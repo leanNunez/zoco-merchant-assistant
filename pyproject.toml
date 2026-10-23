@@ -165,6 +165,10 @@ source_modules = [
     "merchant_assistant.knowledge.questions",
     "merchant_assistant.knowledge.text",
     "merchant_assistant.knowledge.chunking",
+    "merchant_assistant.knowledge.ranking",
+    "merchant_assistant.knowledge.bm25",
+    "merchant_assistant.knowledge.vector",
+    "merchant_assistant.knowledge.fusion",
     "merchant_assistant.knowledge.errors",
 ]
 forbidden_modules = [
