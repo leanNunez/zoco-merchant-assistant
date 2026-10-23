@@ -173,6 +173,8 @@ source_modules = [
     "merchant_assistant.knowledge.errors",
     "merchant_assistant.knowledge.ports",
     "merchant_assistant.knowledge.embedding",
+    "merchant_assistant.knowledge.temporal",
+    "merchant_assistant.knowledge.retrievers",
 ]
 forbidden_modules = [
     "merchant_assistant.knowledge.adapters",
