@@ -1,0 +1,17 @@
+# environments and secrets
+.venv/
+.env
+!.env.example
+
+# tool caches
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+
+# runtime state (the initial claims DB lives in data/ and IS committed)
+var/
