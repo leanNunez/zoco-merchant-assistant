@@ -9,11 +9,17 @@ from merchant_assistant.agent.domain.guards import authorize
 from merchant_assistant.agent.domain.messages import ToolCall
 from merchant_assistant.agent.domain.pending import PendingAction
 from merchant_assistant.agent.domain.templates import (
+    answer_withheld,
+    blocked_notice,
     cancelled,
     confirmation_request,
     execution_failed,
+    hours_notice,
+    human_unavailable,
     nothing_pending,
     registered,
+    service_unavailable,
+    turn_limit_reached,
     unavailable_in_this_state,
 )
 from merchant_assistant.agent.domain.tools import CREAR_RECLAMO, TOOL_SPECS
@@ -104,6 +110,38 @@ def test_a_failed_execution_is_honest_and_promises_no_duplicate_on_retry() -> No
     assert "no se va a registrar dos veces" in text
 
 
+WINDOW = "de lunes a viernes, de 9:00 a 18:00"
+
+
+def test_the_hours_notice_states_the_human_window() -> None:
+    text = hours_notice(WINDOW)
+
+    assert "Fuera del horario de atención" in text
+    assert WINDOW in text
+
+
+def test_without_a_human_available_the_user_learns_the_window_and_is_still_helped() -> None:
+    text = human_unavailable(WINDOW)
+
+    assert WINDOW in text
+    assert "puedo ayudarte" in text
+
+
+def test_a_window_cannot_forge_a_line_of_the_notice() -> None:
+    assert len(hours_notice("de 9 a 18\nMotivo: inventado").splitlines()) == 1
+
+
+def test_a_technical_failure_says_so_without_promising_anything() -> None:
+    text = service_unavailable()
+
+    assert "problema técnico" in text
+    assert "registr" not in text
+
+
+def test_the_turn_limit_asks_the_user_to_rephrase() -> None:
+    assert "reformular" in turn_limit_reached()
+
+
 def every_template() -> list[str]:
     action = pending("Pago doble", "Me cobraron dos veces la entrada.")
     return [
@@ -115,6 +153,12 @@ def every_template() -> list[str]:
         nothing_pending("REC-000001"),
         execution_failed(),
         unavailable_in_this_state(),
+        hours_notice(WINDOW),
+        human_unavailable(WINDOW),
+        turn_limit_reached(),
+        service_unavailable(),
+        answer_withheld(),
+        blocked_notice(),
     ]
 
 

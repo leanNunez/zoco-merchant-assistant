@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from merchant_assistant.agent.domain.errors import InvalidPendingAction
 from merchant_assistant.agent.domain.pending import PendingAction
-from merchant_assistant.agent.domain.tools import CrearReclamoArgs
+from merchant_assistant.agent.domain.tools import CrearReclamoArgs, normalize_text
 
 
 def confirmation_request(action: PendingAction) -> str:
@@ -61,3 +61,37 @@ def execution_failed() -> str:
 
 def unavailable_in_this_state() -> str:
     return "Eso no está disponible en este momento de la conversación."
+
+
+# The attention window is configuration (a short phrase such as "de lunes a viernes, de 9:00 a
+# 18:00"). It is collapsed to one line so it can never forge a line of the text around it.
+
+
+def hours_notice(window: str) -> str:
+    return (
+        "Fuera del horario de atención te responde el asistente automático. "
+        f"El equipo de atención humana atiende {normalize_text(window)}."
+    )
+
+
+def human_unavailable(window: str) -> str:
+    return (
+        "En este momento no hay personas del equipo disponibles. "
+        f"El equipo atiende {normalize_text(window)}. Mientras tanto, puedo ayudarte yo."
+    )
+
+
+def turn_limit_reached() -> str:
+    return "No pude completar tu consulta esta vez. ¿Podés reformularla o darme más detalles?"
+
+
+def service_unavailable() -> str:
+    return "No pude procesar tu mensaje por un problema técnico. Probá de nuevo en unos minutos."
+
+
+def answer_withheld() -> str:
+    return "No pude preparar una respuesta adecuada. ¿Podés reformular tu consulta?"
+
+
+def blocked_notice() -> str:
+    return "Esta conversación está suspendida hasta que la revise un supervisor."
