@@ -12,6 +12,7 @@ import pytest
 
 from merchant_assistant.control.errors import GuardRejected, InvalidTransition, UnauthorizedActor
 from merchant_assistant.control.machine import transition
+from merchant_assistant.control.rules import RULES
 from merchant_assistant.control.states import Actor, Event, State
 
 OPERATOR_OR_ABOVE = frozenset({Actor.OPERATOR, Actor.SUPERVISOR})
@@ -77,6 +78,13 @@ def an_allowed_actor(row: Row) -> Actor:
 def test_the_specification_defines_exactly_seventeen_rules() -> None:
     assert len(TABLE_OF_RECORD) == 17
     assert len(DEFINED_PAIRS) == 17
+
+
+def test_no_pair_has_two_rules_so_no_transition_is_ambiguous() -> None:
+    pairs = [(rule.source, rule.event) for rule in RULES]
+
+    assert len(pairs) == len(set(pairs)) == 17
+    assert set(pairs) == DEFINED_PAIRS
 
 
 @pytest.mark.parametrize("row", ALL_ROWS)

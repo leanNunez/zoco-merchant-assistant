@@ -25,6 +25,7 @@ Requisitos: Python 3.11 o superior y [uv](https://docs.astral.sh/uv/).
 |---|---|
 | `make setup` | Instala las dependencias del lockfile y los hooks de git |
 | `make test` | Corre los tests en la zona horaria local y en UTC |
+| `make diagram` | Regenera el diagrama de estados en `design/state-diagram.md` |
 | `make check` | Lint, tipos, contratos de arquitectura y tests: lo mismo que corre CI |
 
 Los comandos de indexado, chat y evaluación se agregan a esta tabla cuando existen.
@@ -112,17 +113,17 @@ Una fila por requisito. Estados: ⬜ pendiente · 🟨 en curso · ✅ hecho.
 
 | Requisito | Estado | Dónde se garantiza | Evidencia |
 |---|---|---|---|
-| Máquina implementada en Python, sin librerías de máquinas de estado | ⬜ | — | — |
-| Toda transición no definida falla con un error explícito | ⬜ | — | — |
-| Tests de cada transición definida y de al menos tres inválidas | ⬜ | — | — |
-| Cada transición registra estado anterior, nuevo, evento, actor y fecha | ⬜ | — | — |
-| En HUMAN el agente no envía mensajes ni ejecuta acciones | ⬜ | — | — |
-| En SUGGEST el agente nunca envía sin aprobación; `crear_reclamo` requiere además la del operador | ⬜ | — | — |
-| Fuera del horario de atención solo responde la IA e informa la franja humana | ⬜ | — | — |
-| Solo un supervisor puede sacar una conversación de BLOCKED | ⬜ | — | — |
+| Máquina implementada en Python, sin librerías de máquinas de estado | ✅ | `control/rules.py` (tabla de reglas) y `control/machine.py` (`transition`) | `tests/unit/control/test_transition_table.py` |
+| Toda transición no definida falla con un error explícito | ✅ | `control/machine.py` (`InvalidTransition`, `control/errors.py`) | `test_transition_table.py::test_an_undefined_pair_is_refused_whoever_asks_and_whatever_the_hours` (los 15 pares indefinidos) |
+| Tests de cada transición definida y de al menos tres inválidas | ✅ | Tabla de referencia escrita a mano en los tests | `test_transition_table.py` (17 reglas, 15 pares indefinidos, 8 casos inválidos con nombre), `test_effects.py` |
+| Cada transición registra estado anterior, nuevo, evento, actor y fecha | ✅ | `control/log.py` (`TransitionLog`, de solo agregado) y `control/conversation.py` | `test_log.py`, `test_conversation.py`, `test_conversation_properties.py` |
+| En HUMAN el agente no envía mensajes ni ejecuta acciones | 🟨 | `control/capabilities.py` define las capacidades; el agente debe hacerlas cumplir | `test_capabilities.py` |
+| En SUGGEST el agente nunca envía sin aprobación; `crear_reclamo` requiere además la del operador | 🟨 | `control/capabilities.py` define las capacidades; el agente debe hacerlas cumplir | `test_capabilities.py` |
+| Fuera del horario de atención solo responde la IA e informa la franja humana | 🟨 | Guarda en `control/rules.py`, `control/hours.py` y `control/capabilities.py`; el agente debe informar la franja | `test_transition_table.py` (guarda), `test_business_hours.py`, `test_capabilities.py` |
+| Solo un supervisor puede sacar una conversación de BLOCKED | ✅ | `control/rules.py` y `control/machine.py` (garantizado a nivel de `control`) | `test_transition_table.py::test_only_a_supervisor_can_leave_blocked`, `test_conversation_properties.py::test_a_conversation_only_leaves_blocked_through_a_supervisor` |
 | El estado decide qué herramientas hay y si la respuesta se envía, queda como borrador o no se genera | ⬜ | — | — |
-| Diagrama de estados | ⬜ | — | — |
-| `SPEC_REVIEW.md`: contradicciones, ambigüedades y casos faltantes, con la resolución implementada | ⬜ | — | — |
+| Diagrama de estados | ✅ | `control/diagram.py`, generado con `make diagram` en `design/state-diagram.md` | `test_diagram.py` (sin deriva respecto del código) |
+| `SPEC_REVIEW.md`: contradicciones, ambigüedades y casos faltantes, con la resolución implementada | 🟨 | [`SPEC_REVIEW.md`](SPEC_REVIEW.md): 16 hallazgos; varios quedan pendientes de la integración con el agente | Los tests citados en cada hallazgo |
 
 ### Parte 4: evaluación del sistema
 
@@ -146,8 +147,8 @@ Una fila por requisito. Estados: ⬜ pendiente · 🟨 en curso · ✅ hecho.
 | `ventas.json` y la base de reclamos inicial | ⬜ | — | — |
 | Tests unitarios: coseno, BM25, RRF, máquina de estados y guardas 🔒 | 🟨 | `tests/` | `make test` |
 | Script de evaluación y sus resultados guardados | ⬜ | — | — |
-| `SPEC_REVIEW.md` | ⬜ | — | — |
-| Diagrama de estados | ⬜ | — | — |
+| `SPEC_REVIEW.md` | 🟨 | [`SPEC_REVIEW.md`](SPEC_REVIEW.md) | — |
+| Diagrama de estados | ✅ | [`design/state-diagram.md`](design/state-diagram.md) | `test_diagram.py` |
 | README: decisiones técnicas, limitaciones conocidas, posibles mejoras | ⬜ | — | — |
 
 ## Decisiones técnicas
