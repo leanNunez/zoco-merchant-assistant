@@ -169,6 +169,7 @@ source_modules = [
     "merchant_assistant.knowledge.bm25",
     "merchant_assistant.knowledge.vector",
     "merchant_assistant.knowledge.fusion",
+    "merchant_assistant.knowledge.metrics",
     "merchant_assistant.knowledge.errors",
 ]
 forbidden_modules = [
