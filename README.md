@@ -76,16 +76,17 @@ Una fila por requisito. Estados: ⬜ pendiente · 🟨 en curso · ✅ hecho.
 
 | Requisito | Estado | Dónde se garantiza | Evidencia |
 |---|---|---|---|
-| Prohibido LangChain, LlamaIndex, bases vectoriales, scikit-learn, rank-bm25 y similares | ✅ | Contrato de import-linter sobre todo el paquete | `make arch` |
-| Chunking con criterio y tamaño justificados con evidencia | ⬜ | — | — |
-| Búsqueda vectorial: embeddings y coseno a mano con numpy | ⬜ | — | — |
+| Prohibido LangChain, LlamaIndex, bases vectoriales, scikit-learn, rank-bm25 y similares | ✅ | Contrato de import-linter sobre todo el paquete; el dominio de `knowledge/` solo usa stdlib y numpy | `make arch` |
+| Chunking con criterio y tamaño justificados con evidencia | 🟨 | Tres estrategias implementadas (documento, sección, ventana con solape; con o sin encabezado) en `knowledge/chunking.py`; falta la evidencia que justifique la elección | `tests/unit/knowledge/test_chunking.py` |
+| Búsqueda vectorial: embeddings y coseno a mano con numpy | 🟨 | Coseno e índice denso con numpy en `knowledge/vector.py`; falta el cliente de embeddings | `tests/unit/knowledge/test_vector.py` (valores a mano) |
 | Embeddings cacheados en disco: una segunda corrida no paga la API | ⬜ | — | — |
-| BM25 a mano: tokenización, normalización (tildes, mayúsculas) e IDF | ⬜ | — | — |
-| Búsqueda híbrida con RRF | ⬜ | — | — |
+| BM25 a mano: tokenización, normalización (tildes, mayúsculas) e IDF | ✅ | `knowledge/bm25.py` (IDF de Lucene) y `knowledge/text.py` (normalización y tokenizador) | `tests/unit/knowledge/test_bm25.py` (puntajes calculados a mano), `test_text.py` |
+| Búsqueda híbrida con RRF | 🟨 | Fusión RRF en `knowledge/fusion.py`; falta el recuperador que combina BM25 y vectorial | `tests/unit/knowledge/test_fusion.py` (valores a mano) |
 | Uso de la metadata (vigencia y tipo): decisión medida | ⬜ | — | — |
-| recall@3 y MRR sobre las 20 preguntas para las 4 estrategias | ⬜ | — | — |
+| recall@3 y MRR sobre las 20 preguntas para las 4 estrategias | 🟨 | Métricas y su definición para preguntas con varios documentos relevantes en `knowledge/metrics.py`; falta correrlas sobre las estrategias | `tests/unit/knowledge/test_metrics.py` |
 | Análisis por tipo de pregunta, con ejemplos; fallos clasificados como error de código o límite de la técnica | ⬜ | — | — |
-| Tests unitarios de coseno, BM25 y RRF con valores calculados a mano, y tabla de resultados | ⬜ | — | — |
+| Tests unitarios de coseno, BM25 y RRF con valores calculados a mano | ✅ | La derivación aritmética está en el comentario junto a cada valor esperado | `test_vector.py`, `test_bm25.py`, `test_fusion.py` en `tests/unit/knowledge/` |
+| Tabla de resultados de retrieval | ⬜ | — | — |
 
 ### Parte 2: agente con herramientas y políticas
 
