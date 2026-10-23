@@ -12,8 +12,10 @@ from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import SecretStr, field_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from merchant_assistant.shared.faults import FaultConfig, FaultMode
 
 
 class Settings(BaseSettings):
@@ -24,6 +26,14 @@ class Settings(BaseSettings):
     embeddings_model: str = "text-embedding-3-small"
     embeddings_cache_path: Path = Path("data/cache/embeddings.sqlite")
     business_timezone: str = "America/Argentina/Buenos_Aires"
+
+    # Simulated tool failures (brief, Part 2). Off by default: 0 never fails, 1 always fails.
+    tool_failure_rate: float = 0.0
+    tool_failure_seed: int = 0
+    tool_failure_modes: str = "timeout,error,lost_ack"
+    sales_path: Path = Path("data/ventas.json")
+    # Runtime state, git-ignored. The committed data/reclamos.db is only the empty template.
+    complaints_db_path: Path = Path("var/reclamos.db")
 
     @field_validator("openai_api_key", mode="before")
     @classmethod
@@ -53,9 +63,52 @@ class Settings(BaseSettings):
             ) from None
         return value
 
+    @field_validator("tool_failure_rate")
+    @classmethod
+    def _rate_is_a_probability(cls, value: float) -> float:
+        if not 0.0 <= value <= 1.0:  # written so that NaN is refused too
+            raise ValueError(f"TOOL_FAILURE_RATE must be between 0 and 1, got {value}")
+        return value
+
+    @field_validator("tool_failure_modes")
+    @classmethod
+    def _modes_are_known(cls, value: str) -> str:
+        _parse_modes(value)
+        return value
+
+    @model_validator(mode="after")
+    def _failures_have_a_mode(self) -> Settings:
+        if self.tool_failure_rate > 0 and not _parse_modes(self.tool_failure_modes):
+            raise ValueError(
+                "TOOL_FAILURE_MODES must list at least one mode when TOOL_FAILURE_RATE is above 0; "
+                f"allowed: {_ALLOWED_MODES}"
+            )
+        return self
+
+    def fault_config(self) -> FaultConfig:
+        return FaultConfig(
+            rate=self.tool_failure_rate,
+            seed=self.tool_failure_seed,
+            modes=_parse_modes(self.tool_failure_modes),
+        )
+
     @property
     def timezone(self) -> ZoneInfo:
         return ZoneInfo(self.business_timezone)
+
+
+_ALLOWED_MODES = ", ".join(mode.value for mode in FaultMode)
+
+
+def _parse_modes(csv: str) -> frozenset[FaultMode]:
+    names = [item.strip() for item in csv.split(",") if item.strip()]
+    unknown = [name for name in names if name not in set(FaultMode)]
+    if unknown:
+        raise ValueError(
+            f"TOOL_FAILURE_MODES has unknown mode(s) {', '.join(unknown)}; "
+            f"allowed: {_ALLOWED_MODES}"
+        )
+    return frozenset(FaultMode(name) for name in names)
 
 
 @lru_cache(maxsize=1)
