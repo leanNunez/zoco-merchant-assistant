@@ -23,7 +23,9 @@ AT = datetime(2026, 10, 23, 12, 0, tzinfo=UTC)
 
 def pending(motivo: str, descripcion: str) -> PendingAction:
     raw = json.dumps({"motivo": motivo, "descripcion": descripcion})
-    return PendingAction.create(authorize(ToolCall("c", CREAR_RECLAMO, raw), TOOL_SPECS), AT)
+    return PendingAction.create(
+        authorize(ToolCall("c", CREAR_RECLAMO, raw), TOOL_SPECS), AT, turn=1, control_version=0
+    )
 
 
 def skeleton(text: str, *values: str) -> str:

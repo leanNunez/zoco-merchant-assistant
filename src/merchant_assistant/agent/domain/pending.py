@@ -10,9 +10,14 @@ Rules this module enforces:
 - **Exact parameters.** The fingerprint is sensitive to case and punctuation, because the user
   confirmed the text they saw. Proposing again, with any change, supersedes the pending
   action: the older one can never be confirmed again.
-- **A later turn.** `decide` reads only the user's text. A proposal made while the model is
-  answering is new state for the next user message; there is no input through which the same
-  turn that proposes could also confirm.
+- **A later turn.** `decide` reads only the user's text, and every pending action records the
+  turn that proposed it. Deciding in that same turn (or an earlier one) raises
+  `StaleConfirmation`: a loop that proposes and confirms in one turn is a bug, and it must be
+  loud instead of silently executing what the user has not seen yet.
+- **The same hands.** Every pending action also records the control version (how many
+  transitions the control log had) when it was proposed. If control changed hands since, the
+  action is dropped as `Invalidated`, whatever the user answers: the "sí" was given to a
+  question asked in another context.
 - **Strict yes.** Anything but a strictly affirmative reply (see `replies.py`) discards the
   pending action: a refusal cancels it, any other message invalidates it and the turn goes on
   normally. A later "sí" then finds nothing pending.
@@ -66,6 +71,9 @@ class PendingAction:
     arguments: BaseModel
     fingerprint: str
     proposed_at: datetime
+    # Not part of the fingerprint: they say WHEN and UNDER WHOM it was proposed, not WHAT.
+    proposed_turn: int
+    control_version: int
 
     def __post_init__(self) -> None:
         spec = TOOL_SPECS.get(self.tool)
@@ -85,9 +93,15 @@ class PendingAction:
             raise InvalidPendingAction("fingerprint does not match the arguments")
         if self.proposed_at.utcoffset() is None:
             raise InvalidPendingAction("proposed_at must be timezone-aware")
+        for name in ("proposed_turn", "control_version"):
+            value = getattr(self, name)
+            if not _is_counter(value):
+                raise InvalidPendingAction(f"{name} must be an integer >= 0")
 
     @classmethod
-    def create(cls, call: ValidatedCall, proposed_at: datetime) -> PendingAction:
+    def create(
+        cls, call: ValidatedCall, proposed_at: datetime, *, turn: int, control_version: int
+    ) -> PendingAction:
         if call.spec.kind is not ToolKind.EFFECT:
             raise InvalidPendingAction(f"{call.spec.name} is not an effect tool")
         return cls(
@@ -95,7 +109,14 @@ class PendingAction:
             arguments=call.arguments,
             fingerprint=fingerprint(call.spec.name, call.arguments),
             proposed_at=proposed_at,
+            proposed_turn=turn,
+            control_version=control_version,
         )
+
+
+def _is_counter(value: object) -> bool:
+    # bool is an int subclass; True is not a turn number.
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,8 +208,20 @@ def propose(state: PendingState, action: PendingAction) -> tuple[PendingState, P
     return replace(state, pending=action), Proposed(action=action, superseded=state.pending)
 
 
-def decide(state: PendingState, user_text: str) -> tuple[PendingState, Decision]:
+def decide(
+    state: PendingState, user_text: str, *, turn: int, control_version: int
+) -> tuple[PendingState, Decision]:
     """Read the user's next message against the pending action.
+
+    The checks run in this order:
+
+    1. Nothing pending: `NothingPending`.
+    2. `turn` is not after the turn that proposed the action: `StaleConfirmation` is raised.
+       The text is not even looked at; the caller has a bug.
+    3. `control_version` differs from the one the action was proposed under: the action is
+       dropped and the result is `Invalidated`, whatever the text says.
+    4. Otherwise the text decides: a strict yes confirms, a no cancels, anything else
+       invalidates.
 
     A confirmation leaves the action pending on purpose: it is cleared by `mark_registered`
     once the effect is known to have happened, so a failed execution can be retried.
@@ -196,6 +229,12 @@ def decide(state: PendingState, user_text: str) -> tuple[PendingState, Decision]
     action = state.pending
     if action is None:
         return state, NothingPending(state.last_registered)
+    if not _is_counter(turn) or turn <= action.proposed_turn:
+        raise StaleConfirmation(
+            f"decided in turn {turn!r}, proposed in turn {action.proposed_turn}"
+        )
+    if control_version != action.control_version:
+        return replace(state, pending=None), Invalidated(action)
     match classify_reply(user_text):
         case ReplyKind.AFFIRMATIVE:
             return state, Confirmed(action, _proof=_GATE_PROOF)

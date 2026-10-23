@@ -40,6 +40,10 @@ from merchant_assistant.agent.domain.tools import (
 
 AT = datetime(2026, 10, 23, 12, 0, tzinfo=UTC)
 EMPTY = PendingState()
+# Every action below is proposed in turn 1 under control version 0 and decided in turn 2.
+PROPOSED_IN = 1
+LATER = 2
+VERSION = 0
 
 
 def call(motivo: str, descripcion: str, *, raw: str | None = None) -> ValidatedCall:
@@ -50,11 +54,13 @@ def call(motivo: str, descripcion: str, *, raw: str | None = None) -> ValidatedC
 def action(
     motivo: str = "Entrada no recibida", descripcion: str = "Pagué y no llegó."
 ) -> PendingAction:
-    return PendingAction.create(call(motivo, descripcion), AT)
+    return PendingAction.create(
+        call(motivo, descripcion), AT, turn=PROPOSED_IN, control_version=VERSION
+    )
 
 
 def confirm(state: PendingState) -> tuple[PendingState, Confirmed]:
-    after, decision = decide(state, "sí")
+    after, decision = decide(state, "sí", turn=LATER, control_version=VERSION)
     assert isinstance(decision, Confirmed)
     return after, decision
 
@@ -119,12 +125,17 @@ def test_a_read_tool_can_never_become_a_pending_action() -> None:
     lookup = authorize(ToolCall("c1", CONSULTAR_VENTAS, '{"fecha":"2026-10-03"}'), TOOL_SPECS)
 
     with pytest.raises(InvalidPendingAction):
-        PendingAction.create(lookup, AT)
+        PendingAction.create(lookup, AT, turn=PROPOSED_IN, control_version=VERSION)
 
 
 def test_a_pending_action_needs_an_aware_time() -> None:
     with pytest.raises(InvalidPendingAction):
-        PendingAction.create(call("Pago doble", "Me cobraron dos veces."), AT.replace(tzinfo=None))
+        PendingAction.create(
+            call("Pago doble", "Me cobraron dos veces."),
+            AT.replace(tzinfo=None),
+            turn=PROPOSED_IN,
+            control_version=VERSION,
+        )
 
 
 def test_a_pending_action_refuses_a_fingerprint_that_does_not_match() -> None:
@@ -137,7 +148,9 @@ def test_a_pending_action_refuses_arguments_that_skipped_validation() -> None:
     forged = pending.arguments.model_copy(update={"motivo": "x"})
 
     with pytest.raises(InvalidPendingAction):
-        PendingAction(CREAR_RECLAMO, forged, fingerprint(CREAR_RECLAMO, forged), AT)
+        PendingAction(
+            CREAR_RECLAMO, forged, fingerprint(CREAR_RECLAMO, forged), AT, PROPOSED_IN, VERSION
+        )
 
 
 def test_a_pending_action_refuses_arguments_that_are_not_normalized() -> None:
@@ -146,14 +159,48 @@ def test_a_pending_action_refuses_arguments_that_are_not_normalized() -> None:
     )
 
     with pytest.raises(InvalidPendingAction):
-        PendingAction(CREAR_RECLAMO, raw, fingerprint(CREAR_RECLAMO, raw), AT)
+        PendingAction(CREAR_RECLAMO, raw, fingerprint(CREAR_RECLAMO, raw), AT, PROPOSED_IN, VERSION)
 
 
 def test_a_pending_action_refuses_a_read_tool_built_by_hand() -> None:
     arguments = action().arguments
 
     with pytest.raises(InvalidPendingAction):
-        PendingAction(CONSULTAR_VENTAS, arguments, fingerprint(CONSULTAR_VENTAS, arguments), AT)
+        PendingAction(
+            CONSULTAR_VENTAS,
+            arguments,
+            fingerprint(CONSULTAR_VENTAS, arguments),
+            AT,
+            PROPOSED_IN,
+            VERSION,
+        )
+
+
+def test_the_turn_and_the_control_version_are_not_part_of_the_fingerprint() -> None:
+    validated = call("Pago doble", "Me cobraron dos veces.")
+    early = PendingAction.create(validated, AT, turn=1, control_version=0)
+    late = PendingAction.create(validated, AT, turn=9, control_version=4)
+
+    assert early.fingerprint == late.fingerprint
+    assert (late.proposed_turn, late.control_version) == (9, 4)
+
+
+@pytest.mark.parametrize(
+    ("turn", "version"),
+    [
+        pytest.param(-1, 0, id="negative turn"),
+        pytest.param(0, -1, id="negative version"),
+        pytest.param(True, 0, id="bool turn"),
+        pytest.param(0, 1.0, id="float version"),
+    ],
+)
+def test_a_pending_action_refuses_a_counter_that_is_not_a_natural_number(
+    turn: int, version: int
+) -> None:
+    with pytest.raises(InvalidPendingAction):
+        PendingAction.create(
+            call("Pago doble", "Me cobraron dos veces."), AT, turn=turn, control_version=version
+        )
 
 
 # --------------------------------------------------------------------------- confirmed
@@ -197,8 +244,10 @@ def test_a_propose_then_yes_confirms_the_same_fingerprint() -> None:
 def test_b_a_normal_sentence_invalidates_and_a_later_yes_finds_nothing() -> None:
     state, _ = propose(EMPTY, A)
 
-    state, first = decide(state, "¿cuánto tarda en resolverse?")
-    state, second = decide(state, "sí")
+    state, first = decide(
+        state, "¿cuánto tarda en resolverse?", turn=LATER, control_version=VERSION
+    )
+    state, second = decide(state, "sí", turn=LATER, control_version=VERSION)
 
     assert first == Invalidated(A)
     assert second == NothingPending(None)
@@ -217,7 +266,7 @@ def test_c_a_changed_proposal_supersedes_and_only_the_new_one_is_confirmed() -> 
 
 
 def test_d_yes_with_nothing_pending_is_nothing_pending() -> None:
-    state, decision = decide(EMPTY, "sí")
+    state, decision = decide(EMPTY, "sí", turn=LATER, control_version=VERSION)
 
     assert decision == NothingPending(None)
     assert state == EMPTY
@@ -227,8 +276,8 @@ def test_e_repeated_yes_after_registering_carries_the_reference() -> None:
     state, confirmed = confirm(propose(EMPTY, A)[0])
     state, registered = mark_registered(state, confirmed, "REC-000001")
 
-    state, second = decide(state, "sí")
-    state, third = decide(state, "Sí, dale")
+    state, second = decide(state, "sí", turn=LATER, control_version=VERSION)
+    state, third = decide(state, "Sí, dale", turn=LATER, control_version=VERSION)
 
     ref = RegisteredRef("REC-000001", A.fingerprint)
     assert registered.ref == ref
@@ -239,8 +288,8 @@ def test_e_repeated_yes_after_registering_carries_the_reference() -> None:
 def test_f_no_cancels_and_a_later_yes_finds_nothing() -> None:
     state, _ = propose(EMPTY, A)
 
-    state, first = decide(state, "no, gracias")
-    state, second = decide(state, "sí")
+    state, first = decide(state, "no, gracias", turn=LATER, control_version=VERSION)
+    state, second = decide(state, "sí", turn=LATER, control_version=VERSION)
 
     assert first == Cancelled(A)
     assert second == NothingPending(None)
@@ -259,7 +308,7 @@ def test_h_invalidate_clears_the_pending_action() -> None:
     state, _ = propose(EMPTY, A)
 
     state, dropped = invalidate(state)
-    _, decision = decide(state, "sí")
+    _, decision = decide(state, "sí", turn=LATER, control_version=VERSION)
 
     assert dropped == Invalidated(A)
     assert decision == NothingPending(None)
@@ -273,9 +322,9 @@ def test_i_no_operation_mutates_the_state_it_was_given() -> None:
     proposed_state, _ = propose(EMPTY, A)
     snapshot = PendingState(pending=A)
 
-    decide(proposed_state, "sí")
-    decide(proposed_state, "no")
-    decide(proposed_state, "otra cosa")
+    decide(proposed_state, "sí", turn=LATER, control_version=VERSION)
+    decide(proposed_state, "no", turn=LATER, control_version=VERSION)
+    decide(proposed_state, "otra cosa", turn=LATER, control_version=VERSION)
     invalidate(proposed_state)
     propose(proposed_state, B)
     mark_registered(proposed_state, confirm(proposed_state)[1], "REC-000001")
@@ -285,9 +334,38 @@ def test_i_no_operation_mutates_the_state_it_was_given() -> None:
         proposed_state.pending = None  # type: ignore[misc]
 
 
+@pytest.mark.parametrize("text", ["sí", "no", "otra cosa"])
+@pytest.mark.parametrize("turn", [PROPOSED_IN, PROPOSED_IN - 1], ids=["same turn", "earlier turn"])
+def test_deciding_in_the_turn_that_proposed_is_a_loud_bug(text: str, turn: int) -> None:
+    state, _ = propose(EMPTY, A)
+
+    with pytest.raises(StaleConfirmation):
+        decide(state, text, turn=turn, control_version=VERSION)
+
+
+@pytest.mark.parametrize("text", ["sí", "no", "otra cosa"])
+def test_a_change_of_control_since_the_proposal_invalidates_whatever_the_user_says(
+    text: str,
+) -> None:
+    state, _ = propose(EMPTY, A)
+
+    state, decision = decide(state, text, turn=LATER, control_version=VERSION + 1)
+    _, later = decide(state, "sí", turn=LATER + 1, control_version=VERSION + 1)
+
+    assert decision == Invalidated(A)
+    assert state.pending is None
+    assert later == NothingPending(None)
+
+
+def test_with_nothing_pending_the_turn_does_not_matter() -> None:
+    _, decision = decide(EMPTY, "sí", turn=0, control_version=VERSION)
+
+    assert decision == NothingPending(None)
+
+
 def test_registering_requires_the_confirmation_of_what_is_pending_now() -> None:
     state, confirmed = confirm(propose(EMPTY, A)[0])
-    cancelled, _ = decide(state, "no")
+    cancelled, _ = decide(state, "no", turn=LATER, control_version=VERSION)
 
     with pytest.raises(StaleConfirmation):
         mark_registered(cancelled, confirmed, "REC-000001")
