@@ -98,9 +98,9 @@ Una fila por requisito. Estados: ⬜ pendiente · 🟨 en curso · ✅ hecho.
 | Aplicación de consola | ⬜ | — | — |
 | `buscar_documentacion(consulta)` con fragmentos, ID y vigencia | ⬜ | — | — |
 | `consultar_ventas(fecha)` | ⬜ | — | — |
-| `crear_reclamo(motivo, descripcion)` en SQLite, con identificador | ⬜ | — | — |
-| `ventas.json` con 30 días o más, un día sin ventas, un neto negativo y una fecha futura | ⬜ | — | — |
-| Fallas simuladas por variable de entorno en `consultar_ventas` y `crear_reclamo` | ⬜ | — | — |
+| `crear_reclamo(motivo, descripcion)` en SQLite, con identificador | 🟨 | Almacenamiento en `complaints/adapters/sqlite_repository.py` (ids `REC-000001`, ...), modelo y validación en `complaints/models.py`; falta la herramienta del agente | `tests/integration/complaints/test_sqlite_repository.py`, `tests/unit/complaints/test_complaint_models.py` |
+| `ventas.json` con 30 días o más, un día sin ventas, un neto negativo y una fecha futura | ✅ | `data/ventas.json` (37 días de historia, un hueco, un neto negativo y una preventa en 2027), generado con `make dataset` por `scripts/generate_ventas.py`; lo lee el repositorio estricto `sales/adapters/json_repository.py` | `tests/integration/sales/test_dataset.py` (incluye la regeneración byte a byte), `tests/integration/sales/test_json_repository.py` |
+| Fallas simuladas por variable de entorno en `consultar_ventas` y `crear_reclamo` | 🟨 | `TOOL_FAILURE_RATE`, `TOOL_FAILURE_SEED` y `TOOL_FAILURE_MODES` en `shared/config.py`; inyector determinista en `shared/faults.py` y decoradores en `sales/adapters/` y `complaints/adapters/` (incluye `lost_ack`: la escritura ocurre y la confirmación se pierde); falta que el agente las maneje | `tests/unit/shared/test_faults.py`, `tests/unit/shared/test_config.py`, `tests/integration/complaints/test_sqlite_repository.py` (reintento tras `lost_ack`) |
 | No inventar datos cuando una herramienta no devuelve resultados | ⬜ | — | — |
 | 🔒 No registrar un reclamo sin confirmación explícita de esos parámetros exactos | ⬜ | — | — |
 | 🔒 Si cambian el motivo o la descripción después de confirmar, se vuelve a confirmar | ⬜ | — | — |
@@ -145,7 +145,7 @@ Una fila por requisito. Estados: ⬜ pendiente · 🟨 en curso · ✅ hecho.
 | Repositorio Git con worktrees e historial de commits que muestre el avance | 🟨 | Git | `git log` |
 | README con instrucciones de punta a punta, un comando por paso | 🟨 | Este archivo | — |
 | `.env.example` sin credenciales reales | ⬜ | — | — |
-| `ventas.json` y la base de reclamos inicial | ⬜ | — | — |
+| `ventas.json` y la base de reclamos inicial | ✅ | `data/ventas.json` (`make dataset`) y `data/reclamos.db`, vacía y con el esquema del adaptador (`make db`); la base de ejecución es `var/reclamos.db`, fuera de git | `tests/integration/sales/test_dataset.py`, `tests/integration/complaints/test_initial_database.py` |
 | Tests unitarios: coseno, BM25, RRF, máquina de estados y guardas 🔒 | 🟨 | `tests/` | `make test` |
 | Script de evaluación y sus resultados guardados | ⬜ | — | — |
 | `SPEC_REVIEW.md` | 🟨 | [`SPEC_REVIEW.md`](SPEC_REVIEW.md) | — |
