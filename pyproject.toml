@@ -156,3 +156,21 @@ name = "Pure domains perform no I/O and know no provider"
 type = "forbidden"
 source_modules = ["merchant_assistant.control", "merchant_assistant.agent.domain"]
 forbidden_modules = ["openai", "httpx", "requests", "sqlite3"]
+
+[[tool.importlinter.contracts]]
+name = "The retrieval domain performs no I/O and knows no provider"
+type = "forbidden"
+source_modules = [
+    "merchant_assistant.knowledge.documents",
+    "merchant_assistant.knowledge.questions",
+    "merchant_assistant.knowledge.text",
+    "merchant_assistant.knowledge.chunking",
+    "merchant_assistant.knowledge.errors",
+]
+forbidden_modules = [
+    "merchant_assistant.knowledge.adapters",
+    "openai",
+    "httpx",
+    "requests",
+    "sqlite3",
+]
