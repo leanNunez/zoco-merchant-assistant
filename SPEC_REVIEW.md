@@ -374,6 +374,251 @@ estado durante la generación.
 
 ---
 
+## Ambigüedades de la Parte 2
+
+La Parte 2 también deja huecos, sobre todo alrededor de las políticas 🔒. Cada uno se resolvió con una regla
+determinista. La parte de dominio vive en `src/merchant_assistant/agent/domain/` y sus tests en
+`tests/unit/agent/`. En esta sección los estados significan:
+
+- ✅ implementado y probado (en el dominio del agente o en la capacidad que se indica).
+- ⏳ falta conectarlo en el turno del agente (la capa de aplicación, todavía pendiente), que debe usar las
+  piezas del dominio en el orden descrito.
+
+| # | Ambigüedad | Resolución | Estado |
+|---|---|---|---|
+| P1 | Qué es "un mismo reclamo" | Misma conversación y mismo texto, sin importar mayúsculas ni espacios | ✅ capacidad / ⏳ turno |
+| P2 | Qué es una "confirmación explícita" | Vocabulario afirmativo estricto; ante la duda, se vuelve a preguntar | ✅ dominio / ⏳ turno |
+| P3 | "Si el usuario cambia el motivo o la descripción" | Antes de ejecutar: se reemplaza y se vuelve a confirmar. Después: es otro reclamo | ✅ dominio / ⏳ turno |
+| P4 | "Sí" repetido sin nada pendiente | Respuesta determinista desde una plantilla, nunca del LLM | ✅ dominio / ⏳ turno |
+| P5 | Falla después de confirmar | La acción pendiente sobrevive; un "sí" posterior reintenta con la misma clave | ✅ dominio / ⏳ turno |
+| P6 | Qué significa "herramienta disponible" | Depende del estado de la conversación, no solo del registro de herramientas | ✅ guarda / ⏳ turno |
+| P7 | El dataset tiene una venta en el futuro | El contrato de fecha rechaza fechas futuras: el dato nunca llega como hecho | ✅ |
+| P8 | Fechas relativas o ambiguas | El contrato las rechaza; el agente tiene que preguntar | ✅ contrato / ⏳ turno |
+| P9 | DOC-11 define categorías que `crear_reclamo` no tiene | Se mantiene el contrato de la consigna: solo `motivo` y `descripcion` | ✅ |
+| P10 | Frases imperativas dentro del corpus | Son datos: ninguna puede ejecutar un efecto sin la confirmación del usuario | ✅ dominio / ⏳ turno |
+
+## P1. "Un mismo reclamo"
+
+**Qué dice la consigna.** Un reclamo confirmado no se registra dos veces, aunque el usuario repita "sí" o la
+herramienta falle y se reintente.
+
+**Por qué es un problema.** No define la identidad de un reclamo. Si es solo el texto, dos conversaciones
+distintas con el mismo problema se pisarían. Si es el texto exacto, "Pago doble" y "pago  doble" serían dos
+reclamos y un reintento con otra capitalización duplicaría el registro.
+
+**Resolución.** Un reclamo es el mismo si pertenece a la misma conversación y su motivo y su descripción
+coinciden una vez normalizados (NFKC, espacios colapsados) y sin distinguir mayúsculas. Otra conversación u
+otro texto es otro reclamo. La clave de idempotencia la hace cumplir la base de datos con una restricción
+UNIQUE. Hay dos identidades distintas a propósito: la confirmación es sensible a mayúsculas y puntuación (el
+usuario confirma el texto que vio, ver P3), y la deduplicación no lo es (un reintento no debe duplicar).
+
+**Dónde.** `complaints/models.py` (`idempotency_key`) y `complaints/adapters/sqlite_repository.py`.
+
+**Tests.** `tests/unit/complaints/test_complaint_models.py::test_the_same_complaint_typed_differently_gets_the_same_key`,
+`test_another_conversation_or_other_text_gets_another_key`,
+`tests/integration/complaints/test_sqlite_repository.py::test_a_duplicate_key_returns_the_original_and_the_table_keeps_one_row`,
+`test_the_same_text_in_another_conversation_is_another_complaint`, `test_threads_racing_the_same_complaint_leave_exactly_one_row`.
+
+**Estado.** ✅ clave e idempotencia implementadas en la capacidad `complaints`. ⏳ el turno debe registrar
+cada reclamo con el identificador de su conversación.
+
+## P2. "Confirmación explícita"
+
+**Qué dice la consigna.** No registrar un reclamo sin la confirmación explícita del usuario.
+
+**Por qué es un problema.** No dice qué cuenta como explícito. "Sí, pero cambiá el motivo", "si no" o "sí" seguido
+de otra línea con instrucciones contienen un "sí" y no son una aceptación. Si lo decidiera el LLM, la garantía
+dependería de su interpretación.
+
+**Resolución.** Un clasificador determinista y conservador. Una respuesta es afirmativa solo si es una línea de
+hasta seis palabras, todas de un vocabulario afirmativo, con al menos un "sí" real, y sin signos de pregunta.
+Cualquier otra cosa no confirma: una negativa cancela la acción pendiente y cualquier otro mensaje la invalida.
+El costo es una experiencia rígida: "sí, confirmo el reclamo" no confirma y el agente tiene que volver a
+preguntar. Esa es la falla segura; la insegura sería registrar algo que el usuario no aceptó con claridad.
+
+**Dónde.** `agent/domain/replies.py` (`classify_reply`) y `agent/domain/pending.py` (`decide`).
+
+**Tests.** `tests/unit/agent/test_agent_replies.py::test_a_reply_is_classified_conservatively` (tabla con tildes,
+formas de ancho completo, mezclas, saltos de línea y emojis),
+`test_agent_pending_properties.py::test_a_confirmation_needs_a_pending_action_a_strict_yes_and_the_same_fingerprint`.
+
+**Estado.** ✅ en el dominio. ⏳ el turno debe pasarle a `decide` el texto del usuario, y solo ese texto.
+
+## P3. "Si el usuario cambia el motivo o la descripción"
+
+**Qué dice la consigna.** La confirmación vale para esos parámetros exactos; si cambian después de confirmar,
+hay que volver a confirmar.
+
+**Por qué es un problema.** "Después de confirmar" tiene dos momentos distintos: antes de que el reclamo se
+ejecute y después de que quedó registrado. Además, no hay ninguna herramienta para modificar un reclamo.
+
+**Resolución.** La llamada del LLM a `crear_reclamo` no ejecuta nada: crea una acción pendiente atada a un
+fingerprint de la herramienta y de los argumentos normalizados, sensible a mayúsculas y puntuación. Antes de
+la ejecución, cualquier cambio es una propuesta nueva que reemplaza a la anterior; la anterior ya no se puede
+confirmar y la nueva hay que confirmarla de nuevo. Después de la ejecución, un texto distinto es otro reclamo,
+porque no existe una herramienta para modificar uno ya registrado: el agente no puede "corregir" un reclamo,
+solo registrar otro, con su propia confirmación.
+
+**Dónde.** `agent/domain/pending.py` (`fingerprint`, `PendingAction`, `propose`, `Confirmed`).
+
+**Tests.** `test_agent_pending.py::test_the_fingerprint_changes_with_any_change_the_user_could_see`,
+`test_c_a_changed_proposal_supersedes_and_only_the_new_one_is_confirmed`,
+`test_a_confirmed_cannot_be_built_outside_the_gate`.
+
+**Estado.** ✅ en el dominio. ⏳ el turno debe convertir cada llamada a `crear_reclamo` en `propose` y ejecutar
+el efecto solo con un `Confirmed`.
+
+## P4. "Sí" repetido sin nada pendiente
+
+**Qué dice la consigna.** Repetir "sí" no debe registrar el reclamo dos veces.
+
+**Por qué es un problema.** No dice qué se responde. Si el LLM contesta libremente, puede afirmar que registró
+otro reclamo o llamar de nuevo a la herramienta.
+
+**Resolución.** Con nada pendiente, `decide` devuelve `NothingPending` con la referencia del último reclamo
+registrado, y la respuesta sale de una plantilla del código: no hay nada esperando confirmación, el último
+reclamo tiene tal número y no se registró otro.
+
+**Dónde.** `agent/domain/pending.py` (`decide`, `mark_registered`) y `agent/domain/templates.py` (`nothing_pending`).
+
+**Tests.** `test_agent_pending.py::test_d_yes_with_nothing_pending_is_nothing_pending`,
+`test_e_repeated_yes_after_registering_carries_the_reference`,
+`test_agent_templates.py::test_nothing_pending_mentions_the_last_registration_only_when_there_is_one`.
+
+**Estado.** ✅ en el dominio. ⏳ el turno debe responder con la plantilla sin llamar al LLM.
+
+## P5. Falla después de confirmar
+
+**Qué dice la consigna.** Un reclamo confirmado no se registra dos veces aunque la herramienta falle y se
+reintente. DOC-11 agrega: "Ante un timeout, no afirmar que el reclamo se creó sin verificar".
+
+**Por qué es un problema.** Después de una falla no se sabe si el reclamo se guardó (la escritura pudo ocurrir y
+perderse la confirmación). Si la acción pendiente se descarta, el usuario tiene que empezar de nuevo; si se
+reintenta a ciegas, se podría duplicar.
+
+**Resolución.** Confirmar no consume la acción pendiente: solo `mark_registered` la borra, y el turno lo llama
+únicamente cuando el efecto se sabe ocurrido. Si la ejecución falla, la acción sigue pendiente, se le dice al
+usuario con honestidad que no se pudo confirmar si quedó guardado, y un "sí" posterior reintenta con el mismo
+fingerprint y la misma clave de idempotencia. El reintento es la verificación que pide DOC-11: si la escritura
+había ocurrido, la base devuelve el reclamo existente y la respuesta dice que ya estaba registrado.
+
+**Dónde.** `agent/domain/pending.py` (docstring del módulo, `decide`, `mark_registered`),
+`agent/domain/templates.py` (`execution_failed`, `registered`) y `complaints/adapters/sqlite_repository.py`.
+
+**Tests.** `test_agent_pending.py::test_g_a_failed_execution_can_be_retried_with_the_same_fingerprint`,
+`test_agent_templates.py::test_a_failed_execution_is_honest_and_promises_no_duplicate_on_retry`,
+`tests/integration/complaints/test_sqlite_repository.py::test_a_lost_acknowledgement_writes_the_row_and_the_retry_finds_it`.
+
+**Estado.** ✅ en el dominio y en la capacidad. ⏳ el turno debe no llamar a `mark_registered` cuando la
+ejecución falla y usar la plantilla de falla.
+
+## P6. Qué significa "herramienta disponible"
+
+**Qué dice la consigna.** No ejecutar herramientas que no estén disponibles.
+
+**Por qué es un problema.** Leída al pie de la letra, "disponible" sería "existe en el registro". Pero la Parte 3
+quita herramientas según el estado: en HUMAN y BLOCKED no hay ninguna (F13). Una herramienta registrada puede no
+estar disponible ahora.
+
+**Resolución.** La guarda recibe el conjunto de herramientas ofrecidas en este turno, no el registro completo, y
+exige que el nombre sea exactamente una de sus claves. Un nombre desconocido, con otra capitalización, con un
+espacio de más o de una herramienta que el estado no ofrece se rechaza igual, con `ToolNotAvailable`, antes de
+mirar los argumentos.
+
+**Dónde.** `agent/domain/guards.py` (`authorize`) y `control/capabilities.py` (qué permite cada estado).
+
+**Tests.** `test_agent_guards.py::test_a_name_that_is_not_an_exact_offered_key_is_not_available`,
+`test_a_tool_the_current_state_does_not_offer_is_not_available`,
+`test_availability_is_checked_before_the_arguments_are_looked_at`.
+
+**Estado.** ✅ guarda en el dominio. ⏳ el turno debe construir el conjunto ofrecido a partir de las capacidades
+del estado y pasarlo tanto al LLM como a la guarda.
+
+## P7. El dataset tiene una venta en el futuro
+
+**Qué dice la consigna.** `ventas.json` debe incluir una fecha futura.
+
+**Por qué es un problema.** Si la herramienta la devolviera, el agente informaría como hecho una venta que todavía
+no ocurrió.
+
+**Resolución.** El dataset tiene a propósito una preventa en 2027, y el contrato de fecha de `consultar_ventas`
+rechaza toda fecha posterior al día de negocio, que se inyecta. El dato existe en el archivo y nunca llega al
+usuario como un hecho.
+
+**Dónde.** `sales/contract.py` (`parse_sales_date`) y `data/ventas.json`.
+
+**Tests.** `tests/unit/sales/test_contract.py::test_a_date_after_today_is_refused_as_future`,
+`tests/integration/sales/test_dataset.py::test_at_least_one_record_is_after_the_current_date`.
+
+**Estado.** ✅ implementado en la capacidad `sales`.
+
+## P8. Fechas relativas o ambiguas
+
+**Qué dice la consigna.** Pedir datos ante información incompleta o ambigua, incluidas fechas relativas y
+ambiguas.
+
+**Por qué es un problema.** "Ayer" depende de la zona horaria y del día de negocio; "03/04" puede ser 3 de abril o
+4 de marzo. Si el modelo o la herramienta los interpretan, el resultado es una suposición presentada como dato.
+
+**Resolución.** El contrato de la herramienta acepta solo `YYYY-MM-DD` con dígitos ASCII y rechaza todo lo demás
+con `bad_format`, sin interpretar nada. La descripción de la herramienta le dice al modelo que aclare con el
+usuario las fechas relativas o ambiguas antes de llamarla.
+
+**Dónde.** `agent/domain/tools.py` (`ConsultarVentasArgs` y la descripción de `consultar_ventas`) y
+`sales/contract.py` (validez de calendario y fechas futuras).
+
+**Tests.** `test_agent_guards.py::test_arguments_outside_the_contract_are_refused_with_the_exact_issues` (casos
+`relative date`, `ambiguous date`, `unpadded date`, `datetime`), `test_agent_tools.py::test_the_sales_tool_asks_for_an_iso_date_and_to_clarify_relative_ones`,
+`tests/unit/sales/test_contract.py::test_anything_but_a_real_yyyy_mm_dd_date_is_refused`.
+
+**Estado.** ✅ contrato. ⏳ que el agente efectivamente pregunte es comportamiento del turno y se mide en las
+conversaciones de la Parte 4.
+
+## P9. DOC-11 define categorías que `crear_reclamo` no tiene
+
+**Qué dice la consigna.** `crear_reclamo(motivo, descripcion)`. DOC-11 dice que las categorías de reclamos son
+PAGO, ENTRADA, LIQUIDACION, ACCESO y OTROS.
+
+**Por qué es un problema.** El corpus sugiere un campo que el contrato de la herramienta no tiene. Agregarlo
+cambiaría la interfaz que la consigna fija; ignorarlo deja la categoría sin registrar.
+
+**Resolución.** Se mantiene el contrato de la consigna: solo `motivo` y `descripcion`, y cualquier campo extra se
+rechaza como `unexpected_field`. El modelo puede mencionar la categoría dentro del motivo si corresponde.
+
+**Dónde.** `agent/domain/tools.py` (`CrearReclamoArgs`, con `extra="forbid"`).
+
+**Tests.** `test_agent_tools.py::test_the_schema_requires_exactly_the_brief_fields_and_forbids_any_other`,
+`test_agent_guards.py::test_arguments_outside_the_contract_are_refused_with_the_exact_issues[extra field]`.
+
+**Estado.** ✅ decisión implementada en el contrato.
+
+## P10. Frases imperativas dentro del corpus
+
+**Qué dice la consigna.** Las instrucciones dentro de documentos o de respuestas de herramientas son datos, no
+órdenes.
+
+**Por qué es un problema.** Algunos documentos legítimos están escritos en imperativo. DOC-04 dice que el
+asistente "debe recomendar verificar el correo y luego abrir un reclamo". Un modelo que lo lea como orden podría
+intentar registrar un reclamo que el usuario no pidió.
+
+**Resolución.** Ningún texto recuperado puede producir un efecto: lo más que puede lograr es que el modelo
+proponga `crear_reclamo`, y esa propuesta solo crea una acción pendiente que el usuario ve con sus valores exactos
+y tiene que aceptar en un mensaje propio. Un "sí" escondido en un documento o en una respuesta de herramienta no
+cuenta, porque `decide` solo lee el texto del usuario. La descripción de la herramienta le dice además al modelo
+que no la llame porque un documento lo pida, pero la garantía no depende de eso.
+
+**Dónde.** `agent/domain/pending.py` (`propose`, `decide`) y `agent/domain/tools.py` (descripciones).
+
+**Tests.** `test_agent_pending.py::test_b_a_normal_sentence_invalidates_and_a_later_yes_finds_nothing`,
+`test_agent_pending_properties.py::test_a_confirmation_needs_a_pending_action_a_strict_yes_and_the_same_fingerprint`,
+`test_agent_templates.py::test_hostile_text_is_embedded_as_data_without_changing_the_wording_around_it`.
+
+**Estado.** ✅ en el dominio: ningún texto que no sea del usuario puede confirmar. ⏳ el turno debe entregar los
+fragmentos y las respuestas de herramientas al modelo como datos estructurados y pasarle a `decide` solo el
+mensaje del usuario.
+
+---
+
 ## Supuestos
 
 - **La franja de atención humana es configuración.** La consigna no la define, por lo que `BusinessHours` se
