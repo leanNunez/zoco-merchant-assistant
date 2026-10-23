@@ -77,16 +77,16 @@ Una fila por requisito. Estados: ⬜ pendiente · 🟨 en curso · ✅ hecho.
 | Requisito | Estado | Dónde se garantiza | Evidencia |
 |---|---|---|---|
 | Prohibido LangChain, LlamaIndex, bases vectoriales, scikit-learn, rank-bm25 y similares | ✅ | Contrato de import-linter sobre todo el paquete; el dominio de `knowledge/` solo usa stdlib y numpy | `make arch` |
-| Chunking con criterio y tamaño justificados con evidencia | 🟨 | Tres estrategias implementadas (documento, sección, ventana con solape; con o sin encabezado) en `knowledge/chunking.py`; falta la evidencia que justifique la elección | `tests/unit/knowledge/test_chunking.py` |
-| Búsqueda vectorial: embeddings y coseno a mano con numpy | 🟨 | Coseno e índice denso con numpy en `knowledge/vector.py`; falta el cliente de embeddings | `tests/unit/knowledge/test_vector.py` (valores a mano) |
-| Embeddings cacheados en disco: una segunda corrida no paga la API | ⬜ | — | — |
+| Chunking con criterio y tamaño justificados con evidencia | 🟨 | Tres estrategias en `knowledge/chunking.py`; grilla de 9 variantes y regla de selección declarada antes de las tablas en `evaluation/retrieval/pipeline.py` y `selection.py`; falta la corrida real con embeddings | `tests/unit/knowledge/test_chunking.py`, `tests/unit/evaluation/test_selection.py` |
+| Búsqueda vectorial: embeddings y coseno a mano con numpy | 🟨 | Coseno e índice denso con numpy en `knowledge/vector.py`; cliente de OpenAI en `knowledge/adapters/openai_embedder.py` y `VectorRetriever` en `knowledge/retrievers.py`; falta probarlo contra la API real | `tests/unit/knowledge/test_vector.py` (valores a mano), `tests/unit/knowledge/adapters/test_openai_embedder.py` (cliente falso) |
+| Embeddings cacheados en disco: una segunda corrida no paga la API | 🟨 | Caché direccionada por modelo y texto (`knowledge/embedding.py`) en SQLite (`knowledge/adapters/sqlite_cache.py`); decisión en [ADR-0002](design/adr/0002-embeddings-y-cache.md); falta generar y versionar `data/cache/embeddings.sqlite` | `tests/unit/knowledge/test_embedding.py`, `tests/integration/knowledge/test_sqlite_cache.py`, `tests/integration/evaluation/test_retrieval_cli.py` (0 llamadas con la caché completa) |
 | BM25 a mano: tokenización, normalización (tildes, mayúsculas) e IDF | ✅ | `knowledge/bm25.py` (IDF de Lucene) y `knowledge/text.py` (normalización y tokenizador) | `tests/unit/knowledge/test_bm25.py` (puntajes calculados a mano), `test_text.py` |
-| Búsqueda híbrida con RRF | 🟨 | Fusión RRF en `knowledge/fusion.py`; falta el recuperador que combina BM25 y vectorial | `tests/unit/knowledge/test_fusion.py` (valores a mano) |
-| Uso de la metadata (vigencia y tipo): decisión medida | ⬜ | — | — |
-| recall@3 y MRR sobre las 20 preguntas para las 4 estrategias | 🟨 | Métricas y su definición para preguntas con varios documentos relevantes en `knowledge/metrics.py`; falta correrlas sobre las estrategias | `tests/unit/knowledge/test_metrics.py` |
+| Búsqueda híbrida con RRF | ✅ | Fusión RRF en `knowledge/fusion.py`; `HybridRetriever` en `knowledge/retrievers.py` fusiona los rankings de chunks de vector y BM25 | `tests/unit/knowledge/test_fusion.py` (valores a mano), `tests/unit/knowledge/test_retrievers.py` |
+| Uso de la metadata (vigencia y tipo): decisión medida | 🟨 | Período de la pregunta y solapamiento de vigencias en `knowledge/temporal.py`; modos `filter` y `demote` y la ablación por `tipo` en `knowledge/retrievers.py`; falta la medición real | `tests/unit/knowledge/test_temporal.py`, `tests/unit/knowledge/test_retrievers.py` |
+| recall@3 y MRR sobre las 20 preguntas para las 4 estrategias | 🟨 | Métricas en `knowledge/metrics.py`; script en `evaluation/retrieval/` con intervalos bootstrap; falta la corrida real con embeddings | `tests/unit/knowledge/test_metrics.py`, `tests/unit/evaluation/` |
 | Análisis por tipo de pregunta, con ejemplos; fallos clasificados como error de código o límite de la técnica | ⬜ | — | — |
 | Tests unitarios de coseno, BM25 y RRF con valores calculados a mano | ✅ | La derivación aritmética está en el comentario junto a cada valor esperado | `test_vector.py`, `test_bm25.py`, `test_fusion.py` en `tests/unit/knowledge/` |
-| Tabla de resultados de retrieval | ⬜ | — | — |
+| Tabla de resultados de retrieval | 🟨 | El script escribe `evaluation/results/retrieval/metrics.json` y `report.md`; falta la corrida real | `tests/unit/evaluation/test_report.py`, `tests/integration/evaluation/test_retrieval_cli.py` (dos corridas, archivos idénticos) |
 
 ### Parte 2: agente con herramientas y políticas
 
