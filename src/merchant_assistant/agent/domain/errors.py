@@ -82,3 +82,28 @@ class InvalidToolArguments(AgentError):  # noqa: N818 - named after the situatio
         view = super().public()
         view["issues"] = "; ".join(f"{issue.field}: {issue.problem}" for issue in self.issues)
         return view
+
+
+class GateError(AgentError):
+    """The confirmation gate was used in a way its contract does not allow."""
+
+
+class InvalidPendingAction(GateError):  # noqa: N818 - named after the situation
+    """Only an effect tool, with validated arguments and an aware time, can be pending."""
+
+    code: ClassVar[str] = "invalid_pending_action"
+    user_message: ClassVar[str] = "That action cannot wait for a confirmation."
+
+
+class StaleConfirmation(GateError):  # noqa: N818 - named after the situation
+    """A confirmation that does not match the action currently pending."""
+
+    code: ClassVar[str] = "stale_confirmation"
+    user_message: ClassVar[str] = "That confirmation is no longer valid."
+
+
+class InvalidRegistration(GateError):  # noqa: N818 - named after the situation
+    """A registration without a usable complaint identifier."""
+
+    code: ClassVar[str] = "invalid_registration"
+    user_message: ClassVar[str] = "The registration could not be recorded."
