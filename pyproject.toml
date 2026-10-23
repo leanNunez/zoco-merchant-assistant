@@ -195,9 +195,14 @@ source_modules = [
     "merchant_assistant.sales.repository",
     "merchant_assistant.sales.service",
     "merchant_assistant.sales.errors",
+    "merchant_assistant.complaints.models",
+    "merchant_assistant.complaints.repository",
+    "merchant_assistant.complaints.service",
+    "merchant_assistant.complaints.errors",
 ]
 forbidden_modules = [
     "merchant_assistant.sales.adapters",
+    "merchant_assistant.complaints.adapters",
     "openai",
     "httpx",
     "requests",

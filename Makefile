@@ -1,7 +1,7 @@
 # One command per step. `make check` is what CI runs, so green here means green there.
 
 .DEFAULT_GOAL := help
-.PHONY: help setup format lint typecheck arch test diagram index eval-retrieval dataset check
+.PHONY: help setup format lint typecheck arch test diagram index eval-retrieval dataset db check
 
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
@@ -41,5 +41,8 @@ eval-retrieval: ## Retrieval evaluation: recall@3 and MRR tables
 
 dataset: ## Regenerate data/ventas.json
 	uv run python scripts/generate_ventas.py
+
+db: ## Recreate the initial claims database
+	uv run python scripts/init_reclamos_db.py
 
 check: lint typecheck arch test ## Everything CI runs
