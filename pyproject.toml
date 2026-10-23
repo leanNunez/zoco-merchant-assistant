@@ -53,7 +53,7 @@ ban-relative-imports = "all"
 python_version = "3.11"
 strict = true
 warn_unreachable = true
-files = ["src", "tests"]
+files = ["src", "tests", "evaluation"]
 plugins = ["pydantic.mypy"]
 
 [tool.pydantic-mypy]
@@ -64,6 +64,8 @@ warn_required_dynamic_aliases = true
 [tool.pytest.ini_options]
 minversion = "9.0"
 testpaths = ["tests"]
+# The repository root, so the tests can import the top-level `evaluation` package.
+pythonpath = ["."]
 # `-m "not network"` keeps a plain `pytest` from ever spending API credit. Run
 # `pytest -m network` on purpose to exercise a real provider.
 addopts = ["--strict-markers", "--strict-config", "--import-mode=importlib", "-ra", "-m", "not network"]

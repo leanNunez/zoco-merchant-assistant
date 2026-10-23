@@ -1,7 +1,7 @@
 # One command per step. `make check` is what CI runs, so green here means green there.
 
 .DEFAULT_GOAL := help
-.PHONY: help setup format lint typecheck arch test diagram check
+.PHONY: help setup format lint typecheck arch test diagram index eval-retrieval check
 
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
@@ -32,5 +32,11 @@ test: ## Unit and integration tests, in the local timezone and in UTC
 
 diagram: ## Regenerate the state diagram
 	uv run python -m merchant_assistant.control.diagram > design/state-diagram.md
+
+index: ## Embed the corpus with every chunking (uses the cache)
+	uv run python -m evaluation.retrieval index
+
+eval-retrieval: ## Retrieval evaluation: recall@3 and MRR tables
+	uv run python -m evaluation.retrieval run
 
 check: lint typecheck arch test ## Everything CI runs
