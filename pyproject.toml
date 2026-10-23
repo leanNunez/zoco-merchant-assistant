@@ -53,7 +53,7 @@ ban-relative-imports = "all"
 python_version = "3.11"
 strict = true
 warn_unreachable = true
-files = ["src", "tests", "evaluation"]
+files = ["src", "tests", "evaluation", "scripts"]
 plugins = ["pydantic.mypy"]
 
 [tool.pydantic-mypy]
@@ -180,6 +180,24 @@ source_modules = [
 ]
 forbidden_modules = [
     "merchant_assistant.knowledge.adapters",
+    "openai",
+    "httpx",
+    "requests",
+    "sqlite3",
+]
+
+[[tool.importlinter.contracts]]
+name = "The sales and complaints domains perform no I/O"
+type = "forbidden"
+source_modules = [
+    "merchant_assistant.sales.models",
+    "merchant_assistant.sales.contract",
+    "merchant_assistant.sales.repository",
+    "merchant_assistant.sales.service",
+    "merchant_assistant.sales.errors",
+]
+forbidden_modules = [
+    "merchant_assistant.sales.adapters",
     "openai",
     "httpx",
     "requests",

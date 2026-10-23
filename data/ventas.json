@@ -1,0 +1,271 @@
+{
+  "currency": "ARS",
+  "days": [
+    {
+      "fecha": "2026-09-15",
+      "entradas": 169,
+      "bruto": "1918150.00",
+      "devoluciones": "0.00",
+      "neto": "1918150.00"
+    },
+    {
+      "fecha": "2026-09-16",
+      "entradas": 313,
+      "bruto": "3912500.00",
+      "devoluciones": "0.00",
+      "neto": "3912500.00"
+    },
+    {
+      "fecha": "2026-09-17",
+      "entradas": 333,
+      "bruto": "4212450.00",
+      "devoluciones": "0.00",
+      "neto": "4212450.00"
+    },
+    {
+      "fecha": "2026-09-18",
+      "entradas": 248,
+      "bruto": "2219600.00",
+      "devoluciones": "8950.00",
+      "neto": "2210650.00"
+    },
+    {
+      "fecha": "2026-09-19",
+      "entradas": 144,
+      "bruto": "1720800.00",
+      "devoluciones": "0.00",
+      "neto": "1720800.00"
+    },
+    {
+      "fecha": "2026-09-20",
+      "entradas": 191,
+      "bruto": "2158300.00",
+      "devoluciones": "11300.00",
+      "neto": "2147000.00"
+    },
+    {
+      "fecha": "2026-09-21",
+      "entradas": 221,
+      "bruto": "1889550.00",
+      "devoluciones": "8550.00",
+      "neto": "1881000.00"
+    },
+    {
+      "fecha": "2026-09-22",
+      "entradas": 246,
+      "bruto": "2029500.00",
+      "devoluciones": "0.00",
+      "neto": "2029500.00"
+    },
+    {
+      "fecha": "2026-09-23",
+      "entradas": 273,
+      "bruto": "3494400.00",
+      "devoluciones": "0.00",
+      "neto": "3494400.00"
+    },
+    {
+      "fecha": "2026-09-24",
+      "entradas": 189,
+      "bruto": "1634850.00",
+      "devoluciones": "0.00",
+      "neto": "1634850.00"
+    },
+    {
+      "fecha": "2026-09-25",
+      "entradas": 155,
+      "bruto": "2046000.00",
+      "devoluciones": "0.00",
+      "neto": "2046000.00"
+    },
+    {
+      "fecha": "2026-09-26",
+      "entradas": 231,
+      "bruto": "2818200.00",
+      "devoluciones": "0.00",
+      "neto": "2818200.00"
+    },
+    {
+      "fecha": "2026-09-28",
+      "entradas": 0,
+      "bruto": "0.00",
+      "devoluciones": "0.00",
+      "neto": "0.00"
+    },
+    {
+      "fecha": "2026-09-29",
+      "entradas": 118,
+      "bruto": "1722800.00",
+      "devoluciones": "29200.00",
+      "neto": "1693600.00"
+    },
+    {
+      "fecha": "2026-09-30",
+      "entradas": 397,
+      "bruto": "5716800.00",
+      "devoluciones": "14400.00",
+      "neto": "5702400.00"
+    },
+    {
+      "fecha": "2026-10-01",
+      "entradas": 336,
+      "bruto": "3712800.00",
+      "devoluciones": "0.00",
+      "neto": "3712800.00"
+    },
+    {
+      "fecha": "2026-10-02",
+      "entradas": 311,
+      "bruto": "3560950.00",
+      "devoluciones": "0.00",
+      "neto": "3560950.00"
+    },
+    {
+      "fecha": "2026-10-03",
+      "entradas": 220,
+      "bruto": "1815000.00",
+      "devoluciones": "0.00",
+      "neto": "1815000.00"
+    },
+    {
+      "fecha": "2026-10-04",
+      "entradas": 398,
+      "bruto": "3940200.00",
+      "devoluciones": "0.00",
+      "neto": "3940200.00"
+    },
+    {
+      "fecha": "2026-10-05",
+      "entradas": 156,
+      "bruto": "1630200.00",
+      "devoluciones": "0.00",
+      "neto": "1630200.00"
+    },
+    {
+      "fecha": "2026-10-06",
+      "entradas": 58,
+      "bruto": "696000.00",
+      "devoluciones": "12000.00",
+      "neto": "684000.00"
+    },
+    {
+      "fecha": "2026-10-07",
+      "entradas": 349,
+      "bruto": "3472550.00",
+      "devoluciones": "19900.00",
+      "neto": "3452650.00"
+    },
+    {
+      "fecha": "2026-10-08",
+      "entradas": 347,
+      "bruto": "2949500.00",
+      "devoluciones": "17000.00",
+      "neto": "2932500.00"
+    },
+    {
+      "fecha": "2026-10-09",
+      "entradas": 3,
+      "bruto": "30000.00",
+      "devoluciones": "45000.00",
+      "neto": "-15000.00"
+    },
+    {
+      "fecha": "2026-10-10",
+      "entradas": 160,
+      "bruto": "1448000.00",
+      "devoluciones": "18100.00",
+      "neto": "1429900.00"
+    },
+    {
+      "fecha": "2026-10-11",
+      "entradas": 109,
+      "bruto": "1324350.00",
+      "devoluciones": "0.00",
+      "neto": "1324350.00"
+    },
+    {
+      "fecha": "2026-10-12",
+      "entradas": 183,
+      "bruto": "1555500.00",
+      "devoluciones": "8500.00",
+      "neto": "1547000.00"
+    },
+    {
+      "fecha": "2026-10-13",
+      "entradas": 247,
+      "bruto": "3544450.00",
+      "devoluciones": "14350.00",
+      "neto": "3530100.00"
+    },
+    {
+      "fecha": "2026-10-14",
+      "entradas": 301,
+      "bruto": "3852800.00",
+      "devoluciones": "0.00",
+      "neto": "3852800.00"
+    },
+    {
+      "fecha": "2026-10-15",
+      "entradas": 340,
+      "bruto": "3485000.00",
+      "devoluciones": "20500.00",
+      "neto": "3464500.00"
+    },
+    {
+      "fecha": "2026-10-16",
+      "entradas": 201,
+      "bruto": "1979850.00",
+      "devoluciones": "0.00",
+      "neto": "1979850.00"
+    },
+    {
+      "fecha": "2026-10-17",
+      "entradas": 279,
+      "bruto": "3138750.00",
+      "devoluciones": "11250.00",
+      "neto": "3127500.00"
+    },
+    {
+      "fecha": "2026-10-18",
+      "entradas": 304,
+      "bruto": "4544800.00",
+      "devoluciones": "14950.00",
+      "neto": "4529850.00"
+    },
+    {
+      "fecha": "2026-10-19",
+      "entradas": 50,
+      "bruto": "520000.00",
+      "devoluciones": "0.00",
+      "neto": "520000.00"
+    },
+    {
+      "fecha": "2026-10-20",
+      "entradas": 326,
+      "bruto": "4564000.00",
+      "devoluciones": "14000.00",
+      "neto": "4550000.00"
+    },
+    {
+      "fecha": "2026-10-21",
+      "entradas": 160,
+      "bruto": "1880000.00",
+      "devoluciones": "0.00",
+      "neto": "1880000.00"
+    },
+    {
+      "fecha": "2026-10-22",
+      "entradas": 165,
+      "bruto": "1650000.00",
+      "devoluciones": "20000.00",
+      "neto": "1630000.00"
+    },
+    {
+      "fecha": "2027-12-15",
+      "entradas": 120,
+      "bruto": "1500000.00",
+      "devoluciones": "0.00",
+      "neto": "1500000.00"
+    }
+  ]
+}

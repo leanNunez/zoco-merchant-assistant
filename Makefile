@@ -1,7 +1,7 @@
 # One command per step. `make check` is what CI runs, so green here means green there.
 
 .DEFAULT_GOAL := help
-.PHONY: help setup format lint typecheck arch test diagram index eval-retrieval check
+.PHONY: help setup format lint typecheck arch test diagram index eval-retrieval dataset check
 
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
@@ -38,5 +38,8 @@ index: ## Embed the corpus with every chunking (uses the cache)
 
 eval-retrieval: ## Retrieval evaluation: recall@3 and MRR tables
 	uv run python -m evaluation.retrieval run
+
+dataset: ## Regenerate data/ventas.json
+	uv run python scripts/generate_ventas.py
 
 check: lint typecheck arch test ## Everything CI runs
