@@ -35,3 +35,10 @@ class InvalidEmbeddingError(KnowledgeError):
 
     code: ClassVar[str] = "invalid_embedding"
     user_message: ClassVar[str] = "The embeddings returned by the provider are not usable."
+
+
+class EmbeddingsUnavailableError(KnowledgeError):
+    """The embeddings provider could not be reached or refused the request."""
+
+    code: ClassVar[str] = "embeddings_unavailable"
+    user_message: ClassVar[str] = "The search service is temporarily unavailable."
