@@ -278,24 +278,35 @@ def build_agent_service(
     sleeper: Sleeper = time.sleep,
     retry_seed: int = 0,
     docs_dir: Path | None = None,
+    sales_faults: FaultInjector | None = None,
+    complaint_faults: FaultInjector | None = None,
 ) -> AgentBuild:
     """The conversation service over the real capabilities, with the simulated failures the
     environment asks for (`TOOL_FAILURE_*`), one fault injector per tool. The attention window
-    comes from the settings unless `hours` is given."""
+    comes from the settings unless `hours` is given.
+
+    `sales_faults` and `complaint_faults` replace the injector built from the settings for one
+    tool. Production never passes them; the conversation evaluation does, to make a tool fail
+    in an exact, scripted way (time out twice, then work) while everything else is the
+    production composition."""
     tz = settings.timezone
     hours = build_business_hours(settings) if hours is None else hours
     search = build_search(settings, today=lambda: business_today(clock, tz), docs_dir=docs_dir)
 
+    sales_injector = (
+        FaultInjector(settings.fault_config()) if sales_faults is None else sales_faults
+    )
     sales_repository = FaultySalesRepository(
-        JsonSalesRepository(settings.sales_path), FaultInjector(settings.fault_config())
+        JsonSalesRepository(settings.sales_path), sales_injector
     )
     sales = SalesAdapter(SalesService(sales_repository, clock, tz))
 
     complaints_store = SqliteComplaintRepository(settings.complaints_db_path)
     complaints_store.initialize()
-    complaints_repository = FaultyComplaintRepository(
-        complaints_store, FaultInjector(settings.fault_config())
+    complaint_injector = (
+        FaultInjector(settings.fault_config()) if complaint_faults is None else complaint_faults
     )
+    complaints_repository = FaultyComplaintRepository(complaints_store, complaint_injector)
     complaints = ComplaintsAdapter(ComplaintService(complaints_repository, clock))
 
     executor = ToolExecutor(
