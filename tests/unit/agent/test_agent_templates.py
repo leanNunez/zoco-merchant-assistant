@@ -9,6 +9,7 @@ from merchant_assistant.agent.domain.guards import authorize
 from merchant_assistant.agent.domain.messages import ToolCall
 from merchant_assistant.agent.domain.pending import PendingAction
 from merchant_assistant.agent.domain.templates import (
+    action_approval_summary,
     answer_withheld,
     blocked_notice,
     cancelled,
@@ -17,6 +18,7 @@ from merchant_assistant.agent.domain.templates import (
     handover_notice,
     hours_notice,
     human_unavailable,
+    not_approved,
     nothing_pending,
     registered,
     service_unavailable,
@@ -143,6 +145,23 @@ def test_the_turn_limit_asks_the_user_to_rephrase() -> None:
     assert "reformular" in turn_limit_reached()
 
 
+def test_the_operator_sees_exactly_the_values_the_customer_confirmed() -> None:
+    text = action_approval_summary(pending("Pago doble", "Me cobraron dos veces la entrada."))
+
+    assert text.splitlines()[1:] == [
+        "Motivo: Pago doble",
+        "Descripción: Me cobraron dos veces la entrada.",
+    ]
+
+
+def test_a_rejected_complaint_says_it_was_not_registered_and_names_no_internals() -> None:
+    text = not_approved()
+
+    assert "no se registró" in text
+    assert "operador" not in text
+    assert "REC-" not in text
+
+
 def every_template() -> list[str]:
     action = pending("Pago doble", "Me cobraron dos veces la entrada.")
     return [
@@ -161,6 +180,8 @@ def every_template() -> list[str]:
         answer_withheld(),
         blocked_notice(),
         handover_notice(),
+        action_approval_summary(action),
+        not_approved(),
     ]
 
 

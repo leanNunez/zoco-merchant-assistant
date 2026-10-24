@@ -25,16 +25,17 @@ from merchant_assistant.agent.application.conversation import (
 )
 from merchant_assistant.agent.application.executor import ToolExecutor
 from merchant_assistant.agent.application.prompts import describe_hours
+from merchant_assistant.agent.domain.drafts import DraftKind
 from merchant_assistant.agent.domain.messages import Message, Role
 from merchant_assistant.agent.domain.state import ConversationState
 from merchant_assistant.agent.domain.templates import (
     answer_withheld,
     blocked_notice,
+    confirmation_request,
     handover_notice,
     hours_notice,
     human_unavailable,
     nothing_pending,
-    unavailable_in_this_state,
 )
 from merchant_assistant.agent.ports import (
     DayFigures,
@@ -190,25 +191,39 @@ def test_in_suggest_the_reply_is_a_draft_and_stays_out_of_the_history() -> None:
 
     result = conversation.say("¿cómo cobro?")
 
-    assert result.outbound == (Outbound("draft", "Borrador para el operador."),)
-    assert [m.role for m in conversation.stored().messages] == [Role.USER]
+    assert result.outbound == (Outbound("draft", "Borrador para el operador.", "D-0001"),)
+    assert result.drafts == ("D-0001",)
+    stored = conversation.stored()
+    assert [m.role for m in stored.messages] == [Role.USER]
+    assert [(d.id, d.kind, d.text) for d in stored.pending_drafts] == [
+        ("D-0001", DraftKind.REPLY, "Borrador para el operador.")
+    ]
 
 
-def test_in_suggest_a_confirmed_complaint_waits_for_the_operator_and_nothing_stays_pending() -> (
-    None
-):
+def test_in_suggest_a_proposed_complaint_is_a_question_for_the_operator_and_nothing_pends() -> None:
     conversation = chat([calls_reply(tool_call("crear_reclamo", COMPLAINT))])
     conversation.move((Event.LOW_CONFIDENCE, Actor.SYSTEM))
-    conversation.say("quiero reclamar un pago doble")
+
+    result = conversation.say("quiero reclamar un pago doble")
+
+    assert result.pending is None
+    assert [(r.outcome, r.status) for r in result.tools] == [("proposed", "awaiting_operator")]
+    (draft,) = conversation.stored().pending_drafts
+    assert draft.kind is DraftKind.CONFIRMATION_REQUEST
+    assert draft.action is not None
+    assert result.outbound == (Outbound("draft", confirmation_request(draft.action), draft.id),)
+    # The model's call is answered in the history, so it stays well formed for a provider.
+    assert conversation.stored().messages[-1].role is Role.TOOL
+
+
+def test_in_suggest_a_yes_to_nothing_pending_is_a_draft_too() -> None:
+    conversation = chat([])
+    conversation.move((Event.LOW_CONFIDENCE, Actor.SYSTEM))
 
     result = conversation.say("sí")
 
+    assert result.outbound == (Outbound("draft", nothing_pending(None), "D-0001"),)
     assert conversation.registry.calls == 0
-    assert texts(result) == [unavailable_in_this_state()]
-    assert [(r.outcome, r.error_code) for r in result.tools] == [
-        ("rejected", "operator_approval_required")
-    ]
-    assert result.pending is None
 
 
 # --------------------------------------------------------------------------- signals

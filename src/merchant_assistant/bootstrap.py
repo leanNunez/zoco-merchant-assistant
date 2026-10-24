@@ -255,5 +255,5 @@ def build_agent_service(
         rng=random.Random(retry_seed),  # noqa: S311
     )
     service = ConversationService(store, executor, model, hours=hours, clock=clock)
-    operators = OperatorService(store, hours=hours, clock=clock)
+    operators = OperatorService(store, executor, hours=hours, clock=clock)
     return AgentBuild(service, operators, search.mode, search.reason)

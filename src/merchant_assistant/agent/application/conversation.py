@@ -21,6 +21,12 @@
    document no tool returned in this conversation, no complaint number nobody mentioned.
 7. Delivery against the state as stored NOW: if anyone saved the conversation while the turn
    ran (an operator took over while the model was answering), the answer is dropped.
+
+In SUGGEST nothing reaches the customer from the turn: the answer becomes a REPLY draft, the
+model's `crear_reclamo` becomes a CONFIRMATION_REQUEST draft (nothing is pending until an
+operator approves it and the question is actually delivered), and a strict yes to a delivered
+question becomes an ACTION_APPROVAL draft holding the gate's `Confirmed`. Only the operator's
+approval executes it (`OperatorService.approve_draft`).
 """
 
 from __future__ import annotations
@@ -45,6 +51,7 @@ from merchant_assistant.agent.domain.dates import (
     dates_stated_by_assistant,
     is_grounded,
 )
+from merchant_assistant.agent.domain.drafts import Draft, DraftKind, DraftStatus, next_draft_id
 from merchant_assistant.agent.domain.effects import apply_effects
 from merchant_assistant.agent.domain.errors import (
     ActionIgnored,
@@ -74,6 +81,7 @@ from merchant_assistant.agent.domain.signals import (
 )
 from merchant_assistant.agent.domain.state import ConversationState
 from merchant_assistant.agent.domain.templates import (
+    action_approval_summary,
     answer_withheld,
     blocked_notice,
     cancelled,
@@ -116,7 +124,9 @@ from merchant_assistant.shared.errors import DomainError
 # reply: the agent's answer or a code template; notice: a template announcing a change of hands;
 # operator: written by a person in HUMAN; draft: NOT sent, waiting for an operator in SUGGEST.
 OutboundKind = Literal["reply", "draft", "notice", "operator"]
-ToolCallOutcome = Literal["executed", "rejected", "proposed", "ignored", "deduplicated"]
+ToolCallOutcome = Literal[
+    "executed", "rejected", "proposed", "ignored", "deduplicated", "awaiting_operator"
+]
 
 MAX_ROUNDS = 4
 ABUSE_STRIKES_TO_BLOCK = 2
@@ -132,6 +142,7 @@ _UNAVAILABLE_TOOL = "<unavailable>"
 class Outbound:
     kind: OutboundKind
     text: str
+    draft_id: str | None = None  # the draft a "draft" holds, or the approved draft a reply sent
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +186,7 @@ class TurnResult:
     model_error: str | None
     injection_markers: int
     events: tuple[str, ...]  # control events this turn, "event:applied" or "event:rejected:code"
+    drafts: tuple[str, ...] = ()  # drafts this turn created for an operator (SUGGEST)
 
     @property
     def model_calls(self) -> int:
@@ -199,12 +211,21 @@ class _Turn:
     injection: int = 0
     human_refused: bool = False
     dropped: str | None = None
+    drafts: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
 class _Reply:
-    text: str
+    """What the turn would say. In SUGGEST it becomes a draft instead of being sent.
+
+    `action` marks the confirmation question of a complaint the model proposed in SUGGEST;
+    `confirmed` is a customer's yes in SUGGEST, which says nothing and waits for an operator.
+    """
+
+    text: str | None
     kind: Literal["reply", "notice"] = "reply"
+    action: PendingAction | None = None
+    confirmed: Confirmed | None = None
 
 
 class ConversationService:
@@ -329,17 +350,44 @@ class ConversationService:
             case Confirmed():
                 turn.gate = "confirmed"
                 return self._execute(state, decision, capabilities, turn)
-            case Cancelled():
+            case Cancelled(action=dropped):
                 turn.gate = "cancelled"
-                return state, _Reply(cancelled())
-            case Invalidated():
+                return self._forget_approvals(state, dropped, turn), _Reply(cancelled())
+            case Invalidated(action=dropped):
                 turn.gate = "invalidated"
-                return state, None
+                return self._forget_approvals(state, dropped, turn), None
             case NothingPending(last_registered=last):
                 if classify_reply(text) is ReplyKind.OTHER or _answers_a_date_question(state):
                     return state, None
                 turn.gate = "nothing_pending"
                 return state, _Reply(nothing_pending(None if last is None else last.complaint_id))
+
+    def _forget_approvals(
+        self, state: ConversationState, dropped: PendingAction, turn: _Turn
+    ) -> ConversationState:
+        """The customer said no, or something else, to an action an operator was asked to
+        approve: that approval can no longer be given, so its draft is discarded now."""
+        stale = [
+            draft.id
+            for draft in state.pending_drafts
+            if draft.confirmed is not None
+            and draft.confirmed.action.fingerprint == dropped.fingerprint
+        ]
+        if not stale:
+            return state
+        kept = tuple(
+            replace(
+                draft,
+                status=DraftStatus.DISCARDED,
+                decided_by=Actor.SYSTEM,
+                decided_at=self._clock.now(),
+            )
+            if draft.id in stale
+            else draft
+            for draft in state.drafts
+        )
+        turn.events.extend(f"draft_discarded:{draft_id}" for draft_id in stale)
+        return replace(state, drafts=kept)
 
     def _execute(
         self,
@@ -349,8 +397,20 @@ class ConversationService:
         turn: _Turn,
     ) -> tuple[ConversationState, _Reply]:
         arguments = _canonical(confirmed.action)
-        if not capabilities.effect_tools or capabilities.effects_need_operator_approval:
-            # The approval flow is the operator block's: nothing runs, nothing stays pending.
+        if capabilities.effect_tools and capabilities.effects_need_operator_approval:
+            # Rule 6: the customer confirmed; now an operator must approve. Nothing runs and
+            # the action stays pending, so the approval can still execute it.
+            turn.tools.append(
+                ToolRecord(
+                    CREAR_RECLAMO,
+                    arguments,
+                    "awaiting_operator",
+                    "operator_approval_required",
+                )
+            )
+            return state, _Reply(None, confirmed=confirmed)
+        if not capabilities.effect_tools:
+            # No state offers replies without effects today; refused, nothing stays pending.
             turn.tools.append(
                 ToolRecord(
                     CREAR_RECLAMO, arguments, "rejected", error_code="operator_approval_required"
@@ -409,9 +469,11 @@ class ConversationService:
                 return state, _Reply(self._checked(reply.text or "", state, turn))
             # The model's own text next to tool calls is never shown: only results speak.
             state = state.with_messages(Message(Role.ASSISTANT, None, reply.tool_calls))
-            state, proposal = self._run_calls(state, reply.tool_calls, offered, now, turn)
+            state, proposal = self._run_calls(
+                state, reply.tool_calls, offered, capabilities, now, turn
+            )
             if proposal is not None:
-                return state, _Reply(proposal)
+                return state, proposal
         turn.violations.append("round_limit")
         return state, _Reply(turn_limit_reached())
 
@@ -420,10 +482,11 @@ class ConversationService:
         state: ConversationState,
         calls: tuple[ToolCall, ...],
         offered: Mapping[str, ToolSpec],
+        capabilities: Capabilities,
         now: datetime,
         turn: _Turn,
-    ) -> tuple[ConversationState, str | None]:
-        proposal: str | None = None
+    ) -> tuple[ConversationState, _Reply | None]:
+        proposal: _Reply | None = None
         for call in calls:
             shown_name = call.name if call.name in offered else _UNAVAILABLE_TOOL
             if proposal is not None:
@@ -444,7 +507,7 @@ class ConversationService:
                 )
                 continue
             if validated.spec.kind is ToolKind.EFFECT:
-                state, proposal = self._propose(state, validated, call, now, turn)
+                state, proposal = self._propose(state, validated, call, capabilities, now, turn)
                 continue
             state = self._read(state, validated, call, turn)
         return state, proposal
@@ -454,12 +517,32 @@ class ConversationService:
         state: ConversationState,
         validated: ValidatedCall,
         call: ToolCall,
+        capabilities: Capabilities,
         now: datetime,
         turn: _Turn,
-    ) -> tuple[ConversationState, str]:
+    ) -> tuple[ConversationState, _Reply]:
         action = PendingAction.create(
             validated, now, turn=state.turn, control_version=state.control_version
         )
+        question = confirmation_request(action)
+        if capabilities.effects_need_operator_approval:
+            # SUGGEST: the question itself is a draft. Nothing is pending until an operator
+            # approves it, because only then has the customer seen these exact values.
+            turn.tools.append(
+                ToolRecord(call.name, call.arguments, "proposed", "awaiting_operator")
+            )
+            content = envelope(
+                validated.spec.name,
+                "pending_confirmation",
+                data={
+                    "registered": False,
+                    "note": "Nothing was registered. An operator reviews the question before "
+                    "the user sees it; the user must then confirm the exact values.",
+                },
+            )
+            return state.with_messages(_tool_message(call, content)), _Reply(
+                question, action=action
+            )
         pending_state, _ = propose(state.pending, action)
         turn.tools.append(ToolRecord(call.name, call.arguments, "proposed", "pending_confirmation"))
         content = envelope(
@@ -472,7 +555,7 @@ class ConversationService:
             },
         )
         state = replace(state, pending=pending_state).with_messages(_tool_message(call, content))
-        return state, confirmation_request(action)
+        return state, _Reply(question)
 
     def _read(
         self, state: ConversationState, validated: ValidatedCall, call: ToolCall, turn: _Turn
@@ -534,17 +617,32 @@ class ConversationService:
             return self._drop(state.conversation_id, user_message, turn)
 
         outbound: list[Outbound] = []
-        if reply is not None:
-            text = self._with_notices(reply, capabilities, turn)
+        if reply is not None and reply.confirmed is not None:
+            state = self._ask_for_approval(state, reply.confirmed, turn)
+        elif reply is not None and reply.text is not None:
+            text = reply.text
+            if reply.kind != "notice":
+                text = self._with_notices(text, capabilities, turn)
             if reply.kind == "notice":
                 outbound.append(Outbound("notice", text))
                 state = state.with_messages(Message(Role.ASSISTANT, text))
-            elif capabilities.delivery is Delivery.SEND:
+            elif capabilities.delivery is Delivery.SEND and reply.action is None:
                 outbound.append(Outbound("reply", text))
                 state = state.with_messages(Message(Role.ASSISTANT, text))
             elif capabilities.delivery is Delivery.DRAFT:
-                # Not in the history: the user has not seen it. The operator block approves it.
-                outbound.append(Outbound("draft", text))
+                # Not in the history: the customer has not seen it until an operator approves.
+                kind = DraftKind.REPLY if reply.action is None else DraftKind.CONFIRMATION_REQUEST
+                draft = Draft(
+                    next_draft_id(state.drafts),
+                    kind,
+                    text,
+                    self._clock.now(),
+                    state.turn,
+                    action=reply.action,
+                )
+                state = replace(state, drafts=(*state.drafts, draft))
+                turn.drafts.append(draft.id)
+                outbound.append(Outbound("draft", text, draft.id))
 
         final = replace(state, version=base_version + 1)
         try:
@@ -553,14 +651,32 @@ class ConversationService:
             return self._drop(state.conversation_id, user_message, turn)
         return _result(final, outbound, turn)
 
-    def _with_notices(self, reply: _Reply, capabilities: Capabilities, turn: _Turn) -> str:
-        if reply.kind == "notice":
-            return reply.text
+    def _ask_for_approval(
+        self, state: ConversationState, confirmed: Confirmed, turn: _Turn
+    ) -> ConversationState:
+        """An ACTION_APPROVAL draft for the operator; one per action, however often the
+        customer repeats the yes. Nothing is said to the customer."""
+        fingerprint = confirmed.action.fingerprint
+        for draft in state.pending_drafts:
+            if draft.confirmed is not None and draft.confirmed.action.fingerprint == fingerprint:
+                return state
+        draft = Draft(
+            next_draft_id(state.drafts),
+            DraftKind.ACTION_APPROVAL,
+            action_approval_summary(confirmed.action),
+            self._clock.now(),
+            state.turn,
+            confirmed=confirmed,
+        )
+        turn.drafts.append(draft.id)
+        return replace(state, drafts=(*state.drafts, draft))
+
+    def _with_notices(self, text: str, capabilities: Capabilities, turn: _Turn) -> str:
         if turn.human_refused:
-            return f"{reply.text}\n\n{human_unavailable(self._window)}"
+            return f"{text}\n\n{human_unavailable(self._window)}"
         if capabilities.inform_hours_window:
-            return f"{reply.text}\n\n{hours_notice(self._window)}"
-        return reply.text
+            return f"{text}\n\n{hours_notice(self._window)}"
+        return text
 
     def _drop(self, conversation_id: str, user_message: Message, turn: _Turn) -> TurnResult:
         """Someone saved the conversation during this turn: deliver nothing, keep the message.
@@ -676,4 +792,5 @@ def _result(state: ConversationState, outbound: list[Outbound], turn: _Turn) -> 
         model_error=turn.model_error,
         injection_markers=turn.injection,
         events=tuple(turn.events),
+        drafts=tuple(turn.drafts),
     )

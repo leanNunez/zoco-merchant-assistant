@@ -10,7 +10,7 @@ log in the stored state, and what the model was shown.
 import json
 import random
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -33,16 +33,27 @@ from merchant_assistant.agent.application.conversation import (
 from merchant_assistant.agent.application.executor import ToolExecutor
 from merchant_assistant.agent.application.operator import CommandResult, OperatorService
 from merchant_assistant.agent.application.prompts import describe_hours
-from merchant_assistant.agent.domain.errors import CommandNotAllowed, OperatorReplyNotAllowed
+from merchant_assistant.agent.domain.drafts import Draft, DraftKind
+from merchant_assistant.agent.domain.errors import (
+    CommandNotAllowed,
+    DraftNotPending,
+    OperatorReplyNotAllowed,
+    UnknownDraft,
+)
+from merchant_assistant.agent.domain.guards import authorize
 from merchant_assistant.agent.domain.messages import Author, Message, ModelReply, Role
+from merchant_assistant.agent.domain.pending import PendingAction
 from merchant_assistant.agent.domain.state import ConversationState
 from merchant_assistant.agent.domain.templates import (
     blocked_notice,
+    confirmation_request,
     hours_notice,
     human_unavailable,
+    not_approved,
     nothing_pending,
+    registered,
 )
-from merchant_assistant.agent.domain.tools import CREAR_RECLAMO, ToolSpec
+from merchant_assistant.agent.domain.tools import CREAR_RECLAMO, TOOL_SPECS, ToolSpec
 from merchant_assistant.agent.ports import Passage, SearchOutcome
 from merchant_assistant.bootstrap import ComplaintsAdapter, SalesAdapter
 from merchant_assistant.complaints.adapters.sqlite_repository import SqliteComplaintRepository
@@ -157,7 +168,7 @@ def make_world(
     model = ScriptedChatModel(steps)
     store = InMemoryConversationStore()
     agent = ConversationService(store, executor, model, hours=HOURS, clock=clock)
-    team = OperatorService(store, hours=HOURS, clock=clock)
+    team = OperatorService(store, executor, hours=HOURS, clock=clock)
     return World(agent, team, model, store, repository, clock, search)
 
 
@@ -199,6 +210,192 @@ def test_1_a_takeover_kills_a_half_confirmed_complaint_for_good(tmp_path: Path) 
     assert texts(late) == [nothing_pending(None)]
     assert world.rows == 0
     assert world.model.call_count == 1
+
+
+# --------------------------------------------------------------------------- 2: SUGGEST
+
+
+def enter_suggest(world: World) -> None:
+    """Put the conversation in SUGGEST through the control machine, as the system would."""
+    state = world.store.load(CID) or ConversationState(CID)
+    control = state.control()
+    control.apply(Event.LOW_CONFIDENCE, Actor.SYSTEM, at=world.clock.now(), hours=HOURS)
+    world.store.save(
+        replace(state.with_control(control), version=state.version + 1),
+        expected_version=state.version,
+    )
+
+
+def only_draft(world: World, kind: DraftKind) -> Draft:
+    (draft,) = world.team.drafts(CID)
+    assert draft.kind is kind
+    return draft
+
+
+def ask_in_suggest(world: World) -> Draft:
+    """The model proposes a complaint in SUGGEST; the operator lets the question through."""
+    proposed = world.say("Quiero reclamar: pagué la entrada y no me llegó el correo.")
+    question = only_draft(world, DraftKind.CONFIRMATION_REQUEST)
+    assert proposed.outbound == (Outbound("draft", expected_question(), question.id),)
+    assert (proposed.pending, world.stored().pending.pending) == (None, None)
+    asked = world.team.approve_draft(CID, question.id, Actor.OPERATOR)
+    assert asked.outbound == (Outbound("reply", expected_question(), question.id),)
+    assert world.stored().pending.pending is not None
+    return question
+
+
+def expected_question() -> str:
+    validated = authorize(tool_call(CREAR_RECLAMO, A), TOOL_SPECS)
+    return confirmation_request(PendingAction.create(validated, OPEN, turn=1, control_version=0))
+
+
+def test_2_in_suggest_an_answer_reaches_the_customer_only_once_approved(tmp_path: Path) -> None:
+    world = make_world(tmp_path, [text_reply("Las liquidaciones salen en 48 horas.")])
+    enter_suggest(world)
+
+    drafted = world.say("¿cuándo cobro?")
+    draft = only_draft(world, DraftKind.REPLY)
+    approved = world.team.approve_draft(CID, draft.id, Actor.OPERATOR)
+
+    assert drafted.outbound == (
+        Outbound("draft", "Las liquidaciones salen en 48 horas.", draft.id),
+    )
+    assert approved.outbound == (
+        Outbound("reply", "Las liquidaciones salen en 48 horas.", draft.id),
+    )
+    assert world.stored().messages[-1] == Message(
+        Role.ASSISTANT, "Las liquidaciones salen en 48 horas."
+    )
+    assert world.team.drafts(CID) == ()
+
+
+def test_2_in_suggest_a_complaint_needs_the_customer_and_then_the_operator(tmp_path: Path) -> None:
+    world = make_world(tmp_path, [propose_reply(A)])
+    enter_suggest(world)
+    ask_in_suggest(world)
+
+    confirmed = world.say("sí")
+
+    approval = only_draft(world, DraftKind.ACTION_APPROVAL)
+    assert (confirmed.outbound, confirmed.gate, confirmed.drafts) == (
+        (),
+        "confirmed",
+        (approval.id,),
+    )
+    assert [(r.outcome, r.status) for r in confirmed.tools] == [
+        ("awaiting_operator", "operator_approval_required")
+    ]
+    assert world.rows == 0
+    assert "Motivo: Entrada no recibida" in approval.text
+
+    executed = world.team.approve_draft(CID, approval.id, Actor.SUPERVISOR)
+
+    assert world.rows == 1
+    assert executed.registered == ("REC-000001",)
+    assert texts(executed) == [registered("REC-000001", created=True)]
+    assert world.stored().pending.pending is None
+    assert world.model.call_count == 1  # the model proposed; everything after was code
+
+
+def test_2_a_repeated_yes_asks_the_operator_once(tmp_path: Path) -> None:
+    world = make_world(tmp_path, [propose_reply(A)])
+    enter_suggest(world)
+    ask_in_suggest(world)
+
+    world.say("sí")
+    again = world.say("Sí.")
+
+    assert again.drafts == ()
+    only_draft(world, DraftKind.ACTION_APPROVAL)
+    assert world.rows == 0
+
+
+def test_2_rejecting_the_approval_registers_nothing_and_says_so(tmp_path: Path) -> None:
+    world = make_world(tmp_path, [propose_reply(A)])
+    enter_suggest(world)
+    ask_in_suggest(world)
+    world.say("sí")
+
+    rejected = world.team.reject_draft(
+        CID, only_draft(world, DraftKind.ACTION_APPROVAL).id, Actor.OPERATOR
+    )
+    late = world.say("sí")
+
+    assert texts(rejected) == [not_approved()]
+    assert world.stored().pending.pending is None
+    assert late.outbound == (Outbound("draft", nothing_pending(None), late.drafts[0]),)
+    assert world.rows == 0
+
+
+def test_2_rejecting_the_question_leaves_nothing_pending(tmp_path: Path) -> None:
+    world = make_world(tmp_path, [propose_reply(A)])
+    enter_suggest(world)
+    world.say("Quiero reclamar: pagué la entrada y no me llegó el correo.")
+
+    rejected = world.team.reject_draft(
+        CID, only_draft(world, DraftKind.CONFIRMATION_REQUEST).id, Actor.OPERATOR
+    )
+    late = world.say("sí")
+
+    assert rejected.outbound == ()
+    assert world.stored().pending.pending is None
+    assert late.gate == "nothing_pending"
+    assert world.rows == 0
+
+
+@pytest.mark.parametrize("stage", ["question", "approval"])
+def test_2_releasing_to_auto_discards_the_drafts_for_good(tmp_path: Path, stage: str) -> None:
+    world = make_world(tmp_path, [propose_reply(A)])
+    enter_suggest(world)
+    if stage == "question":
+        world.say("Quiero reclamar: pagué la entrada y no me llegó el correo.")
+    else:
+        ask_in_suggest(world)
+        world.say("sí")
+    (waiting,) = world.team.drafts(CID)
+
+    released = world.team.release(CID, Actor.OPERATOR)
+
+    assert f"draft_discarded:{waiting.id}" in released.events
+    assert world.team.drafts(CID) == ()
+    with pytest.raises(DraftNotPending):
+        world.team.approve_draft(CID, waiting.id, Actor.OPERATOR)
+    assert world.stored().pending.pending is None
+    assert world.rows == 0
+    assert all(m.content != registered("REC-000001", created=True) for m in world.stored().messages)
+
+
+def test_2_a_customer_who_says_something_else_voids_the_approval(tmp_path: Path) -> None:
+    world = make_world(tmp_path, [propose_reply(A), text_reply("Estamos revisándolo.")])
+    enter_suggest(world)
+    ask_in_suggest(world)
+    world.say("sí")
+    approval = only_draft(world, DraftKind.ACTION_APPROVAL)
+
+    changed = world.say("mejor esperá, lo pienso")
+
+    assert f"draft_discarded:{approval.id}" in changed.events
+    with pytest.raises(DraftNotPending):
+        world.team.approve_draft(CID, approval.id, Actor.OPERATOR)
+    assert world.rows == 0
+
+
+def test_2_only_the_team_decides_on_drafts(tmp_path: Path) -> None:
+    world = make_world(tmp_path, [text_reply("Borrador.")])
+    enter_suggest(world)
+    world.say("¿cuándo cobro?")
+    (draft,) = world.team.drafts(CID)
+
+    for actor in (Actor.CUSTOMER, Actor.SYSTEM):
+        with pytest.raises(CommandNotAllowed):
+            world.team.approve_draft(CID, draft.id, actor)
+        with pytest.raises(CommandNotAllowed):
+            world.team.reject_draft(CID, draft.id, actor)
+    with pytest.raises(UnknownDraft):
+        world.team.approve_draft(CID, "D-9999", Actor.OPERATOR)
+
+    assert world.team.drafts(CID) == (draft,)
+    assert all(m.role is not Role.ASSISTANT for m in world.stored().messages)
 
 
 # --------------------------------------------------------------------------- 3: BLOCKED

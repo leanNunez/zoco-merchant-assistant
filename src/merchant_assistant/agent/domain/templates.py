@@ -16,15 +16,37 @@ from merchant_assistant.agent.domain.pending import PendingAction
 from merchant_assistant.agent.domain.tools import CrearReclamoArgs, normalize_text
 
 
-def confirmation_request(action: PendingAction) -> str:
+def _complaint(action: PendingAction) -> CrearReclamoArgs:
     arguments = action.arguments
     if not isinstance(arguments, CrearReclamoArgs):
-        raise InvalidPendingAction(f"no confirmation text for {action.tool!r}")
+        raise InvalidPendingAction(f"no text for {action.tool!r}")
+    return arguments
+
+
+def confirmation_request(action: PendingAction) -> str:
+    arguments = _complaint(action)
     return (
         "Voy a registrar este reclamo:\n"
         f"Motivo: {arguments.motivo}\n"
         f"Descripción: {arguments.descripcion}\n"
         'Si es correcto, respondé "sí" para registrarlo. Si no, respondé "no" para cancelarlo.'
+    )
+
+
+def action_approval_summary(action: PendingAction) -> str:
+    """For the operator, never for the customer: what approving the draft would register."""
+    arguments = _complaint(action)
+    return (
+        "El cliente confirmó este reclamo y espera tu aprobación para registrarlo:\n"
+        f"Motivo: {arguments.motivo}\n"
+        f"Descripción: {arguments.descripcion}"
+    )
+
+
+def not_approved() -> str:
+    return (
+        "El equipo revisó tu pedido y no aprobó registrar ese reclamo, así que no se registró. "
+        "Si querés, contame de nuevo el motivo y qué pasó."
     )
 
 
