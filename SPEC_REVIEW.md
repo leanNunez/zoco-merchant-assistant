@@ -6,14 +6,15 @@ lista cada hallazgo, la decisión tomada y dónde queda implementada y probada. 
 
 Estados de implementación:
 
-- ✅ implementado en el paquete `control` y probado.
-- ⏳ el paquete `control` emite la señal (un efecto, un error o una capacidad), pero falta la parte del
-  agente que actúa sobre ella (los comandos del operador y del supervisor, los borradores y las
-  aprobaciones son el bloque siguiente).
+- ✅ implementado y probado, en `control` y en el agente.
+- ⏳ queda una parte pendiente, que el hallazgo nombra.
 
 El turno del agente (`src/merchant_assistant/agent/application/conversation.py`, decisión en
-[ADR-0003](design/adr/0003-turno-del-agente.md)) ya hace cumplir lo que la columna de estado marca con ✅
-del lado del agente; sus escenarios están en `tests/integration/agent/test_agent_policies.py`.
+[ADR-0003](design/adr/0003-turno-del-agente.md)) y los comandos del operador y del supervisor
+(`src/merchant_assistant/agent/application/operator.py`, decisión en
+[ADR-0004](design/adr/0004-control-y-operadores.md)) hacen cumplir lo que el paquete `control` declara.
+Sus escenarios están en `tests/integration/agent/test_agent_policies.py` y en
+`tests/integration/agent/test_agent_control_scenarios.py`, que cruza estados con comandos reales.
 
 ## Resumen
 
@@ -27,10 +28,10 @@ del lado del agente; sus escenarios están en `tests/integration/agent/test_agen
 | F6 | Ambigüedad | Los actores no están definidos | Tabla de actores por evento; SUPERVISOR incluye a OPERATOR | ✅ |
 | F7 | Caso faltante | SUGGEST + `customer_requests_human` no está definido | Pasa a HUMAN, con guarda de horario | ✅ |
 | F8 | Caso faltante | Qué pasa con los eventos redundantes o sin sentido | Fallan de forma explícita con `InvalidTransition` | ✅ |
-| F9 | Ambigüedad | `low_confidence` no está definida y la confianza del LLM no está calibrada | Debe salir de una señal determinista de retrieval | ⏳ |
+| F9 | Ambigüedad | `low_confidence` no está definida y la confianza del LLM no está calibrada | Umbral BM25 calibrado con el kit; todas las búsquedas del turno sin resultado disparan el evento | ✅ léxico / ⏳ lado vectorial |
 | F10 | Interacción con la Parte 2 | Un reclamo a medio confirmar sobrevive a un cambio de control | `INVALIDATE_PENDING_ACTION` en todo cambio de estado, y la compuerta compara la versión de control | ✅ |
-| F11 | Interacción con la Parte 2 | Orden de la regla 6 en SUGGEST | Confirmación del usuario, aprobación del operador, ejecución | ✅ capacidad y bloqueo / ⏳ aprobación |
-| F12 | Caso faltante | Los borradores no deben filtrarse al salir de SUGGEST | `DISCARD_UNAPPROVED_DRAFTS` al salir de SUGGEST | ✅ efecto / ⏳ bandeja de salida |
+| F11 | Interacción con la Parte 2 | Orden de la regla 6 en SUGGEST | Pregunta aprobada, confirmación del cliente, aprobación del operador, ejecución | ✅ |
+| F12 | Caso faltante | Los borradores no deben filtrarse al salir de SUGGEST | `DISCARD_UNAPPROVED_DRAFTS` descarta los borradores, que ya no se pueden aprobar | ✅ |
 | F13 | Ambigüedad | "Ejecuta acciones" en HUMAN: ¿cuentan las herramientas de lectura? | Lectura estricta: ninguna herramienta en HUMAN ni BLOCKED | ✅ |
 | F14 | Ambigüedad | La regla 5 no dice si los intentos rechazados se registran | Se registran ambos, distinguidos por resultado y motivo | ✅ |
 | F15 | Ambigüedad | "Nadie responde" en BLOCKED no dice qué pasa con los mensajes entrantes | Se registran; no se genera ni se envía nada | ✅ |
@@ -133,9 +134,16 @@ y `capabilities.py` (`inform_hours_window`).
 
 **Estado.** ✅ guarda implementada en `control`. ✅ fuera de horario el turno agrega a cada respuesta la
 plantilla con la franja (`hours_notice`), y si el cliente pide un humano fuera de horario el intento queda
-registrado como rechazado y la respuesta dice cuándo atiende el equipo (`human_unavailable`). Tests:
+registrado como rechazado y la respuesta dice cuándo atiende el equipo (`human_unavailable`). ✅ un
+`takeover` del operador fuera de horario falla con `out_of_hours` y queda registrado, y todo comando
+sincroniza primero el horario, así que después del cierre un operador ya no puede escribirle al cliente
+ni aprobar un borrador. La franja es configuración (`HUMAN_HOURS_*`, ver Supuestos) y se le muestra al
+cliente como "de lunes a viernes de 09:00 a 18:00, hora de Buenos Aires" (`describe_hours`). Tests:
 `tests/integration/agent/test_agent_policies.py::test_17_out_of_hours_the_answer_carries_the_human_window`,
-`tests/unit/agent/test_agent_conversation.py::test_a_request_for_a_person_out_of_hours_is_answered_with_the_window`.
+`tests/unit/agent/test_agent_conversation.py::test_a_request_for_a_person_out_of_hours_is_answered_with_the_window`,
+`tests/integration/agent/test_agent_control_scenarios.py::test_4_out_of_hours_a_takeover_is_refused_and_logged`,
+`test_4_out_of_hours_a_customer_asking_for_a_person_gets_the_window`,
+`test_4_after_closing_an_operator_can_no_longer_write_to_the_customer`.
 
 ## F5. No existe `in_hours_started` ni regla de retorno
 
@@ -226,20 +234,45 @@ baja ni quién la mide.
 
 **Por qué es un problema.** Si se la delega al propio modelo ("¿qué tan seguro estás?"), la confianza
 autoinformada de un LLM está mal calibrada: puede ser alta cuando se equivoca. La transición dependería de
-la opinión de quien debería ser supervisado.
+la opinión de quien debería ser supervisado. Y "no hubo resultados" casi nunca ocurre por sí solo: BM25
+puntúa cualquier token compartido (no hay stopwords) y una búsqueda vectorial siempre devuelve vecinos.
 
-**Resolución.** El evento solo lo dispara SYSTEM, y debe originarse en una señal determinista de retrieval:
-ninguna coincidencia, o un puntaje por debajo de un umbral calibrado con datos. Nunca de lo que el modelo diga
-de sí mismo. `control` solo recibe el evento ya decidido.
+**Resolución.** El evento solo lo dispara SYSTEM, a partir de una señal determinista de retrieval. La
+búsqueda tiene un **piso léxico**: si el mejor puntaje BM25 de la consulta sobre el corpus (con el mismo
+chunking que usa el agente) está por debajo de `MIN_BM25_SCORE`, devuelve `no_data`, diga lo que diga el
+retriever, también en modo híbrido. En AUTO, si el modelo buscó en la documentación y **todas** las
+búsquedas del turno dieron `no_data`, el turno dispara `low_confidence` antes de entregar. En horario la
+conversación pasa a SUGGEST y la respuesta de ese mismo turno queda como borrador (las capacidades se
+recalculan después de la transición). Fuera de horario la guarda lo rechaza, el rechazo queda registrado y
+la respuesta sale en AUTO con el aviso de la franja. La transición vive en el estado del turno y se guarda
+con él, así que no dispara el descarte por concurrencia del propio turno. La confianza que diga tener el
+modelo no se usa nunca.
 
-**Dónde.** `rules.py` (solo SYSTEM puede disparar `low_confidence`). La señal se calcula fuera de este
-paquete.
+**Calibración, sin la API.** El mejor puntaje BM25 de las 20 preguntas del kit va de 5,871 (Q13) a 26,707
+(Q05); el de 16 preguntas fuera de tema escritas antes de elegir el umbral ("¿Cuál es la capital de
+Francia?", "¿Quién ganó el mundial 2022?", "Receta de empanadas", ...) va de 0,000 a 4,626. No se solapan:
+el umbral es el punto medio, **5,25**, con 0,62 de margen hacia cada lado. Todas las preguntas del kit
+pasan y ninguna fuera de tema.
 
-**Tests.** `test_transition_table.py::test_only_the_system_reports_abuse_or_low_confidence`. El umbral y su
-calibración se prueban cuando exista el retrieval.
+**Dónde.** `rules.py` (solo SYSTEM puede disparar `low_confidence`), `bootstrap.py` (`MIN_BM25_SCORE`,
+`SearchAdapter`) y `agent/application/conversation.py` (`_found_nothing` y el disparo en
+`handle_user_message`).
 
-**Estado.** ⏳ `control` define quién puede emitir el evento; el cálculo de la señal y su umbral siguen
-pendientes (bloque siguiente). El turno todavía no emite `low_confidence`.
+**Tests.** `test_transition_table.py::test_only_the_system_reports_abuse_or_low_confidence`,
+`tests/integration/agent/test_agent_retrieval_floor.py` (corpus real: cada pregunta del kit es `ok`, cada
+pregunta fuera de tema es `no_data`, y el margen), `tests/integration/agent/test_agent_bootstrap.py::test_the_lexical_floor_wins_over_a_retriever_that_always_finds_neighbours`,
+`tests/unit/agent/test_agent_conversation.py::test_when_every_search_finds_nothing_in_hours_the_answer_waits_for_an_operator`,
+`test_out_of_hours_low_confidence_is_refused_and_the_answer_goes_out_with_the_window`,
+`test_low_confidence_needs_searches_and_every_one_of_them_empty`,
+`tests/integration/agent/test_agent_control_scenarios.py::test_2_an_off_topic_question_hands_the_answer_and_then_a_complaint_to_the_operator`.
+
+**Estado.** ✅ señal léxica, umbral calibrado y transición en el turno. ⏳ el lado vectorial no tiene
+umbral propio: calibrar un piso de coseno necesita embeddings reales del corpus. Limitación conocida: el
+umbral se calibró sobre preguntas completas, y una consulta de pocas palabras comunes queda por debajo
+("liquidación", 2,98; "entrada no llegó", 2,92). En horario eso manda la conversación a SUGGEST (falla
+segura); fuera de horario el agente dice que no encontró información. La descripción de
+`buscar_documentacion` le pide al modelo la pregunta completa del comerciante, pero es un pedido, no una
+garantía; el test de calibración deja fijado este costo.
 
 ## F10. Un reclamo a medio confirmar sobrevive a un cambio de control
 
@@ -264,7 +297,10 @@ sincronizar el horario y en las transiciones que disparan las señales). Además
 que alguien aplique el efecto: cada acción pendiente guarda la versión de control (`len(control_log)`) con la
 que se propuso, y `decide` la descarta si la versión cambió, diga lo que diga el usuario. Una transición
 rechazada también cuenta: cualquier intento de cambiar de manos invalida, que es la lectura conservadora.
-Tests: `tests/unit/agent/test_agent_pending.py::test_a_change_of_control_since_the_proposal_invalidates_whatever_the_user_says`,
+El comando `takeover` del operador ejecuta el mismo efecto (`apply_effects`): después de liberar, un
+"sí" ya no encuentra nada pendiente.
+Tests: `tests/integration/agent/test_agent_control_scenarios.py::test_1_a_takeover_kills_a_half_confirmed_complaint_for_good`,
+`tests/unit/agent/test_agent_pending.py::test_a_change_of_control_since_the_proposal_invalidates_whatever_the_user_says`,
 `test_agent_pending_properties.py::test_a_reply_under_another_control_version_never_confirms`,
 `tests/integration/agent/test_agent_policies.py::test_10_a_change_of_control_since_the_proposal_voids_a_later_yes`,
 `tests/unit/agent/test_agent_conversation.py::test_closing_time_hands_a_human_conversation_back_and_drops_the_pending_action`.
@@ -275,22 +311,47 @@ Tests: `tests/unit/agent/test_agent_pending.py::test_a_change_of_control_since_t
 confirmación del usuario. No dice en qué orden ni qué pasa si el operador edita el texto.
 
 **Por qué es un problema.** Sin un orden, el operador podría aprobar parámetros que el usuario nunca vio, o
-el usuario confirmar algo que el operador después cambió.
+el usuario confirmar algo que el operador después cambió. Y en SUGGEST la propia pregunta de confirmación
+es un mensaje al cliente, que no puede salir sin aprobación.
 
-**Resolución.** El orden es: confirmación del usuario, aprobación del operador, ejecución. Si el operador edita
-los parámetros, cambia el fingerprint de la acción pendiente (ADR-0001) y el usuario debe confirmar de nuevo.
-La pregunta de confirmación es en sí un borrador: no llega al cliente hasta que el operador la aprueba.
-`control` expresa solo la parte de estado: en SUGGEST, `effects_need_operator_approval` es verdadero, y solo ahí.
+**Resolución.** Cinco pasos en un orden estricto:
 
-**Dónde.** `capabilities.py` (`Capabilities.effects_need_operator_approval`).
+1. El modelo propone `crear_reclamo`: queda un borrador CONFIRMATION_REQUEST con la acción, y **nada
+   pendiente**. La propiedad de la compuerta ("el cliente vio estos valores exactos") solo vale cuando la
+   pregunta se entregó de verdad.
+2. El operador aprueba ese borrador: la pregunta de plantilla se entrega y recién ahí se propone la acción,
+   con el turno y la versión de control de ese momento. La respuesta del cliente es necesariamente un turno
+   posterior.
+3. El "sí" estricto del cliente produce un `Confirmed`; como `effects_need_operator_approval` es verdadero,
+   no se ejecuta nada: queda un único borrador ACTION_APPROVAL que lo contiene. Un "sí" repetido no pide
+   dos veces; un "no" o cualquier otro mensaje lo descarta.
+4. El operador lo aprueba: `execute_confirmed`, `mark_registered` y la plantilla `registered`. Ese mensaje
+   es la consecuencia directa y determinista de la decisión del operador, así que cuenta como aprobado por
+   él; lo mismo vale para `not_approved`, que se envía si el operador lo rechaza (y la acción se cancela).
+5. Salir de SUGGEST por cualquier evento descarta los borradores e invalida la acción, así que ni una
+   pregunta ni una aprobación se pueden aprobar después.
+
+No hay un comando para editar los parámetros. Un operador que quiere otros valores rechaza, y el cliente
+los vuelve a decir y a confirmar; es más rígido, pero no abre otra entrada al efecto. Una aprobación también
+se rechaza (y su borrador se descarta) si la acción que contiene ya no es la pendiente o si la versión de
+control cambió desde el "sí", aunque haya sido por un intento rechazado: la lectura conservadora de F10.
+
+**Dónde.** `capabilities.py` (`Capabilities.effects_need_operator_approval`),
+`agent/application/conversation.py` (`_propose`, `_execute`, `_ask_for_approval`, `_forget_approvals`),
+`agent/application/operator.py` (`approve_draft`, `reject_draft`) y `agent/domain/drafts.py`.
 
 **Tests.** `test_capabilities.py::test_a_complaint_needs_the_operator_only_while_the_operator_reviews`,
-`test_a_suggested_reply_is_never_sent_without_approval`.
+`tests/integration/agent/test_agent_control_scenarios.py::test_2_in_suggest_a_complaint_needs_the_customer_and_then_the_operator`,
+`test_2_rejecting_the_approval_registers_nothing_and_says_so`, `test_2_rejecting_the_question_leaves_nothing_pending`,
+`test_2_a_repeated_yes_asks_the_operator_once`, `test_2_a_customer_who_says_something_else_voids_the_approval`,
+`test_10_the_two_approvals_interleaved_with_anything_keep_every_rule` (Hypothesis: una fila solo existe
+después de la confirmación del cliente y, en SUGGEST, de la aprobación del operador),
+`tests/unit/agent/test_agent_operator.py` (falla de la ejecución, carrera perdida después del efecto, versión
+de control cambiada).
 
-**Estado.** ✅ indicador de capacidad en `control`. ✅ el turno nunca ejecuta un reclamo en SUGGEST: un "sí"
-del cliente no registra nada, se responde (como borrador) que no está disponible y no queda nada pendiente
-(`tests/unit/agent/test_agent_conversation.py::test_in_suggest_a_confirmed_complaint_waits_for_the_operator_and_nothing_stays_pending`).
-⏳ la aprobación del operador, y con ella la ejecución en SUGGEST, son del bloque siguiente.
+**Estado.** ✅ implementado. Si una carrera perdida repite una aprobación después de que el efecto corrió,
+no lo corre de nuevo; si en esa ventana la conversación cambió de manos, el registro queda guardado y la
+bandeja del operador dice que no se anunció, porque el estado ya no deja enviar nada.
 
 ## F12. Los borradores no deben filtrarse al salir de SUGGEST
 
@@ -302,18 +363,25 @@ operador tomó la conversación, o se bloqueó por abuso) llegaría al cliente f
 un bloqueo.
 
 **Resolución.** Toda transición que sale de SUGGEST emite `DISCARD_UNAPPROVED_DRAFTS`. Entrar a SUGGEST no lo
-emite.
+emite. El agente lo ejecuta en un solo lugar (`apply_effects`), tanto en el turno como en los comandos: cada
+borrador pendiente pasa a DISCARDED, queda en el registro de la conversación con quién (SYSTEM) y cuándo, y no
+se puede aprobar ni enviar. Un borrador se decide una sola vez, solo un operador o un supervisor lo decide, y
+solo mientras la conversación sigue en SUGGEST.
 
-**Dónde.** `machine.py` (`effects_for`).
+**Dónde.** `machine.py` (`effects_for`), `agent/domain/effects.py`, `agent/domain/drafts.py` y
+`agent/application/operator.py` (`drafts`, `approve_draft`, `reject_draft`).
 
 **Tests.** `test_effects.py::test_leaving_suggest_discards_the_drafts_nobody_approved`,
 `test_entering_suggest_discards_nothing`,
-`test_every_rule_carries_exactly_the_effects_of_record[SUGGEST+...]` (las cinco filas de SUGGEST),
-`test_conversation.py::test_leaving_suggest_at_closing_time_discards_the_drafts`.
+`test_effects.py::test_every_rule_carries_exactly_the_effects_of_record[SUGGEST+...]` (las cinco filas de SUGGEST),
+`test_conversation.py::test_leaving_suggest_at_closing_time_discards_the_drafts`,
+`tests/unit/agent/test_agent_effects.py`, `tests/unit/agent/test_agent_drafts.py`,
+`tests/integration/agent/test_agent_control_scenarios.py::test_2_releasing_to_auto_discards_the_drafts_for_good`
+(con una pregunta y con una aprobación pendientes), `test_2_only_the_team_decides_on_drafts`, y las dos
+propiedades `test_10_*` (en SUGGEST no llega al cliente nada más que borradores aprobados y plantillas que
+siguen a una decisión del operador).
 
-**Estado.** ✅ efecto emitido por `control`. En SUGGEST el turno ya entrega la respuesta como borrador
-(`Outbound(kind="draft")`) y no la agrega al historial. ⏳ todavía no hay una bandeja de borradores que
-descartar: el turno registra el efecto en `TurnResult.events` y la bandeja llega con el bloque del operador.
+**Estado.** ✅ implementado.
 
 ## F13. "Ejecuta acciones" en HUMAN es ambiguo
 
@@ -353,7 +421,9 @@ de la conversación se deriva de él, por lo que ambos no pueden divergir.
 `test_conversation_properties.py::test_replaying_the_applied_records_from_auto_reproduces_the_state` y
 `test_a_refused_attempt_never_changes_the_state`.
 
-**Estado.** ✅ implementado en `control`.
+**Estado.** ✅ implementado en `control`. ✅ cada comando del operador o del supervisor deja un registro con
+los cinco campos, o uno REJECTED con su código, y el registro se guarda con la conversación aunque el comando
+falle (`tests/integration/agent/test_agent_control_scenarios.py::test_9_every_command_leaves_a_record_with_the_five_fields`).
 
 ## F15. "Nadie responde" en BLOCKED es ambiguo para los mensajes entrantes
 
@@ -376,7 +446,12 @@ ni envía nada en HUMAN ni en BLOCKED
 (`tests/integration/agent/test_agent_policies.py::test_17_a_state_that_generates_no_reply_never_calls_the_model`).
 Decisión adicional de este diseño: en el turno en que una señal determinista lleva la conversación a HUMAN o a
 BLOCKED, el sistema manda una única plantilla de aviso (traspaso o suspensión); después, silencio
-([ADR-0003](design/adr/0003-turno-del-agente.md)).
+([ADR-0003](design/adr/0003-turno-del-agente.md)). ✅ con comandos reales: dos insultos bloquean, los mensajes
+siguientes quedan guardados sin llamar al modelo, el `unblock` y el `release` de un operador se rechazan y
+quedan como REJECTED, y el `unblock` de un supervisor vuelve a AUTO y pone en cero los avisos de abuso
+(`tests/integration/agent/test_agent_control_scenarios.py::test_3_only_a_supervisor_brings_a_blocked_conversation_back`).
+El abuso en HUMAN deja una entrada en la bandeja del operador, que decide si bloquea
+(`test_3_abuse_while_a_person_answers_reaches_the_operator_inbox_and_the_operator_blocks`).
 
 ## F16. Carrera entre un takeover y una llamada al LLM en curso
 
@@ -397,7 +472,11 @@ guardado ahora. El guardado usa concurrencia optimista (`ConversationStore.save(
 que una escritura entre la relectura y el guardado también termina en descarte.
 
 **Tests.** `tests/integration/agent/test_agent_policies.py::test_16_an_answer_generated_while_control_changed_hands_is_dropped`
-(un paso del modelo guionado hace el takeover mientras "responde"), `tests/unit/agent/test_agent_memory_store.py`.
+(un paso del modelo guionado hace el takeover mientras "responde"),
+`tests/integration/agent/test_agent_control_scenarios.py::test_6_a_takeover_while_the_model_answers_drops_the_answer`
+(el mismo caso, a través de `OperatorService.takeover`), `tests/unit/agent/test_agent_memory_store.py`, y
+`tests/unit/agent/test_agent_operator.py::test_a_command_that_loses_a_race_is_replayed_on_the_fresh_state`
+(el comando que pierde la carrera se repite sobre el estado nuevo, sin pisar lo que no leyó).
 
 **Estado.** ✅ implementado en el turno del agente.
 
@@ -681,8 +760,14 @@ de inyección (`agent/domain/signals.py`) solo cuenta y nunca bloquea.
 
 ## Supuestos
 
-- **La franja de atención humana es configuración.** La consigna no la define, por lo que `BusinessHours` se
-  inyecta desde la raíz de composición y el dominio no tiene ningún valor por defecto. Se evalúa en la zona
-  horaria del comercio, `opens` es inclusivo, `closes` es exclusivo y no se admiten franjas que crucen la
-  medianoche.
+- **La franja de atención humana es configuración, y su valor por defecto es un supuesto.** La consigna no la
+  define. `HUMAN_HOURS_START`, `HUMAN_HOURS_END` y `HUMAN_HOURS_DAYS` (`shared/config.py`) valen por defecto
+  de lunes a viernes de 09:00 a 18:00, un horario comercial típico elegido sin información del comercio.
+  `bootstrap.build_business_hours` arma la guarda; el dominio de `control` no tiene ningún valor por defecto.
+  Se evalúa en la zona horaria del comercio, el inicio es inclusivo, el fin es exclusivo y no se admiten
+  franjas que crucen la medianoche.
+- **Un comando del equipo sobre una conversación que no existe la crea.** Un `takeover` de un identificador
+  nuevo deja una conversación en HUMAN sin mensajes; un comando rechazado deja su registro REJECTED.
+- **El desbloqueo de un supervisor reinicia los avisos de abuso.** Si no, el insulto siguiente volvería a
+  bloquear al instante, aunque el supervisor ya haya revisado el caso.
 - **El estado inicial de toda conversación es AUTO.** La consigna no lo dice; el registro vacío equivale a AUTO.
