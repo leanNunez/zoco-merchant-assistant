@@ -110,3 +110,20 @@ producción.
 - `tests/integration/evaluation/test_conversation_results_drift.py`: los resultados versionados son
   los que produce el código actual.
 - `tests/integration/evaluation/test_conversation_naive.py`: nada en `src/` importa la evaluación.
+
+## Actualización (2026-10-24): qué cambió después de este ADR
+
+- **Son 34 escenarios, no 24:** 26 de la partición `dev` (S01 a S22 y X1 a X4) y 8 de `heldout` (H01 a H08),
+  3 repeticiones, 102 corridas por modo guionado ([ADR-0008](0008-primera-corrida-real-y-lo-que-cambio.md)).
+- **S20 dejó de ser una limitación conocida.** La compuerta calibrada
+  ([ADR-0007](0007-recuperacion-del-agente-y-umbral.md)) responde "¿Cómo transfiero una entrada?"; hoy S20 es
+  un caso de regresión que pasa, y `scripted` cumple 102 de 102.
+- **El prompt de sistema tiene candado.** Se retiene toda respuesta con 40 caracteres seguidos del prompt
+  (ADR-0007), y `no_system_prompt_leak` es un LOCK. Lo mismo vale para la nota de plataforma
+  (`no_platform_note_visible`, ADR-0008). Las demás debilidades del párrafo de consecuencias siguen:
+  un documento envenenado se puede citar y la pregunta de confirmación muestra valores escritos por el modelo.
+- **Ya existe una corrida `live`:** `gpt-4o-mini`, ocho corridas guardadas y la historia del ajuste en el ADR-0008.
+- **Con el agente inseguro fallan 228 de 1197 checks LOCK** (no 165 de 774), por los escenarios agregados.
+- **Los resultados guardados de `live*` no se reproducen byte a byte** (el modelo no es determinista);
+  solo `scripted`, `null` y `naive` los vigila el test de deriva.
+

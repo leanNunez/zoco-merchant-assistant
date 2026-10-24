@@ -102,3 +102,24 @@ el formato ISO: un modelo que convierte "ayer" en `2026-10-22` por su cuenta pas
 - `tests/unit/agent/test_agent_dates.py`, `test_agent_pending.py`,
   `test_agent_pending_properties.py`: el guardia de fechas y la compuerta.
 - `tests/integration/agent/test_agent_bootstrap.py`: el modo degradado y el cableado real.
+
+## Actualización (2026-10-24): lo que cambió después de este ADR
+
+El orden de los siete pasos y la regla de que la compuerta corre antes del modelo siguen vigentes. Lo que
+describe este ADR y ya no es así:
+
+- **El "sí" estricto admite palabras neutras** (artículos, "mi", "reclamo", "registra", "eso", "gracias"):
+  "sí, confirmo el reclamo" confirma. Lo que podría cambiar lo aceptado ("pero", "otro", "cambia", "motivo",
+  "no") sigue invalidando la propuesta ([ADR-0007](0007-recuperacion-del-agente-y-umbral.md)).
+- **El modelo se entera de que una propuesta se retiró.** Cuando la compuerta retira la acción pendiente, el
+  código escribe una nota de plataforma en el historial antes de la próxima llamada al modelo
+  ([ADR-0008](0008-primera-corrida-real-y-lo-que-cambio.md), `agent/domain/notes.py`).
+- **Los controles de salida del paso 6 son más** que los tres listados: además se retiene la respuesta que
+  copia 40 caracteres seguidos del prompt de sistema, se retiene la que anuncia un registro, se revisa toda
+  mención `DOC-NN` y un monto sin respaldo se marca ([ADR-0004](0004-control-y-operadores.md),
+  [ADR-0007](0007-recuperacion-del-agente-y-umbral.md)).
+- **El modo degradado se decide por consulta** además de por arranque: si embeber una consulta nueva falla,
+  esa consulta se responde con BM25 y el turno registra `search_degraded:<código>`.
+- La cifra de "18 situaciones de ataque" es la de los escenarios numerados de `test_agent_policies.py`; la
+  evaluación de conversaciones tiene hoy 34 escenarios (README, Parte 4).
+

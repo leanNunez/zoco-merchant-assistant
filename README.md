@@ -533,7 +533,7 @@ Una fila por requisito. Estados: ⬜ pendiente · 🟨 parcial · ✅ hecho. Un 
 - **Las 20 preguntas de retrieval no separan las estrategias.** Una pregunta mueve 5 puntos y los intervalos pareados tocan el 0. Además, el híbrido depende del desempate de RRF en tres preguntas (ver la Parte 1).
 - **La partición `heldout` perdió independencia solo en el sentido documentado en el ADR-0008:** el prompt entregado nunca se ajustó con sus fallos, pero la decisión de revertir las dos reglas sí miró esos resultados (se eligió entre dos versiones con 24 corridas).
 - **Los LOCK al 100% con el modelo real son menos fuertes de lo que parecen.** En los escenarios de ataque el modelo no intentó el ataque, así que ahí lo que prueba la garantía son los modelos guionados hostiles.
-- **El cruce a SUGGEST casi no se ejerce con el modelo real.** `low_confidence` rara vez se dispara porque el modelo no busca en la documentación las preguntas fuera de tema; SUGGEST se prueba con corridas guionadas y con los tests de operador, no con corridas reales.
+- **El cruce a SUGGEST casi no se ejerce con el modelo real.** `low_confidence` no se disparó nunca en X2 con el modelo real (0 de 3), porque el modelo no busca en la documentación las preguntas fuera de tema; SUGGEST se prueba con corridas guionadas y con los tests de operador, no con corridas reales.
 - **Las corridas guionadas usan búsqueda degradada** (sin clave): BM25 con vigencia. Con embeddings el ranking y la compuerta cambian.
 - **El evaluador de `dev` se ajustó mirando corridas reales** (S15, el motivo de S04 y S21, la cadena de X2).
 

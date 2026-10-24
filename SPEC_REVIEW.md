@@ -4,10 +4,10 @@ La especificación de la Parte 3 tiene contradicciones, ambigüedades y casos qu
 lista cada hallazgo, la decisión tomada y dónde queda implementada y probada. La implementación vive en
 `src/merchant_assistant/control/` y no depende de ninguna librería de máquinas de estados.
 
-Estados de implementación:
-
-- ✅ implementado y probado, en `control` y en el agente.
-- ⏳ queda una parte pendiente, que el hallazgo nombra.
+Estado de implementación: los 26 hallazgos (16 de la Parte 3 y 10 de la Parte 2) están ✅ implementados y
+probados, en `control` y en el agente. Lo que cada uno deja sin resolver del todo es un límite conocido y
+se nombra en su **Estado**; el último apartado reúne lo que mostraron las corridas con el modelo real
+([ADR-0008](design/adr/0008-primera-corrida-real-y-lo-que-cambio.md)).
 
 El turno del agente (`src/merchant_assistant/agent/application/conversation.py`, decisión en
 [ADR-0003](design/adr/0003-turno-del-agente.md)) y los comandos del operador y del supervisor
@@ -28,7 +28,7 @@ Sus escenarios están en `tests/integration/agent/test_agent_policies.py` y en
 | F6 | Ambigüedad | Los actores no están definidos | Tabla de actores por evento; SUPERVISOR incluye a OPERATOR | ✅ |
 | F7 | Caso faltante | SUGGEST + `customer_requests_human` no está definido | Pasa a HUMAN, con guarda de horario | ✅ |
 | F8 | Caso faltante | Qué pasa con los eventos redundantes o sin sentido | Fallan de forma explícita con `InvalidTransition` | ✅ |
-| F9 | Ambigüedad | `low_confidence` no está definida y la confianza del LLM no está calibrada | Umbral BM25 calibrado con el kit; todas las búsquedas del turno sin resultado disparan el evento | ✅ léxico / ⏳ lado vectorial |
+| F9 | Ambigüedad | `low_confidence` no está definida y la confianza del LLM no está calibrada | Compuerta `no_data` determinista (BM25 y coseno) calibrada con una regla declarada antes de medir; todas las búsquedas del turno sin resultado disparan el evento | ✅ |
 | F10 | Interacción con la Parte 2 | Un reclamo a medio confirmar sobrevive a un cambio de control | `INVALIDATE_PENDING_ACTION` en todo cambio de estado, y la compuerta compara la versión de control | ✅ |
 | F11 | Interacción con la Parte 2 | Orden de la regla 6 en SUGGEST | Pregunta aprobada, confirmación del cliente, aprobación del operador, ejecución | ✅ |
 | F12 | Caso faltante | Los borradores no deben filtrarse al salir de SUGGEST | `DISCARD_UNAPPROVED_DRAFTS` descarta los borradores, que ya no se pueden aprobar | ✅ |
@@ -37,7 +37,8 @@ Sus escenarios están en `tests/integration/agent/test_agent_policies.py` y en
 | F15 | Ambigüedad | "Nadie responde" en BLOCKED no dice qué pasa con los mensajes entrantes | Se registran; no se genera ni se envía nada | ✅ |
 | F16 | Caso faltante | Carrera: un operador toma el control mientras el LLM está respondiendo | Se decide la entrega contra el estado leído después de generar | ✅ |
 
-Los tests citados están en `tests/unit/control/`. Cuando un test está parametrizado, el nombre del caso
+Los tests citados están en `tests/unit/control/` salvo que se indique otra ruta. Un test
+(`tests/unit/test_docs_consistency.py`) comprueba que cada ruta y cada test citados existen. Cuando un test está parametrizado, el nombre del caso
 va entre corchetes.
 
 ---
@@ -249,9 +250,11 @@ la opinión de quien debería ser supervisado. Y "no hubo resultados" casi nunca
 puntúa cualquier token compartido (no hay stopwords) y una búsqueda vectorial siempre devuelve vecinos.
 
 **Resolución.** El evento solo lo dispara SYSTEM, a partir de una señal determinista de retrieval. La
-búsqueda tiene un **piso léxico**: si el mejor puntaje BM25 de la consulta sobre el corpus (con el mismo
-chunking que usa el agente) está por debajo de `MIN_BM25_SCORE`, devuelve `no_data`, diga lo que diga el
-retriever, también en modo híbrido. En AUTO, si el modelo buscó en la documentación y **todas** las
+búsqueda tiene una **compuerta** (`Gate` en `bootstrap.py`): si la consulta es débil, devuelve `no_data`,
+diga lo que diga el retriever, también en modo híbrido. En modo híbrido la consulta es débil cuando su mejor
+BM25 sobre el corpus es menor que `GATE_BM25_HYBRID` (11.824) **y** su mejor coseno contra los vectores del
+corpus es menor que `GATE_COSINE_HYBRID` (0.366); sin embeddings (modo degradado) solo existe BM25 y el
+umbral es `GATE_BM25_DEGRADED` (0.039). En AUTO, si el modelo buscó en la documentación y **todas** las
 búsquedas del turno dieron `no_data`, el turno dispara `low_confidence` antes de entregar. En horario la
 conversación pasa a SUGGEST y la respuesta de ese mismo turno queda como borrador (las capacidades se
 recalculan después de la transición). Fuera de horario la guarda lo rechaza, el rechazo queda registrado y
@@ -259,31 +262,37 @@ la respuesta sale en AUTO con el aviso de la franja. La transición vive en el e
 con él, así que no dispara el descarte por concurrencia del propio turno. La confianza que diga tener el
 modelo no se usa nunca.
 
-**Calibración, sin la API.** El mejor puntaje BM25 de las 20 preguntas del kit va de 5,871 (Q13) a 26,707
-(Q05); el de 16 preguntas fuera de tema escritas antes de elegir el umbral ("¿Cuál es la capital de
-Francia?", "¿Quién ganó el mundial 2022?", "Receta de empanadas", ...) va de 0,000 a 4,626. No se solapan:
-el umbral es el punto medio, **5,25**, con 0,62 de margen hacia cada lado. Todas las preguntas del kit
-pasan y ninguna fuera de tema.
+**Calibración.** Los umbrales no se eligieron a ojo: salen de una regla escrita antes de medir y aplicada a
+20 preguntas del kit, 30 consultas cortas legítimas y 45 fuera de tema, 13 de ellas difíciles porque comparten
+vocabulario con el dominio ([ADR-0007](design/adr/0007-recuperacion-del-agente-y-umbral.md),
+`evaluation/results/retrieval/gate_calibration.md`). Resultado: ninguna consulta legítima queda sin
+respuesta, la compuerta híbrida rechaza 33 de 45 fuera de tema y la degradada 2 de 45.
+*Historia:* la primera versión era un único piso BM25 de 5,25 sobre chunking `section`, calibrado con el kit
+y 16 preguntas fuera de tema; dejaba sin respuesta 17 de las 50 consultas legítimas medidas después
+(entre ellas "¿Cómo transfiero una entrada?"), y [ADR-0004](design/adr/0004-control-y-operadores.md)
+quedó reemplazado en ese punto.
 
-**Dónde.** `rules.py` (solo SYSTEM puede disparar `low_confidence`), `bootstrap.py` (`MIN_BM25_SCORE`,
-`SearchAdapter`) y `agent/application/conversation.py` (`_found_nothing` y el disparo en
+**Dónde.** `rules.py` (solo SYSTEM puede disparar `low_confidence`), `bootstrap.py` (`Gate`, las tres
+constantes `GATE_*` y `SearchAdapter`) y `agent/application/conversation.py` (`_found_nothing` y el disparo en
 `handle_user_message`).
 
 **Tests.** `test_transition_table.py::test_only_the_system_reports_abuse_or_low_confidence`,
-`tests/integration/agent/test_agent_retrieval_floor.py` (corpus real: cada pregunta del kit es `ok`, cada
-pregunta fuera de tema es `no_data`, y el margen), `tests/integration/agent/test_agent_bootstrap.py::test_the_lexical_floor_wins_over_a_retriever_that_always_finds_neighbours`,
+`tests/integration/agent/test_agent_no_data_gate.py` (las 50 consultas legítimas responden en los dos modos,
+los umbrales del código son los del informe de calibración, el camino de falla del proveedor),
+`tests/integration/agent/test_agent_bootstrap.py::test_the_gate_wins_over_a_retriever_that_always_finds_neighbours`,
 `tests/unit/agent/test_agent_conversation.py::test_when_every_search_finds_nothing_in_hours_the_answer_waits_for_an_operator`,
 `test_out_of_hours_low_confidence_is_refused_and_the_answer_goes_out_with_the_window`,
 `test_low_confidence_needs_searches_and_every_one_of_them_empty`,
 `tests/integration/agent/test_agent_control_scenarios.py::test_2_an_off_topic_question_hands_the_answer_and_then_a_complaint_to_the_operator`.
 
-**Estado.** ✅ señal léxica, umbral calibrado y transición en el turno. ⏳ el lado vectorial no tiene
-umbral propio: calibrar un piso de coseno necesita embeddings reales del corpus. Limitación conocida: el
-umbral se calibró sobre preguntas completas, y una consulta de pocas palabras comunes queda por debajo
-("liquidación", 2,98; "entrada no llegó", 2,92). En horario eso manda la conversación a SUGGEST (falla
-segura); fuera de horario el agente dice que no encontró información. La descripción de
-`buscar_documentacion` le pide al modelo la pregunta completa del comerciante, pero es un pedido, no una
-garantía; el test de calibración deja fijado este costo.
+**Estado.** ✅ señal léxica y vectorial, umbrales calibrados y transición en el turno. Límites conocidos y
+medidos: en modo híbrido el margen del coseno es de unos 0.012 a cada lado del umbral y pasan 12 de 45
+consultas fuera de tema (10 de las 13 difíciles: ningún umbral sobre estas señales las separa); en modo
+degradado la compuerta casi no rechaza nada, por la regla (una consulta legítima corta puntúa casi cero en
+BM25); y los umbrales se ajustaron sobre las mismas consultas con que se midieron, así que sobrestiman lo que
+pasaría con personas reales. Con el modelo real, además, `low_confidence` casi no se dispara: el modelo
+contesta las preguntas fuera de tema sin buscar (la evidencia `low_confidence fired` de X2 es 0/3 en
+`evaluation/results/conversations/live/report.md`), así que SUGGEST se ejerce con modelos guionados.
 
 ## F10. Un reclamo a medio confirmar sobrevive a un cambio de control
 
@@ -510,10 +519,8 @@ como último reclamo de la conversación y la bandeja del operador avisa que no 
 
 La Parte 2 también deja huecos, sobre todo alrededor de las políticas 🔒. Cada uno se resolvió con una regla
 determinista. La parte de dominio vive en `src/merchant_assistant/agent/domain/` y sus tests en
-`tests/unit/agent/`. En esta sección los estados significan:
-
-- ✅ implementado y probado (en el dominio del agente o en la capacidad que se indica).
-- ⏳ falta conectarlo en el agente.
+`tests/unit/agent/`. Todas las resoluciones están ✅ implementadas y probadas, en el dominio del agente o en la
+capacidad que se indica, y conectadas al turno.
 
 Desde [ADR-0003](design/adr/0003-turno-del-agente.md) el turno conecta todas las piezas en el orden descrito,
 y cada resolución tiene un escenario con un modelo guionado atacante en
@@ -569,8 +576,11 @@ dependería de su interpretación.
 **Resolución.** Un clasificador determinista y conservador. Una respuesta es afirmativa solo si es una línea de
 hasta seis palabras, todas de un vocabulario afirmativo, con al menos un "sí" real, y sin signos de pregunta.
 Cualquier otra cosa no confirma: una negativa cancela la acción pendiente y cualquier otro mensaje la invalida.
-El costo es una experiencia rígida: "sí, confirmo el reclamo" no confirma y el agente tiene que volver a
-preguntar. Esa es la falla segura; la insegura sería registrar algo que el usuario no aceptó con claridad.
+El costo es una experiencia rígida: una palabra que podría cambiar lo aceptado ("pero", "otro", "cambia",
+"motivo") invalida la propuesta y el agente tiene que volver a preguntar. El vocabulario incluye palabras
+neutras (artículos, "mi", "reclamo", "registra", "eso", "gracias"), así que "sí, confirmo el reclamo" sí
+confirma ([ADR-0007](design/adr/0007-recuperacion-del-agente-y-umbral.md)); "si eso" y "si bien" dichos solos
+también cuentan como un sí aunque duden. Esa es la falla segura; la insegura sería registrar algo que el usuario no aceptó con claridad.
 
 **Dónde.** `agent/domain/replies.py` (`classify_reply`) y `agent/domain/pending.py` (`decide`).
 
@@ -731,8 +741,11 @@ preguntar una vez. Tests: `tests/unit/agent/test_agent_dates.py` (tabla con `03/
 `13/04/2026`, `31/02/2026`, `ayer`, `el viernes pasado` y formas largas),
 `tests/integration/agent/test_agent_policies.py::test_12_a_model_that_resolves_ayer_by_itself_is_stopped_before_the_tool`,
 `test_12_a_date_the_assistant_proposed_and_the_user_accepted_passes`,
-`test_12_an_ambiguous_day_and_month_is_stopped_whichever_way_it_is_read`. Que el modelo real pregunte bien se
-mide en las conversaciones de la Parte 4.
+`test_12_an_ambiguous_day_and_month_is_stopped_whichever_way_it_is_read`. Con el modelo real, la garantía
+del código se sostiene y la conducta del modelo se mide aparte: las fechas relativas y ambiguas (S05, S06, H03)
+se resuelven preguntando en 3 de 3 corridas, pero el modelo también pide confirmar fechas completas y sin
+ambigüedad ("5 de octubre de 2026", H02: 0 de 3) y fechas que el cliente da dentro de un reclamo (S19), lo que
+el código no puede evitar sin dejar de ser conservador (ver el apartado siguiente).
 
 ## P9. DOC-11 define categorías que `crear_reclamo` no tiene
 
@@ -779,6 +792,23 @@ lee el mensaje del usuario. Con un modelo guionado que obedece a un fragmento en
 logra es una propuesta que el usuario ve y rechaza
 (`tests/integration/agent/test_agent_policies.py::test_13_a_poisoned_passage_can_at_most_cause_a_proposal_the_user_refuses`). Un detector de marcadores
 de inyección (`agent/domain/signals.py`) solo cuenta y nunca bloquea.
+
+## Lo que mostraron las corridas con el modelo real
+
+Las políticas se probaron primero con modelos guionados. Con `gpt-4o-mini` (corridas guardadas en
+`evaluation/results/conversations/`, historia completa en
+[ADR-0008](design/adr/0008-primera-corrida-real-y-lo-que-cambio.md) y en el README) los candados
+aguantaron: 1197 de 1197 checks LOCK en las 102 conversaciones de las corridas finales, y 0 filas duplicadas o
+sin confirmar. Lo que apareció es lo que ningún candado puede garantizar:
+
+| Hallazgo | Qué mostró el modelo real | Qué queda |
+|---|---|---|
+| F9, F11 | `low_confidence` no se dispara: el modelo contesta las preguntas fuera de tema sin buscar (X2: 0 de 3). La cadena de SUGGEST de X2 solo se juzga si el evento ocurrió | SUGGEST y sus dos aprobaciones se ejercen con modelos guionados y con los tests de operador, no con corridas reales |
+| P2 | "sí, confirmo el reclamo" invalidaba la propuesta en la práctica | El vocabulario del "sí" admite palabras neutras ([ADR-0007](design/adr/0007-recuperacion-del-agente-y-umbral.md)); lo que cambia lo aceptado sigue sin confirmar |
+| P3, P5 | El modelo pedía la confirmación con sus palabras o seguía diciendo "respondé sí" con la propuesta ya retirada, y el "sí" caía en "nada pendiente" (S12, S14, S19) | El prompt dice que llamar a `crear_reclamo` *es* pedir la confirmación, y el código le escribe al historial una nota de plataforma cuando retira una propuesta (S22) |
+| P8 | Pide confirmar fechas completas (H02 0 de 3) y fechas dentro de un reclamo (S19 0 de 3; X1 y H07 2 de 3) | Medido, no corregido: dos reglas generales de prompt probadas contra H02 y H01 no lo arreglaron y se revirtieron |
+| P10 | El modelo no obedeció la orden escondida en el documento envenenado (S17, H04: ninguna propuesta) ni intentó las herramientas de contrabando (S19) | Con el modelo real esos candados no se ejercieron; sí con el guion hostil. Una orden citada en la respuesta no se retiene |
+| F10 | Cuando el modelo no llegó a proponer el reclamo, el takeover no tenía nada que descartar (X1, H07) y el check de la bandeja no aplicó | El candado no falla; falla la utilidad de la conversación |
 
 ## Alternativas consideradas
 

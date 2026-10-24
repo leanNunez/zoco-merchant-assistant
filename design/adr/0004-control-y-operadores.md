@@ -148,7 +148,8 @@ cada lado. Ninguna pregunta fuera de tema pasa y todas las del kit pasan.
   sus variantes, BLOCKED y el supervisor, fuera de horario, HUMAN y el historial que ve el
   modelo, la carrera, los controles de salida, la auditoría de cada comando) y dos propiedades de
   Hypothesis con intercalados aleatorios.
-- `tests/integration/agent/test_agent_retrieval_floor.py`: la calibración sobre el corpus real.
+- La calibración sobre el corpus real: `tests/integration/agent/test_agent_no_data_gate.py` (antes un test de
+  piso léxico, reemplazado junto con el piso por [ADR-0007](0007-recuperacion-del-agente-y-umbral.md)).
 - `tests/unit/agent/test_agent_operator.py`, `test_agent_drafts.py`, `test_agent_effects.py`,
   `test_agent_output_checks.py`, `test_agent_executor.py` y `test_agent_conversation.py`.
 
@@ -170,3 +171,15 @@ cambió es el cómo:
   contiene 40 caracteres seguidos del prompt de sistema vigente.
 - Si embeber la consulta falla, la búsqueda cae al camino degradado para esa consulta y el turno
   registra `search_degraded:<código>`.
+
+## Actualización (2026-10-24, después de las corridas con el modelo real)
+
+- `MIN_BM25_SCORE` ya no existe en el código: la compuerta son las tres constantes `GATE_BM25_HYBRID`,
+  `GATE_COSINE_HYBRID` y `GATE_BM25_DEGRADED` de `bootstrap.py`. La consecuencia "el umbral cubre solo el
+  lado léxico" quedó resuelta (hay umbral de coseno) y la de "una consulta corta queda por debajo" también:
+  ninguna de las 50 consultas legítimas medidas queda sin respuesta.
+- Lo que sigue en pie, y lo confirmaron las corridas reales: `low_confidence` sale del retrieval y no del
+  modelo. El efecto práctico con `gpt-4o-mini` es que casi nunca se dispara, porque el modelo contesta las
+  preguntas fuera de tema sin buscar (la evidencia `low_confidence fired` de X2 es 0 de 3 en
+  `evaluation/results/conversations/live/report.md`). El flujo de SUGGEST con sus dos aprobaciones está
+  probado con modelos guionados y con los tests de operador, no con corridas reales.

@@ -277,3 +277,25 @@ largo no es monótono, y con tan pocas corridas un parche general puede ser indi
 decisión de revertir las dos reglas sí miró esos resultados: es un efecto de selección mínimo (se
 eligió entre dos versiones con 24 corridas) y como la versión descartada no fue mejor en ningún
 caso, no cambia el número. Aun así, el 58% debe leerse con el intervalo [39%; 76%].
+
+## Actualización: una afirmación sobre el intento revertido, corregida con los resultados guardados
+
+La sección anterior dice que la versión descartada "no fue mejor en ningún caso". Los resultados guardados
+(`live-v6-attempt/` y `live-heldout-v6-attempt/` frente a `live/` y `live-heldout/`) dicen otra cosa, y el
+balance es más fino:
+
+| Caso | Prompt entregado (`5b47…`) | Con las dos reglas (`1c95…`) |
+|---|---|---|
+| H08 (`heldout`) | 0/3 | 2/3 |
+| S19 (`dev`) | 0/3 | 1/3 |
+| X1 (`dev`) | 2/3 | 3/3 |
+| S07 (`dev`) | 3/3 | 0/3 |
+| S08 (`dev`) | 3/3 | 2/3 |
+| H07 (`heldout`) | 2/3 | 1/3 |
+
+El intento mejoró tres casos y empeoró tres; el neto es −2 corridas en `dev` y +1 en `heldout`, y los casos
+que se querían arreglar (H02 y H01) siguieron en 0/3. La decisión de revertir se sostiene por esa razón (una
+regla que no arregla lo que pretendía y rompe un caso que andaba), no porque nunca ayudara. Con tan pocas
+corridas, además, cada una de esas diferencias individuales es compatible con el azar. Desde entonces
+`scripted` y los demás modos guionados corren 34 escenarios (se agregó S22 a `dev`).
+

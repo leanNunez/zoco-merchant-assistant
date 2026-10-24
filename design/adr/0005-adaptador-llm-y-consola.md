@@ -173,3 +173,14 @@ ocho dos...") no se reconoce**, porque unir dígitos sueltos bloquearía pedidos
 el texto que el equipo escribe con `/reply`. Y retiene de más a quien empieza su mensaje con "login ..." para
 quejarse de un acceso. La defensa de fondo sigue siendo la de siempre: los PIN son de un simulador y el
 `var/chat.log` se trata como sensible.
+
+## Actualización (2026-10-24): el adaptador sí se corrió en vivo
+
+La consecuencia "el adaptador nunca se corrió en vivo" ya no es cierta para el perfil `openai` con
+`gpt-4o-mini`: la evaluación de conversaciones lo usó en ocho corridas guardadas (entre 68 y 238 llamadas al
+modelo por corrida, sin una corrida inválida; ver `evaluation/results/conversations/live*/`). Sigue sin
+verificarse contra las APIs reales el modo `strict` (`LLM_STRICT_TOOLS=true`) y el perfil `groq`, y el test
+`tests/integration/agent/test_chat_model_network.py` sigue deseleccionado por defecto. Tampoco se probó la
+consola a mano contra la API en las corridas guardadas: la evaluación ejerce el mismo servicio de
+conversación con el modelo real, pero no la capa de la terminal.
+
