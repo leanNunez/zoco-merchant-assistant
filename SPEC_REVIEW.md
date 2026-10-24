@@ -780,6 +780,28 @@ logra es una propuesta que el usuario ve y rechaza
 (`tests/integration/agent/test_agent_policies.py::test_13_a_poisoned_passage_can_at_most_cause_a_proposal_the_user_refuses`). Un detector de marcadores
 de inyección (`agent/domain/signals.py`) solo cuenta y nunca bloquea.
 
+## Alternativas consideradas
+
+Un análisis independiente de la misma especificación coincidió en casi todo y difirió en dos decisiones de
+diseño. Se dejan registradas, con el motivo de no adoptarlas.
+
+- **F2: qué hacer con BLOCKED + `operator_release`.** Ese análisis propuso borrar la fila y exigir además el rol
+  SUPERVISOR en `supervisor_unblock`. Esta implementación conserva la fila y restringe su actor a SUPERVISOR.
+  El resultado de seguridad es el mismo: ningún operador sale de BLOCKED. La diferencia es observable solo en el
+  rechazo: un operador recibe `unauthorized_actor` en lugar de `invalid_transition`, que dice con más precisión
+  qué falló (el par existe, el actor no alcanza). Además la tabla de la especificación queda intacta, y la
+  corrección se limita a una columna.
+- **F5: cómo se sabe que es fuera de horario.** El mismo análisis propuso un booleano persistido `is_out_of_hours`
+  y un evento `business_hours_started` para volver a ponerlo en falso. Esta implementación deriva "fuera de
+  horario" del reloj en cada decisión (`BusinessHours.is_open`). Un indicador guardado puede divergir del reloj
+  real (una conversación inactiva durante la noche seguiría "cerrada" a las 10), y el evento inverso necesitaría
+  un proceso que lo dispare en todas las conversaciones, que nada en el sistema tiene.
+
+Una observación más de ese análisis: señaló una posible instrucción inyectada dentro del corpus. En el kit no
+hay ninguna. Lo que sí hay son frases en imperativo dirigidas al agente (por ejemplo DOC-04: "debe recomendar
+verificar el correo y luego abrir un reclamo"), que aquí se tratan como datos y no pueden habilitar ningún
+efecto (ver P10).
+
 ---
 
 ## Supuestos

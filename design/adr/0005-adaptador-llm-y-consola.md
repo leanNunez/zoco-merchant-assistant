@@ -157,3 +157,19 @@ proceso.
 - `tests/integration/cli/test_console_start.py`: el cartel DEMO, los PIN configurados que no se
   imprimen y el arranque sin clave (estado distinto de cero, sin traza).
 - `make arch`: el adaptador puede importar `openai`; `agent.domain` no; nada importa `cli`.
+
+## Actualización: guarda de credenciales en la vista de cliente
+
+La limitación de arriba ("quien escribe un PIN sin la barra lo manda como mensaje") era real y se cerró
+en parte. `ConsoleRuntime` lleva `protected_secrets` (los dos PIN y las claves efectivas del modelo y de los
+embeddings, fuera del repr). Antes de llamar al servicio, la vista de cliente retiene una línea que contiene
+alguno de esos valores (coincidencia exacta de subcadena, también sobre la forma NFKC) o que parece un login mal
+escrito (`login ...`, `login:`, o `/login` precedido de otros caracteres). Lo retenido no llega al modelo, no se
+guarda en el historial y no se escribe en el log; el cliente ve una línea neutra que le indica usar
+`/login <rol> <pin>`. Un número de seis dígitos que no es un PIN (un número de pedido) pasa.
+
+El límite es deliberado: **un secreto parafraseado o escrito con separadores (`482 913`, `4-8-2-9-1-3`, "cuatro
+ocho dos...") no se reconoce**, porque unir dígitos sueltos bloquearía pedidos legítimos. La guarda tampoco cubre
+el texto que el equipo escribe con `/reply`. Y retiene de más a quien empieza su mensaje con "login ..." para
+quejarse de un acceso. La defensa de fondo sigue siendo la de siempre: los PIN son de un simulador y el
+`var/chat.log` se trata como sensible.
