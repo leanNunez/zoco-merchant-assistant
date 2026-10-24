@@ -26,7 +26,7 @@ EFFECTS_OF_RECORD = [
     (H, Event.OPERATOR_RELEASE, Actor.OPERATOR, {INVALIDATE}),
     (H, Event.ABUSE_DETECTED, Actor.SYSTEM, {NOTIFY}),
     (H, Event.OPERATOR_BLOCK, Actor.OPERATOR, {INVALIDATE}),
-    (H, Event.OUT_OF_HOURS_STARTED, Actor.SYSTEM, {INVALIDATE}),
+    (H, Event.OUT_OF_HOURS_STARTED, Actor.SYSTEM, {INVALIDATE, NOTIFY}),
     (B, Event.OPERATOR_RELEASE, Actor.SUPERVISOR, {INVALIDATE}),
     (B, Event.SUPERVISOR_UNBLOCK, Actor.SUPERVISOR, {INVALIDATE}),
     (B, Event.OUT_OF_HOURS_STARTED, Actor.SYSTEM, set()),
@@ -68,6 +68,20 @@ def test_abuse_while_a_human_answers_notifies_without_invalidating() -> None:
 
     assert outcome.new == H
     assert outcome.effects == {NOTIFY}
+
+
+def test_closing_time_in_human_notifies_the_operator_and_hands_the_chat_back() -> None:
+    outcome = transition(H, Event.OUT_OF_HOURS_STARTED, Actor.SYSTEM, hours_open=False)
+
+    assert outcome.new == A
+    assert outcome.effects == {INVALIDATE, NOTIFY}
+
+
+@pytest.mark.parametrize("source", [A, S, B])
+def test_closing_time_outside_human_does_not_notify_the_operator(source: State) -> None:
+    outcome = transition(source, Event.OUT_OF_HOURS_STARTED, Actor.SYSTEM, hours_open=False)
+
+    assert NOTIFY not in outcome.effects
 
 
 def test_the_effects_cannot_be_changed_after_the_fact() -> None:

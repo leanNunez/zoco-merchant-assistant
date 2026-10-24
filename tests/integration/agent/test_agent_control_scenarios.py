@@ -567,6 +567,50 @@ def test_4_a_human_conversation_returns_to_the_agent_at_closing_time(tmp_path: P
     assert world.rows == 0
 
 
+def test_4_closing_time_leaves_the_operator_an_inbox_entry_when_it_ends_a_human_chat(
+    tmp_path: Path,
+) -> None:
+    world = make_world(tmp_path, [text_reply("Hola de nuevo.")])
+    world.team.takeover(CID, Actor.OPERATOR)
+    assert world.stored().inbox == ()
+    world.clock.instant = CLOSED
+
+    world.say("¿hay alguien?")
+
+    assert world.stored().control_state is State.AUTO
+    assert [(n.code, n.at, n.detail) for n in world.stored().inbox] == [
+        ("out_of_hours_started", CLOSED, "state=AUTO")
+    ]
+
+
+def test_4_the_entry_is_left_when_a_command_finds_the_window_closed(tmp_path: Path) -> None:
+    world = make_world(tmp_path)
+    world.team.takeover(CID, Actor.OPERATOR)
+    world.clock.instant = CLOSED
+
+    with pytest.raises(OperatorReplyNotAllowed):
+        world.team.operator_reply(CID, Actor.OPERATOR, "¿Seguís ahí?")
+
+    assert [(n.code, n.at) for n in world.stored().inbox] == [("out_of_hours_started", CLOSED)]
+
+
+@pytest.mark.parametrize("stage", ["auto", "suggest", "blocked"])
+def test_4_closing_time_leaves_no_entry_when_no_person_was_answering(
+    tmp_path: Path, stage: str
+) -> None:
+    world = make_world(tmp_path, [text_reply("Hola.")])
+    if stage == "suggest":
+        enter_suggest(world)
+    if stage == "blocked":
+        world.team.takeover(CID, Actor.OPERATOR)
+        world.team.block(CID, Actor.OPERATOR)
+    world.clock.instant = CLOSED
+
+    world.say("hola")
+
+    assert world.stored().inbox == ()
+
+
 def test_4_after_closing_an_operator_can_no_longer_write_to_the_customer(tmp_path: Path) -> None:
     world = make_world(tmp_path)
     world.team.takeover(CID, Actor.OPERATOR)

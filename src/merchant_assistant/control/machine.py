@@ -21,7 +21,7 @@ class Outcome:
 
 
 def effects_for(source: State, event: Event, target: State) -> frozenset[Effect]:
-    """What the application must do when this transition happens. One place, three rules."""
+    """What the application must do when this transition happens. One place, four rules."""
     effects: set[Effect] = set()
     if source != target:
         # A half-confirmed complaint must never survive a change of who controls the chat.
@@ -31,6 +31,10 @@ def effects_for(source: State, event: Event, target: State) -> frozenset[Effect]
         effects.add(Effect.DISCARD_UNAPPROVED_DRAFTS)
     if source == State.HUMAN and event == Event.ABUSE_DETECTED:
         # The state does not change (nothing to invalidate): the operator decides.
+        effects.add(Effect.NOTIFY_OPERATOR)
+    if source == State.HUMAN and event == Event.OUT_OF_HOURS_STARTED:
+        # Closing time takes the conversation away from a person: the operator must not find
+        # the agent answering a chat they believed was theirs, with no trace of why.
         effects.add(Effect.NOTIFY_OPERATOR)
     return frozenset(effects)
 

@@ -41,8 +41,10 @@ _EFFECT_MEANING = {
         "Descarta los borradores que nadie aprobó, para que no se envíen después.",
     ),
     Effect.NOTIFY_OPERATOR: (
-        "Abuso detectado en HUMAN",
-        "Avisa al operador, que decide si bloquea (`operator_block`). El estado no cambia.",
+        "Abuso detectado en HUMAN, o cierre de la franja de atención en HUMAN",
+        "Avisa al operador. Con abuso, el estado no cambia y el operador decide si bloquea "
+        "(`operator_block`). Con el cierre, la conversación vuelve a AUTO y el aviso es la "
+        "constancia de que el agente retomó el chat.",
     ),
 }
 

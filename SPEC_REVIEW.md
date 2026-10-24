@@ -22,7 +22,7 @@ Sus escenarios están en `tests/integration/agent/test_agent_policies.py` y en
 |---|---|---|---|---|
 | F1 | Contradicción | HUMAN + `abuse_detected` aparece dos veces con destinos distintos | Queda en HUMAN y avisa al operador; nuevo evento `operator_block` | ✅ |
 | F2 | Contradicción | BLOCKED + `operator_release` contradice la regla 4 | Se conserva la fila, restringida al supervisor | ✅ |
-| F3 | Contradicción | "Cualquiera + `out_of_hours_started`" desbloquearía por reloj | Cuatro filas explícitas; BLOCKED sigue BLOCKED | ✅ |
+| F3 | Contradicción | "Cualquiera + `out_of_hours_started`" desbloquearía por reloj | Cuatro filas explícitas; BLOCKED sigue BLOCKED; el cierre en HUMAN avisa al operador | ✅ |
 | F4 | Contradicción | La regla 3 solo se modela al entrar en AUTO | Guarda de horario abierto en tres eventos | ✅ |
 | F5 | Caso faltante | No hay evento ni regla de retorno al abrir la franja | El horario es una guarda, no un estado | ✅ |
 | F6 | Ambigüedad | Los actores no están definidos | Tabla de actores por evento; SUPERVISOR incluye a OPERATOR | ✅ |
@@ -99,11 +99,22 @@ AUTO → AUTO, SUGGEST → AUTO, HUMAN → AUTO y BLOCKED → BLOCKED. En AUTO y
 registrado pero no cambia el estado ni emite efectos. En SUGGEST y HUMAN devuelve el control al agente,
 porque a esa hora no hay un humano que responda (ver F4).
 
+Se conserva la regla literal de la especificación (HUMAN + `out_of_hours_started` → AUTO), pero no en
+silencio. Un operador que tomó la conversación cree que sigue siendo suya; al cerrar la franja, el agente
+la retoma y le responde al cliente sin que nadie lo haya dicho. Por eso esa fila también emite
+`NOTIFY_OPERATOR`: queda una entrada `out_of_hours_started` en el inbox (visible solo en la vista de equipo,
+con `state=AUTO`), además de invalidar la acción pendiente. Es información para el operador, no una acción:
+el estado ya cambió. En SUGGEST no se avisa, porque ahí el operador solo aprobaba borradores y no había
+tomado el chat.
+
 **Dónde.** `rules.py` y `machine.py` (`effects_for`).
 
 **Tests.** `test_transition_table.py::test_every_defined_rule_leads_to_its_target[BLOCKED+out_of_hours_started]`
 y el resto de las filas del evento, `test_effects.py::test_every_rule_carries_exactly_the_effects_of_record[AUTO+out_of_hours_started]`
-y `[BLOCKED+out_of_hours_started]`, `test_conversation.py::test_a_blocked_conversation_stays_blocked_through_closing_time`.
+y `[BLOCKED+out_of_hours_started]` (la fila HUMAN incluye `NOTIFY_OPERATOR`),
+`test_effects.py::test_closing_time_in_human_notifies_the_operator_and_hands_the_chat_back`,
+`test_conversation.py::test_a_blocked_conversation_stays_blocked_through_closing_time` y, de punta a punta con
+el `OperatorService` real, `test_agent_control_scenarios.py::test_4_closing_time_leaves_the_operator_an_inbox_entry_when_it_ends_a_human_chat`.
 
 **Estado.** ✅ implementado en `control`.
 

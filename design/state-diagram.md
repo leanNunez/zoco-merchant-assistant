@@ -37,4 +37,4 @@ Son instrucciones declarativas: el dominio las devuelve y no las ejecuta.
 |---|---|---|
 | `invalidate_pending_action` | Todo cambio de estado | Descarta la acción pendiente (por ejemplo, un reclamo a medio confirmar). |
 | `discard_unapproved_drafts` | Al salir de SUGGEST | Descarta los borradores que nadie aprobó, para que no se envíen después. |
-| `notify_operator` | Abuso detectado en HUMAN | Avisa al operador, que decide si bloquea (`operator_block`). El estado no cambia. |
+| `notify_operator` | Abuso detectado en HUMAN, o cierre de la franja de atención en HUMAN | Avisa al operador. Con abuso, el estado no cambia y el operador decide si bloquea (`operator_block`). Con el cierre, la conversación vuelve a AUTO y el aviso es la constancia de que el agente retomó el chat. |

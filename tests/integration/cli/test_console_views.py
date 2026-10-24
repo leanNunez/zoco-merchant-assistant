@@ -356,7 +356,9 @@ def test_the_hidden_draft_is_there_for_the_operator_and_reaches_the_customer_onl
     assert f"{draft.id} (reply): No tengo información sobre eso." in drafts
     assert "Estado: SUGGEST" in state
     assert "low_confidence" in state
-    assert inbox == "El inbox está vacío."  # NOTIFY_OPERATOR is only for abuse while in HUMAN
+    assert (
+        inbox == "El inbox está vacío."
+    )  # NOTIFY_OPERATOR is only for abuse in HUMAN and closing time in HUMAN
 
     approved = world.type(f"/approve {draft.id}")
     assert approved == f"Borrador {draft.id} aprobado."
