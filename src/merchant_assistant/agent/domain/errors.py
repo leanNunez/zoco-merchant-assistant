@@ -107,3 +107,38 @@ class InvalidRegistration(GateError):  # noqa: N818 - named after the situation
 
     code: ClassVar[str] = "invalid_registration"
     user_message: ClassVar[str] = "The registration could not be recorded."
+
+
+class DateNotConfirmed(AgentError):  # noqa: N818 - named after the situation
+    """A sales date the user neither wrote explicitly nor accepted. The tool did not run."""
+
+    code: ClassVar[str] = "date_not_confirmed"
+    user_message: ClassVar[str] = (
+        "The user has not stated or confirmed this exact date, so the lookup did not run. "
+        "Ask the user for the exact day, or state the exact date you understood (for example "
+        "2026-10-22) and ask them to confirm it."
+    )
+
+
+class ActionIgnored(AgentError):  # noqa: N818 - named after the situation
+    """A tool call that came after the first proposed action of the same reply."""
+
+    code: ClassVar[str] = "ignored_after_proposal"
+    user_message: ClassVar[str] = (
+        "Not executed: an action was already proposed in this reply and only one action is "
+        "handled at a time."
+    )
+
+
+class InvalidConversationState(AgentError):  # noqa: N818 - named after the situation
+    """A stored conversation that breaks its own invariants (counters, control log chain)."""
+
+    code: ClassVar[str] = "invalid_conversation_state"
+    user_message: ClassVar[str] = "The conversation could not be loaded."
+
+
+class ConcurrentUpdate(AgentError):  # noqa: N818 - named after the situation
+    """The stored conversation changed since it was read: someone else wrote it first."""
+
+    code: ClassVar[str] = "concurrent_update"
+    user_message: ClassVar[str] = "The conversation changed while the message was processed."
