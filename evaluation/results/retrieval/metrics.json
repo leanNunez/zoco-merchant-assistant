@@ -1,0 +1,1779 @@
+{
+  "provenance": {
+    "embeddings_model": "text-embedding-3-small",
+    "reference_date": "2026-10-23",
+    "corpus_sha256": "e10416a93c50adb4a30383a9cee36ea9da3aa098f5eb40c91c5a665cd07f16d3",
+    "chunk_counts": {
+      "document": 12,
+      "section": 49,
+      "section+header": 49,
+      "window-32-o0": 50,
+      "window-32-o5": 58,
+      "window-64-o0": 26,
+      "window-64-o10": 30,
+      "window-128-o0": 14,
+      "window-128-o19": 14,
+      "document+header": 12
+    },
+    "api_calls": 0,
+    "bootstrap": {
+      "resamples": 10000,
+      "seed": 0
+    }
+  },
+  "selection_rule": "El chunking de la tabla principal es el de mayor MRR híbrido; ante un empate, el de mayor recall@3 híbrido; luego el de menos chunks; luego el tipo más simple (documento < sección < ventana) y, por último, el orden de la grilla (sin encabezado antes que con encabezado, ventanas chicas antes que grandes). Para elegir entre dos estrategias (el mejor modo de metadata, la mejor estrategia simple) se usa el mayor MRR, luego el mayor recall@3 y luego un orden fijo declarado de antemano. No se ajusta nada más sobre estas 20 preguntas.",
+  "selected_chunking": {
+    "label": "document",
+    "reason": "`document` frente a `window-128-o0` (el segundo): empatan en MRR híbrido (0.975) y en recall@3 híbrido (0.975); gana por tener menos chunks (12 contra 14)."
+  },
+  "grid": [
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "vector",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.9
+    },
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "bm25",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.916667
+    },
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "hybrid",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.975
+    },
+    {
+      "chunking": "section",
+      "chunks": 49,
+      "strategy": "vector",
+      "recall_at_3": 1.0,
+      "hit_at_3": 1.0,
+      "mrr": 0.866667
+    },
+    {
+      "chunking": "section",
+      "chunks": 49,
+      "strategy": "bm25",
+      "recall_at_3": 1.0,
+      "hit_at_3": 1.0,
+      "mrr": 0.925
+    },
+    {
+      "chunking": "section",
+      "chunks": 49,
+      "strategy": "hybrid",
+      "recall_at_3": 1.0,
+      "hit_at_3": 1.0,
+      "mrr": 0.9
+    },
+    {
+      "chunking": "section+header",
+      "chunks": 49,
+      "strategy": "vector",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.925
+    },
+    {
+      "chunking": "section+header",
+      "chunks": 49,
+      "strategy": "bm25",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.925
+    },
+    {
+      "chunking": "section+header",
+      "chunks": 49,
+      "strategy": "hybrid",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.95
+    },
+    {
+      "chunking": "window-32-o0",
+      "chunks": 50,
+      "strategy": "vector",
+      "recall_at_3": 1.0,
+      "hit_at_3": 1.0,
+      "mrr": 0.891667
+    },
+    {
+      "chunking": "window-32-o0",
+      "chunks": 50,
+      "strategy": "bm25",
+      "recall_at_3": 1.0,
+      "hit_at_3": 1.0,
+      "mrr": 0.891667
+    },
+    {
+      "chunking": "window-32-o0",
+      "chunks": 50,
+      "strategy": "hybrid",
+      "recall_at_3": 1.0,
+      "hit_at_3": 1.0,
+      "mrr": 0.875
+    },
+    {
+      "chunking": "window-32-o5",
+      "chunks": 58,
+      "strategy": "vector",
+      "recall_at_3": 1.0,
+      "hit_at_3": 1.0,
+      "mrr": 0.841667
+    },
+    {
+      "chunking": "window-32-o5",
+      "chunks": 58,
+      "strategy": "bm25",
+      "recall_at_3": 0.875,
+      "hit_at_3": 0.9,
+      "mrr": 0.8475
+    },
+    {
+      "chunking": "window-32-o5",
+      "chunks": 58,
+      "strategy": "hybrid",
+      "recall_at_3": 1.0,
+      "hit_at_3": 1.0,
+      "mrr": 0.9
+    },
+    {
+      "chunking": "window-64-o0",
+      "chunks": 26,
+      "strategy": "vector",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.925
+    },
+    {
+      "chunking": "window-64-o0",
+      "chunks": 26,
+      "strategy": "bm25",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.916667
+    },
+    {
+      "chunking": "window-64-o0",
+      "chunks": 26,
+      "strategy": "hybrid",
+      "recall_at_3": 1.0,
+      "hit_at_3": 1.0,
+      "mrr": 0.95
+    },
+    {
+      "chunking": "window-64-o10",
+      "chunks": 30,
+      "strategy": "vector",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.908333
+    },
+    {
+      "chunking": "window-64-o10",
+      "chunks": 30,
+      "strategy": "bm25",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.916667
+    },
+    {
+      "chunking": "window-64-o10",
+      "chunks": 30,
+      "strategy": "hybrid",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.925
+    },
+    {
+      "chunking": "window-128-o0",
+      "chunks": 14,
+      "strategy": "vector",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.925
+    },
+    {
+      "chunking": "window-128-o0",
+      "chunks": 14,
+      "strategy": "bm25",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.916667
+    },
+    {
+      "chunking": "window-128-o0",
+      "chunks": 14,
+      "strategy": "hybrid",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.975
+    },
+    {
+      "chunking": "window-128-o19",
+      "chunks": 14,
+      "strategy": "vector",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.925
+    },
+    {
+      "chunking": "window-128-o19",
+      "chunks": 14,
+      "strategy": "bm25",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.916667
+    },
+    {
+      "chunking": "window-128-o19",
+      "chunks": 14,
+      "strategy": "hybrid",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.975
+    }
+  ],
+  "main": [
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "vector",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.9,
+      "recall_at_3_ci95": [
+        0.925,
+        1.0
+      ],
+      "mrr_ci95": [
+        0.8,
+        0.975
+      ]
+    },
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "bm25",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.916667,
+      "recall_at_3_ci95": [
+        0.925,
+        1.0
+      ],
+      "mrr_ci95": [
+        0.825,
+        1.0
+      ]
+    },
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "hybrid",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.975,
+      "recall_at_3_ci95": [
+        0.925,
+        1.0
+      ],
+      "mrr_ci95": [
+        0.925,
+        1.0
+      ]
+    },
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "hybrid+meta(filter)",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 1.0,
+      "recall_at_3_ci95": [
+        0.925,
+        1.0
+      ],
+      "mrr_ci95": [
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "hybrid+meta(demote)",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 1.0,
+      "recall_at_3_ci95": [
+        0.925,
+        1.0
+      ],
+      "mrr_ci95": [
+        1.0,
+        1.0
+      ]
+    }
+  ],
+  "paired_differences": [
+    {
+      "label": "mejor modo de metadata menos híbrido",
+      "metric": "mrr",
+      "better": "hybrid+meta(demote)",
+      "baseline": "hybrid",
+      "mean_difference": 0.025,
+      "ci95": [
+        0.0,
+        0.075
+      ]
+    },
+    {
+      "label": "híbrido menos la mejor estrategia simple",
+      "metric": "mrr",
+      "better": "hybrid",
+      "baseline": "bm25",
+      "mean_difference": 0.058333,
+      "ci95": [
+        0.0,
+        0.15
+      ]
+    }
+  ],
+  "ablations": [
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "bm25(stem)",
+      "recall_at_3": 0.95,
+      "hit_at_3": 0.95,
+      "mrr": 0.9125
+    },
+    {
+      "chunking": "document+header",
+      "chunks": 12,
+      "strategy": "vector",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.95
+    },
+    {
+      "chunking": "document+header",
+      "chunks": 12,
+      "strategy": "bm25",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.941667
+    },
+    {
+      "chunking": "document+header",
+      "chunks": 12,
+      "strategy": "hybrid",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 1.0
+    },
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "hybrid+kind-demotion(historico)",
+      "recall_at_3": 0.875,
+      "hit_at_3": 0.9,
+      "mrr": 0.908333
+    }
+  ],
+  "per_question": [
+    {
+      "id": "Q01",
+      "question": "¿Qué rol puede publicar eventos una vez aprobado?",
+      "relevant": [
+        "DOC-01",
+        "DOC-02"
+      ],
+      "reference_period": {
+        "start": "2026-10-23",
+        "end": "2026-10-23",
+        "source": "today"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 2,
+          "top3": [
+            "DOC-03",
+            "DOC-02",
+            "DOC-09"
+          ],
+          "recall_at_3": 0.5,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 0.5
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-02",
+            "DOC-09",
+            "DOC-10"
+          ],
+          "recall_at_3": 0.5,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-02",
+            "DOC-09",
+            "DOC-03"
+          ],
+          "recall_at_3": 0.5,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-02",
+            "DOC-09",
+            "DOC-03"
+          ],
+          "recall_at_3": 0.5,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-02",
+            "DOC-09",
+            "DOC-03"
+          ],
+          "recall_at_3": 0.5,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q02",
+      "question": "¿Cuánto demora la revisión de alta con documentación completa?",
+      "relevant": [
+        "DOC-02"
+      ],
+      "reference_period": {
+        "start": "2026-10-23",
+        "end": "2026-10-23",
+        "source": "today"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-02",
+            "DOC-08",
+            "DOC-11"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-02",
+            "DOC-03",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-02",
+            "DOC-08",
+            "DOC-12"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-02",
+            "DOC-08",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-02",
+            "DOC-08",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q03",
+      "question": "¿Qué pasa si los lotes superan la capacidad del recinto?",
+      "relevant": [
+        "DOC-03"
+      ],
+      "reference_period": {
+        "start": "2026-10-23",
+        "end": "2026-10-23",
+        "source": "today"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 2,
+          "top3": [
+            "DOC-04",
+            "DOC-03",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 0.5
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-03",
+            "DOC-04",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-03",
+            "DOC-04",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-03",
+            "DOC-04",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-03",
+            "DOC-04",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q04",
+      "question": "¿Cuántos minutos permanece reservado un carrito sin pago confirmado?",
+      "relevant": [
+        "DOC-04"
+      ],
+      "reference_period": {
+        "start": "2026-10-23",
+        "end": "2026-10-23",
+        "source": "today"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-04",
+            "DOC-08",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-04",
+            "DOC-11",
+            "DOC-05"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-04",
+            "DOC-08",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-04",
+            "DOC-08",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-04",
+            "DOC-08",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q05",
+      "question": "¿Cuál es el cargo por una entrada de $10.000 en ZT-PRO-2 durante octubre de 2026?",
+      "relevant": [
+        "DOC-05"
+      ],
+      "reference_period": {
+        "start": "2026-10-01",
+        "end": "2026-10-31",
+        "source": "question"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-05",
+            "DOC-12",
+            "DOC-07"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-05",
+            "DOC-12",
+            "DOC-07"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-05",
+            "DOC-12",
+            "DOC-07"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-05",
+            "DOC-07",
+            "DOC-01"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-05",
+            "DOC-07",
+            "DOC-01"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q06",
+      "question": "¿En cuántos días hábiles se liquida normalmente un evento finalizado en octubre de 2026?",
+      "relevant": [
+        "DOC-06"
+      ],
+      "reference_period": {
+        "start": "2026-10-01",
+        "end": "2026-10-31",
+        "source": "question"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 2,
+          "top3": [
+            "DOC-12",
+            "DOC-06",
+            "DOC-08"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 0.5
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-06",
+            "DOC-12",
+            "DOC-08"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-06",
+            "DOC-12",
+            "DOC-08"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-06",
+            "DOC-08",
+            "DOC-03"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-06",
+            "DOC-08",
+            "DOC-03"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q07",
+      "question": "¿Cuál es el mínimo de entradas por mes del plan ZT-PRO-2?",
+      "relevant": [
+        "DOC-07"
+      ],
+      "reference_period": {
+        "start": "2026-10-23",
+        "end": "2026-10-23",
+        "source": "today"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-07",
+            "DOC-12",
+            "DOC-05"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-07",
+            "DOC-12",
+            "DOC-05"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-07",
+            "DOC-12",
+            "DOC-05"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-07",
+            "DOC-05",
+            "DOC-01"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-07",
+            "DOC-05",
+            "DOC-01"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q08",
+      "question": "¿Cuentan las entradas gratuitas para el mínimo mensual del plan PRO?",
+      "relevant": [
+        "DOC-07"
+      ],
+      "reference_period": {
+        "start": "2026-10-23",
+        "end": "2026-10-23",
+        "source": "today"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-07",
+            "DOC-05",
+            "DOC-12"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-07",
+            "DOC-12",
+            "DOC-05"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-07",
+            "DOC-05",
+            "DOC-12"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-07",
+            "DOC-05",
+            "DOC-01"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-07",
+            "DOC-05",
+            "DOC-01"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q09",
+      "question": "¿Se devuelve el cargo de servicio si el organizador cancela todo el evento?",
+      "relevant": [
+        "DOC-08"
+      ],
+      "reference_period": {
+        "start": "2026-10-23",
+        "end": "2026-10-23",
+        "source": "today"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-08",
+            "DOC-06",
+            "DOC-03"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-08",
+            "DOC-05",
+            "DOC-07"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-08",
+            "DOC-05",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-08",
+            "DOC-05",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-08",
+            "DOC-05",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q10",
+      "question": "¿Hasta cuándo puede pedirse devolución por reprogramación?",
+      "relevant": [
+        "DOC-08"
+      ],
+      "reference_period": {
+        "start": "2026-10-23",
+        "end": "2026-10-23",
+        "source": "today"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-08",
+            "DOC-11",
+            "DOC-02"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-08",
+            "DOC-12",
+            "DOC-02"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-08",
+            "DOC-02",
+            "DOC-12"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-08",
+            "DOC-02",
+            "DOC-09"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-08",
+            "DOC-02",
+            "DOC-09"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q11",
+      "question": "¿Cuántas veces puede transferirse una entrada?",
+      "relevant": [
+        "DOC-09"
+      ],
+      "reference_period": {
+        "start": "2026-10-23",
+        "end": "2026-10-23",
+        "source": "today"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-09",
+            "DOC-04",
+            "DOC-03"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-09",
+            "DOC-04",
+            "DOC-08"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-09",
+            "DOC-04",
+            "DOC-03"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-09",
+            "DOC-04",
+            "DOC-03"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-09",
+            "DOC-04",
+            "DOC-03"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q12",
+      "question": "¿Qué pasa con el QR original después de una transferencia?",
+      "relevant": [
+        "DOC-09"
+      ],
+      "reference_period": {
+        "start": "2026-10-23",
+        "end": "2026-10-23",
+        "source": "today"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-09",
+            "DOC-10",
+            "DOC-04"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-09",
+            "DOC-12",
+            "DOC-10"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-09",
+            "DOC-10",
+            "DOC-12"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-09",
+            "DOC-10",
+            "DOC-04"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-09",
+            "DOC-10",
+            "DOC-04"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q13",
+      "question": "¿Qué estados devuelve la validación de un QR?",
+      "relevant": [
+        "DOC-10"
+      ],
+      "reference_period": {
+        "start": "2026-10-23",
+        "end": "2026-10-23",
+        "source": "today"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-10",
+            "DOC-02",
+            "DOC-09"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "bm25": {
+          "first_relevant_rank": 2,
+          "top3": [
+            "DOC-11",
+            "DOC-10",
+            "DOC-02"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 0.5
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-10",
+            "DOC-02",
+            "DOC-11"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-10",
+            "DOC-02",
+            "DOC-11"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-10",
+            "DOC-02",
+            "DOC-11"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q14",
+      "question": "¿Cuál es el riesgo de escanear offline en dos dispositivos?",
+      "relevant": [
+        "DOC-10"
+      ],
+      "reference_period": {
+        "start": "2026-10-23",
+        "end": "2026-10-23",
+        "source": "today"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-10",
+            "DOC-09",
+            "DOC-02"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-10",
+            "DOC-01",
+            "DOC-08"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-10",
+            "DOC-01",
+            "DOC-02"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-10",
+            "DOC-01",
+            "DOC-02"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-10",
+            "DOC-01",
+            "DOC-02"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q15",
+      "question": "¿Puede abrirse un reclamo sin que el usuario confirme sus datos?",
+      "relevant": [
+        "DOC-11"
+      ],
+      "reference_period": {
+        "start": "2026-10-23",
+        "end": "2026-10-23",
+        "source": "today"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-11",
+            "DOC-02",
+            "DOC-08"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "bm25": {
+          "first_relevant_rank": 3,
+          "top3": [
+            "DOC-06",
+            "DOC-02",
+            "DOC-11"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 0.333333
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-11",
+            "DOC-02",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-11",
+            "DOC-02",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-11",
+            "DOC-02",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q16",
+      "question": "¿Qué significa que crear_reclamo devuelva REC-000123?",
+      "relevant": [
+        "DOC-11"
+      ],
+      "reference_period": {
+        "start": "2026-10-23",
+        "end": "2026-10-23",
+        "source": "today"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-11",
+            "DOC-02",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-11",
+            "DOC-04",
+            "DOC-09"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-11",
+            "DOC-04",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-11",
+            "DOC-04",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-11",
+            "DOC-04",
+            "DOC-06"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q17",
+      "question": "¿Cuál era el mínimo mensual de ZT-PRO-2 en julio de 2026?",
+      "relevant": [
+        "DOC-12"
+      ],
+      "reference_period": {
+        "start": "2026-07-01",
+        "end": "2026-07-31",
+        "source": "question"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-12",
+            "DOC-07",
+            "DOC-05"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "bm25": {
+          "first_relevant_rank": 2,
+          "top3": [
+            "DOC-07",
+            "DOC-12",
+            "DOC-05"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 0.5
+        },
+        "hybrid": {
+          "first_relevant_rank": 2,
+          "top3": [
+            "DOC-07",
+            "DOC-12",
+            "DOC-05"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 0.5
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-12",
+            "DOC-01",
+            "DOC-10"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-12",
+            "DOC-01",
+            "DOC-10"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q18",
+      "question": "¿Cuánto cobraba ZT-START-1 en agosto de 2026?",
+      "relevant": [
+        "DOC-12"
+      ],
+      "reference_period": {
+        "start": "2026-08-01",
+        "end": "2026-08-31",
+        "source": "question"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-12",
+            "DOC-05",
+            "DOC-07"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-12",
+            "DOC-05",
+            "DOC-07"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-12",
+            "DOC-05",
+            "DOC-07"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-12",
+            "DOC-08",
+            "DOC-01"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-12",
+            "DOC-08",
+            "DOC-01"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q19",
+      "question": "¿Qué documento contiene las tarifas aplicables en octubre de 2026?",
+      "relevant": [
+        "DOC-05"
+      ],
+      "reference_period": {
+        "start": "2026-10-01",
+        "end": "2026-10-31",
+        "source": "question"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 2,
+          "top3": [
+            "DOC-12",
+            "DOC-05",
+            "DOC-07"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 0.5
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-05",
+            "DOC-12",
+            "DOC-07"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-05",
+            "DOC-12",
+            "DOC-07"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-05",
+            "DOC-07",
+            "DOC-01"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-05",
+            "DOC-07",
+            "DOC-01"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    },
+    {
+      "id": "Q20",
+      "question": "¿Puede un organizador en estado EN_REVISION publicar un evento?",
+      "relevant": [
+        "DOC-02",
+        "DOC-03"
+      ],
+      "reference_period": {
+        "start": "2026-10-23",
+        "end": "2026-10-23",
+        "source": "today"
+      },
+      "strategies": {
+        "vector": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-03",
+            "DOC-02",
+            "DOC-08"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "bm25": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-02",
+            "DOC-03",
+            "DOC-08"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-02",
+            "DOC-03",
+            "DOC-08"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(filter)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-02",
+            "DOC-03",
+            "DOC-08"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "hybrid+meta(demote)": {
+          "first_relevant_rank": 1,
+          "top3": [
+            "DOC-02",
+            "DOC-03",
+            "DOC-08"
+          ],
+          "recall_at_3": 1.0,
+          "hit_at_3": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    }
+  ]
+}

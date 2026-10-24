@@ -1,0 +1,124 @@
+# Evaluación de retrieval
+
+Generado por `make eval-retrieval` (`uv run python -m evaluation.retrieval run`). No editar a mano: se regenera igual en cada corrida.
+
+## Procedencia
+
+- Modelo de embeddings: `text-embedding-3-small`
+- Fecha de referencia ("hoy"): 2026-10-23, fija para que el resultado no dependa del día en que se corre
+- sha256 del corpus (`docs/*.md` y `questions.jsonl`): `e10416a93c50adb4a30383a9cee36ea9da3aa098f5eb40c91c5a665cd07f16d3`
+- Llamadas a la API de embeddings durante esta corrida: 0
+- Chunks por estrategia de chunking: `document` 12, `section` 49, `section+header` 49, `window-32-o0` 50, `window-32-o5` 58, `window-64-o0` 26, `window-64-o10` 30, `window-128-o0` 14, `window-128-o19` 14, `document+header` 12
+
+## Reglas declaradas antes de ver las tablas
+
+El chunking de la tabla principal es el de mayor MRR híbrido; ante un empate, el de mayor recall@3 híbrido; luego el de menos chunks; luego el tipo más simple (documento < sección < ventana) y, por último, el orden de la grilla (sin encabezado antes que con encabezado, ventanas chicas antes que grandes). Para elegir entre dos estrategias (el mejor modo de metadata, la mejor estrategia simple) se usa el mayor MRR, luego el mayor recall@3 y luego un orden fijo declarado de antemano. No se ajusta nada más sobre estas 20 preguntas.
+
+Orden fijo para el modo de metadata: `hybrid+meta(demote)` > `hybrid+meta(filter)`. Para la mejor estrategia simple: `bm25` > `vector`.
+
+## Definiciones
+
+- La unidad del ranking es el documento: cada documento cuenta una vez, en la posición de su mejor chunk. A cada estrategia se le piden todos los chunks, así el MRR ve la lista completa.
+- recall@3 = documentos relevantes en el top 3 / documentos relevantes. Con dos relevantes y uno encontrado vale 0.5.
+- hit@3 = 1 si algún documento relevante está en el top 3.
+- MRR = promedio de 1 / posición del primer documento relevante (0 si no aparece).
+- Intervalos: bootstrap percentil al 95 %, 10000 remuestreos de las preguntas con `numpy.random.default_rng(0)`; todas las estrategias se remuestrean con los mismos sorteos.
+- Hay 20 preguntas: **una sola pregunta mueve un promedio 5 puntos** (0.05 en recall@3, hit@3 o MRR). Una diferencia de ese tamaño no alcanza para preferir una estrategia.
+
+## Grilla de chunking
+
+BM25 sin stemming. Híbrido = RRF (k = 60) sobre los rankings de chunks de vector y BM25.
+
+| Chunking | Chunks | Estrategia | recall@3 | hit@3 | MRR |
+|---|---:|---|---:|---:|---:|
+| `document` | 12 | vector | 0.975 | 1.000 | 0.900 |
+| `document` | 12 | bm25 | 0.975 | 1.000 | 0.917 |
+| `document` | 12 | hybrid | 0.975 | 1.000 | 0.975 |
+| `section` | 49 | vector | 1.000 | 1.000 | 0.867 |
+| `section` | 49 | bm25 | 1.000 | 1.000 | 0.925 |
+| `section` | 49 | hybrid | 1.000 | 1.000 | 0.900 |
+| `section+header` | 49 | vector | 0.975 | 1.000 | 0.925 |
+| `section+header` | 49 | bm25 | 0.975 | 1.000 | 0.925 |
+| `section+header` | 49 | hybrid | 0.975 | 1.000 | 0.950 |
+| `window-32-o0` | 50 | vector | 1.000 | 1.000 | 0.892 |
+| `window-32-o0` | 50 | bm25 | 1.000 | 1.000 | 0.892 |
+| `window-32-o0` | 50 | hybrid | 1.000 | 1.000 | 0.875 |
+| `window-32-o5` | 58 | vector | 1.000 | 1.000 | 0.842 |
+| `window-32-o5` | 58 | bm25 | 0.875 | 0.900 | 0.847 |
+| `window-32-o5` | 58 | hybrid | 1.000 | 1.000 | 0.900 |
+| `window-64-o0` | 26 | vector | 0.975 | 1.000 | 0.925 |
+| `window-64-o0` | 26 | bm25 | 0.975 | 1.000 | 0.917 |
+| `window-64-o0` | 26 | hybrid | 1.000 | 1.000 | 0.950 |
+| `window-64-o10` | 30 | vector | 0.975 | 1.000 | 0.908 |
+| `window-64-o10` | 30 | bm25 | 0.975 | 1.000 | 0.917 |
+| `window-64-o10` | 30 | hybrid | 0.975 | 1.000 | 0.925 |
+| `window-128-o0` | 14 | vector | 0.975 | 1.000 | 0.925 |
+| `window-128-o0` | 14 | bm25 | 0.975 | 1.000 | 0.917 |
+| `window-128-o0` | 14 | hybrid | 0.975 | 1.000 | 0.975 |
+| `window-128-o19` | 14 | vector | 0.975 | 1.000 | 0.925 |
+| `window-128-o19` | 14 | bm25 | 0.975 | 1.000 | 0.917 |
+| `window-128-o19` | 14 | hybrid | 0.975 | 1.000 | 0.975 |
+
+## Chunking seleccionado
+
+**`document`**. `document` frente a `window-128-o0` (el segundo): empatan en MRR híbrido (0.975) y en recall@3 híbrido (0.975); gana por tener menos chunks (12 contra 14).
+
+## Tabla principal (`document`)
+
+| Estrategia | recall@3 | IC 95 % | hit@3 | MRR | IC 95 % |
+|---|---:|---|---:|---:|---|
+| vector | 0.975 | [0.925, 1.000] | 1.000 | 0.900 | [0.800, 0.975] |
+| bm25 | 0.975 | [0.925, 1.000] | 1.000 | 0.917 | [0.825, 1.000] |
+| hybrid | 0.975 | [0.925, 1.000] | 1.000 | 0.975 | [0.925, 1.000] |
+| hybrid+meta(filter) | 0.975 | [0.925, 1.000] | 1.000 | 1.000 | [1.000, 1.000] |
+| hybrid+meta(demote) | 0.975 | [0.925, 1.000] | 1.000 | 1.000 | [1.000, 1.000] |
+
+## Diferencias pareadas de MRR
+
+Diferencia por pregunta y bootstrap de su promedio. Un intervalo que contiene el 0 no muestra una diferencia.
+
+| Comparación | Diferencia de MRR | IC 95 % |
+|---|---:|---|
+| mejor modo de metadata menos híbrido: hybrid+meta(demote) - hybrid | +0.025 | [0.000, 0.075] |
+| híbrido menos la mejor estrategia simple: hybrid - bm25 | +0.058 | [0.000, 0.150] |
+
+## Ablaciones
+
+- `bm25(stem)`: BM25 con el stemming de plurales, sobre `document`.
+- La misma tabla con el encabezado (título, tipo y vigencia) cambiado: `document+header`.
+- `hybrid+kind-demotion(historico)`: baja los documentos de tipo `historico` sin mirar fechas, para ver si el tipo aporta algo que la vigencia no aporte.
+
+| Chunking | Estrategia | recall@3 | hit@3 | MRR |
+|---|---|---:|---:|---:|
+| `document` | bm25(stem) | 0.950 | 0.950 | 0.912 |
+| `document+header` | vector | 0.975 | 1.000 | 0.950 |
+| `document+header` | bm25 | 0.975 | 1.000 | 0.942 |
+| `document+header` | hybrid | 0.975 | 1.000 | 1.000 |
+| `document` | hybrid+kind-demotion(historico) | 0.875 | 0.900 | 0.908 |
+
+## Por pregunta
+
+Sobre `document`. Cada celda: posición del primer documento relevante (— si no aparece) y el top 3 de documentos. **✗** marca las preguntas en las que alguna estrategia deja afuera del top 3 algún documento relevante; la última columna dice cuáles.
+
+| | Pregunta | Relevantes | Período | vector | bm25 | hybrid | hybrid+meta(filter) | hybrid+meta(demote) | Fallan en top 3 |
+|---|---|---|---|---|---|---|---|---|---|
+| Q01 ✗ | ¿Qué rol puede publicar eventos una vez aprobado? | DOC-01, DOC-02 | hoy | 2 · DOC-03, DOC-02, DOC-09 | 1 · DOC-02, DOC-09, DOC-10 | 1 · DOC-02, DOC-09, DOC-03 | 1 · DOC-02, DOC-09, DOC-03 | 1 · DOC-02, DOC-09, DOC-03 | vector (parcial), bm25 (parcial), hybrid (parcial), hybrid+meta(filter) (parcial), hybrid+meta(demote) (parcial) |
+| Q02 | ¿Cuánto demora la revisión de alta con documentación comple… | DOC-02 | hoy | 1 · DOC-02, DOC-08, DOC-11 | 1 · DOC-02, DOC-03, DOC-06 | 1 · DOC-02, DOC-08, DOC-12 | 1 · DOC-02, DOC-08, DOC-06 | 1 · DOC-02, DOC-08, DOC-06 | — |
+| Q03 | ¿Qué pasa si los lotes superan la capacidad del recinto? | DOC-03 | hoy | 2 · DOC-04, DOC-03, DOC-06 | 1 · DOC-03, DOC-04, DOC-06 | 1 · DOC-03, DOC-04, DOC-06 | 1 · DOC-03, DOC-04, DOC-06 | 1 · DOC-03, DOC-04, DOC-06 | — |
+| Q04 | ¿Cuántos minutos permanece reservado un carrito sin pago co… | DOC-04 | hoy | 1 · DOC-04, DOC-08, DOC-06 | 1 · DOC-04, DOC-11, DOC-05 | 1 · DOC-04, DOC-08, DOC-06 | 1 · DOC-04, DOC-08, DOC-06 | 1 · DOC-04, DOC-08, DOC-06 | — |
+| Q05 | ¿Cuál es el cargo por una entrada de $10.000 en ZT-PRO-2 du… | DOC-05 | 2026-10-01 a 2026-10-31 | 1 · DOC-05, DOC-12, DOC-07 | 1 · DOC-05, DOC-12, DOC-07 | 1 · DOC-05, DOC-12, DOC-07 | 1 · DOC-05, DOC-07, DOC-01 | 1 · DOC-05, DOC-07, DOC-01 | — |
+| Q06 | ¿En cuántos días hábiles se liquida normalmente un evento f… | DOC-06 | 2026-10-01 a 2026-10-31 | 2 · DOC-12, DOC-06, DOC-08 | 1 · DOC-06, DOC-12, DOC-08 | 1 · DOC-06, DOC-12, DOC-08 | 1 · DOC-06, DOC-08, DOC-03 | 1 · DOC-06, DOC-08, DOC-03 | — |
+| Q07 | ¿Cuál es el mínimo de entradas por mes del plan ZT-PRO-2? | DOC-07 | hoy | 1 · DOC-07, DOC-12, DOC-05 | 1 · DOC-07, DOC-12, DOC-05 | 1 · DOC-07, DOC-12, DOC-05 | 1 · DOC-07, DOC-05, DOC-01 | 1 · DOC-07, DOC-05, DOC-01 | — |
+| Q08 | ¿Cuentan las entradas gratuitas para el mínimo mensual del… | DOC-07 | hoy | 1 · DOC-07, DOC-05, DOC-12 | 1 · DOC-07, DOC-12, DOC-05 | 1 · DOC-07, DOC-05, DOC-12 | 1 · DOC-07, DOC-05, DOC-01 | 1 · DOC-07, DOC-05, DOC-01 | — |
+| Q09 | ¿Se devuelve el cargo de servicio si el organizador cancela… | DOC-08 | hoy | 1 · DOC-08, DOC-06, DOC-03 | 1 · DOC-08, DOC-05, DOC-07 | 1 · DOC-08, DOC-05, DOC-06 | 1 · DOC-08, DOC-05, DOC-06 | 1 · DOC-08, DOC-05, DOC-06 | — |
+| Q10 | ¿Hasta cuándo puede pedirse devolución por reprogramación? | DOC-08 | hoy | 1 · DOC-08, DOC-11, DOC-02 | 1 · DOC-08, DOC-12, DOC-02 | 1 · DOC-08, DOC-02, DOC-12 | 1 · DOC-08, DOC-02, DOC-09 | 1 · DOC-08, DOC-02, DOC-09 | — |
+| Q11 | ¿Cuántas veces puede transferirse una entrada? | DOC-09 | hoy | 1 · DOC-09, DOC-04, DOC-03 | 1 · DOC-09, DOC-04, DOC-08 | 1 · DOC-09, DOC-04, DOC-03 | 1 · DOC-09, DOC-04, DOC-03 | 1 · DOC-09, DOC-04, DOC-03 | — |
+| Q12 | ¿Qué pasa con el QR original después de una transferencia? | DOC-09 | hoy | 1 · DOC-09, DOC-10, DOC-04 | 1 · DOC-09, DOC-12, DOC-10 | 1 · DOC-09, DOC-10, DOC-12 | 1 · DOC-09, DOC-10, DOC-04 | 1 · DOC-09, DOC-10, DOC-04 | — |
+| Q13 | ¿Qué estados devuelve la validación de un QR? | DOC-10 | hoy | 1 · DOC-10, DOC-02, DOC-09 | 2 · DOC-11, DOC-10, DOC-02 | 1 · DOC-10, DOC-02, DOC-11 | 1 · DOC-10, DOC-02, DOC-11 | 1 · DOC-10, DOC-02, DOC-11 | — |
+| Q14 | ¿Cuál es el riesgo de escanear offline en dos dispositivos? | DOC-10 | hoy | 1 · DOC-10, DOC-09, DOC-02 | 1 · DOC-10, DOC-01, DOC-08 | 1 · DOC-10, DOC-01, DOC-02 | 1 · DOC-10, DOC-01, DOC-02 | 1 · DOC-10, DOC-01, DOC-02 | — |
+| Q15 | ¿Puede abrirse un reclamo sin que el usuario confirme sus d… | DOC-11 | hoy | 1 · DOC-11, DOC-02, DOC-08 | 3 · DOC-06, DOC-02, DOC-11 | 1 · DOC-11, DOC-02, DOC-06 | 1 · DOC-11, DOC-02, DOC-06 | 1 · DOC-11, DOC-02, DOC-06 | — |
+| Q16 | ¿Qué significa que crear_reclamo devuelva REC-000123? | DOC-11 | hoy | 1 · DOC-11, DOC-02, DOC-06 | 1 · DOC-11, DOC-04, DOC-09 | 1 · DOC-11, DOC-04, DOC-06 | 1 · DOC-11, DOC-04, DOC-06 | 1 · DOC-11, DOC-04, DOC-06 | — |
+| Q17 | ¿Cuál era el mínimo mensual de ZT-PRO-2 en julio de 2026? | DOC-12 | 2026-07-01 a 2026-07-31 | 1 · DOC-12, DOC-07, DOC-05 | 2 · DOC-07, DOC-12, DOC-05 | 2 · DOC-07, DOC-12, DOC-05 | 1 · DOC-12, DOC-01, DOC-10 | 1 · DOC-12, DOC-01, DOC-10 | — |
+| Q18 | ¿Cuánto cobraba ZT-START-1 en agosto de 2026? | DOC-12 | 2026-08-01 a 2026-08-31 | 1 · DOC-12, DOC-05, DOC-07 | 1 · DOC-12, DOC-05, DOC-07 | 1 · DOC-12, DOC-05, DOC-07 | 1 · DOC-12, DOC-08, DOC-01 | 1 · DOC-12, DOC-08, DOC-01 | — |
+| Q19 | ¿Qué documento contiene las tarifas aplicables en octubre d… | DOC-05 | 2026-10-01 a 2026-10-31 | 2 · DOC-12, DOC-05, DOC-07 | 1 · DOC-05, DOC-12, DOC-07 | 1 · DOC-05, DOC-12, DOC-07 | 1 · DOC-05, DOC-07, DOC-01 | 1 · DOC-05, DOC-07, DOC-01 | — |
+| Q20 | ¿Puede un organizador en estado EN_REVISION publicar un eve… | DOC-02, DOC-03 | hoy | 1 · DOC-03, DOC-02, DOC-08 | 1 · DOC-02, DOC-03, DOC-08 | 1 · DOC-02, DOC-03, DOC-08 | 1 · DOC-02, DOC-03, DOC-08 | 1 · DOC-02, DOC-03, DOC-08 | — |
