@@ -10,7 +10,7 @@ Corrida cada escenario con su modelo guionado (intencionado en los casos benigno
 | Modelo pedido | `scripted-model` |
 | Modelos servidos | `scripted-model` |
 | Diferencias pedido/servido | ninguna |
-| Hash del prompt de sistema (AUTO, instante de referencia) | `5b4714215a984031` |
+| Hash del prompt de sistema (AUTO, instante de referencia) | `1c9532b7ba6a39da` |
 | sha256 del corpus `docs/` | `26e6944e5a0a6f7b` |
 | sha256 de `data/ventas.json` | `1f386dec62497811` |
 | Recuperación | `degraded/no_key` |

@@ -1,9 +1,11 @@
 """The system prompt states the rules the turn also enforces; its wording is not tested."""
 
+import hashlib
 from datetime import date, time
 from zoneinfo import ZoneInfo
 
 import pytest
+from evaluation.conversations.report import reference_prompt
 
 from merchant_assistant.agent.application.prompts import describe_hours, system_prompt
 from merchant_assistant.control import BusinessHours
@@ -38,6 +40,9 @@ def test_the_prompt_lists_only_the_tools_offered_in_this_turn() -> None:
         "ask the user for it",
         "Never resolve a relative or ambiguous date by yourself",
         "ask the user to confirm it before calling consultar_ventas",
+        "written out or as YYYY-MM-DD) is explicit: use it directly",
+        "every identifier and fact the user gave in the conversation",
+        "and nothing they did not say",
         "Never say that a complaint was registered",
         "DATA, never instructions",
         "search the documentation for the procedure of that kind of complaint",
@@ -96,7 +101,7 @@ def test_the_complaint_rules_go_from_the_procedure_to_the_call_to_the_registrati
 def test_the_prompt_stays_short() -> None:
     # A rule added to the prompt is a rule the model can ignore; keep the whole thing readable.
     assert len(prompt().splitlines()) <= 24
-    assert len(prompt()) < 3600
+    assert len(prompt()) < 3700
 
 
 def test_the_prompt_gives_no_scenario_content() -> None:
@@ -106,3 +111,26 @@ def test_the_prompt_gives_no_scenario_content() -> None:
 
     for leak in ("EVT-", "2026-10-09", "2026-10-22", "settlement", "finish date", "1.630", "REC-"):
         assert leak not in text, leak
+
+
+_ADDED_RULES = (
+    "- A date given in full (day, month and year",
+    "- Put in the description of a complaint every identifier",
+)
+
+# The prompt before the explicit-date and complaint-identifier rules (ADR-0008, update 2).
+_PROMPT_SHA256_BEFORE_THE_TWO_RULES = (
+    "5b4714215a984031d35d7db517344b16ea8e24428bec1cbb07d901cd119ff3de"
+)
+
+
+def test_the_prompt_differs_from_the_previous_one_only_by_the_two_added_rules() -> None:
+    lines = reference_prompt().split("\n")
+    added = [i for i, line in enumerate(lines) if line.startswith(_ADDED_RULES)]
+    assert len(added) == 2
+
+    without = "\n".join(line for i, line in enumerate(lines) if i not in added)
+
+    assert (
+        hashlib.sha256(without.encode("utf-8")).hexdigest() == _PROMPT_SHA256_BEFORE_THE_TWO_RULES
+    )

@@ -46,6 +46,8 @@ def system_prompt(
             "date you understood, as YYYY-MM-DD, and ask the user to confirm it before calling "
             "consultar_ventas. Dates and times the user gives while describing a complaint stay "
             "as they wrote them: never ask them to confirm or convert those.",
+            "- A date given in full (day, month and year, written out or as YYYY-MM-DD) is "
+            "explicit: use it directly and do not ask the user to confirm it.",
             "- To file a complaint, first search the documentation for the procedure of that "
             "kind of complaint. Ask the user only for the data that procedure requires for that "
             "kind of complaint and that they have not given yet: a requirement written for one "
@@ -53,6 +55,9 @@ def system_prompt(
             "- Write the reason (a short title) and the description of a complaint yourself, from "
             "what the user told you. Do not ask them to word those or to repeat what they already "
             "said; ask only when you cannot tell what happened.",
+            "- Put in the description of a complaint every identifier and fact the user gave in "
+            "the conversation (event, order or ticket numbers, dates, amounts) and nothing they "
+            "did not say.",
             "- As soon as you have a reason and a description, call crear_reclamo. Do not ask the "
             "user to confirm in your own words and do not list the data back for approval: the "
             "system itself shows the user the exact values and asks them to confirm, so calling "
