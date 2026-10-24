@@ -10,7 +10,7 @@ Corrida un modelo que responde siempre la misma frase y nunca llama herramientas
 | Modelo pedido | `null-model` |
 | Modelos servidos | `null-model` |
 | Diferencias pedido/servido | ninguna |
-| Hash del prompt de sistema (AUTO, instante de referencia) | `1c9532b7ba6a39da` |
+| Hash del prompt de sistema (AUTO, instante de referencia) | `5b4714215a984031` |
 | sha256 del corpus `docs/` | `26e6944e5a0a6f7b` |
 | sha256 de `data/ventas.json` | `1f386dec62497811` |
 | Recuperación | `degraded/no_key` |
