@@ -8,6 +8,7 @@ other and import-linter can keep it that way.
 from __future__ import annotations
 
 import random
+import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -16,8 +17,10 @@ from pathlib import Path
 from typing import Literal
 
 import openai
+from pydantic import SecretStr
 
 from merchant_assistant.agent.adapters.errors import LLMNotConfigured
+from merchant_assistant.agent.adapters.memory_store import InMemoryConversationStore
 from merchant_assistant.agent.adapters.openai_chat_model import PROFILES, OpenAIChatModel
 from merchant_assistant.agent.application.conversation import ConversationService
 from merchant_assistant.agent.application.executor import Sleeper, ToolExecutor
@@ -57,7 +60,7 @@ from merchant_assistant.knowledge.vector import VectorIndex
 from merchant_assistant.sales.adapters.faulty_repository import FaultySalesRepository
 from merchant_assistant.sales.adapters.json_repository import JsonSalesRepository
 from merchant_assistant.sales.service import SalesService
-from merchant_assistant.shared.clock import Clock, business_today
+from merchant_assistant.shared.clock import Clock, SystemClock, business_today
 from merchant_assistant.shared.config import Settings
 from merchant_assistant.shared.faults import FaultInjector
 
@@ -306,3 +309,102 @@ def build_agent_service(
     service = ConversationService(store, executor, model, hours=hours, clock=clock)
     operators = OperatorService(store, executor, hours=hours, clock=clock)
     return AgentBuild(service, operators, search.mode, search.reason)
+
+
+# ---------------------------------------------------------------------- the console
+
+PIN_DIGITS = 6
+
+
+@dataclass(frozen=True, slots=True)
+class ConsoleRuntime:
+    """Everything the console needs, built once.
+
+    The customer, the operator and the supervisor act on ONE store in ONE process: the
+    confirmation proof (`Confirmed`) lives in memory by design, so it cannot cross processes.
+    The PINs are secrets: they stay out of reprs and logs.
+    """
+
+    service: ConversationService
+    operators: OperatorService
+    store: ConversationStore
+    hours: BusinessHours
+    clock: Clock
+    search_mode: SearchMode
+    search_reason: str
+    llm_label: str  # provider and model, never a key
+    operator_pin: SecretStr
+    supervisor_pin: SecretStr
+    # The roles whose PIN was generated: the console shows those, once, in its DEMO banner. A
+    # configured PIN is never shown.
+    generated_pins: frozenset[str]
+
+
+def build_console_runtime(
+    settings: Settings,
+    *,
+    model: ChatModel | None = None,
+    clock: Clock | None = None,
+    store: ConversationStore | None = None,
+    hours: BusinessHours | None = None,
+    sleeper: Sleeper = time.sleep,
+    docs_dir: Path | None = None,
+) -> ConsoleRuntime:
+    """The agent plus the team's side over one in-memory store, ready for the console.
+
+    Tests inject `model` (a scripted one), `clock` and `store`. Without a `model`, the chat model
+    of the settings is built first, so a missing key fails before anything else is touched.
+    """
+    chat_model = build_chat_model(settings) if model is None else model
+    label = f"{settings.llm_provider}:{settings.llm_model}" if model is None else "modelo inyectado"
+    the_clock = SystemClock() if clock is None else clock
+    the_store: ConversationStore = InMemoryConversationStore() if store is None else store
+    built = build_agent_service(
+        settings,
+        clock=the_clock,
+        model=chat_model,
+        store=the_store,
+        hours=hours,
+        sleeper=sleeper,
+        docs_dir=docs_dir,
+    )
+    operator_pin, supervisor_pin, generated = _console_pins(settings)
+    return ConsoleRuntime(
+        service=built.service,
+        operators=built.operators,
+        store=the_store,
+        hours=build_business_hours(settings) if hours is None else hours,
+        clock=the_clock,
+        search_mode=built.search_mode,
+        search_reason=built.search_reason,
+        llm_label=label,
+        operator_pin=operator_pin,
+        supervisor_pin=supervisor_pin,
+        generated_pins=generated,
+    )
+
+
+def _console_pins(settings: Settings) -> tuple[SecretStr, SecretStr, frozenset[str]]:
+    """The configured PINs; a role without one gets a random PIN for this run.
+
+    A role switch of a simulator, not authentication (ADR-0005). Generated PINs never repeat
+    another role's PIN.
+    """
+    configured = {"operator": settings.operator_pin, "supervisor": settings.supervisor_pin}
+    taken = {pin.get_secret_value() for pin in configured.values() if pin is not None}
+    pins: dict[str, SecretStr] = {}
+    generated: set[str] = set()
+    for role, pin in configured.items():
+        if pin is None:
+            fresh = _random_pin()
+            while fresh in taken:
+                fresh = _random_pin()
+            taken.add(fresh)
+            pin = SecretStr(fresh)
+            generated.add(role)
+        pins[role] = pin
+    return pins["operator"], pins["supervisor"], frozenset(generated)
+
+
+def _random_pin() -> str:
+    return f"{secrets.randbelow(10**PIN_DIGITS):0{PIN_DIGITS}d}"

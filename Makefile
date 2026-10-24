@@ -1,7 +1,7 @@
 # One command per step. `make check` is what CI runs, so green here means green there.
 
 .DEFAULT_GOAL := help
-.PHONY: help setup format lint typecheck arch test diagram index eval-retrieval dataset db check
+.PHONY: help setup format lint typecheck arch test diagram index eval-retrieval dataset db chat check
 
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
@@ -44,5 +44,8 @@ dataset: ## Regenerate data/ventas.json
 
 db: ## Recreate the initial claims database
 	uv run python scripts/init_reclamos_db.py
+
+chat: ## Open the console (customer, operator and supervisor views)
+	uv run python -m merchant_assistant.cli
 
 check: lint typecheck arch test ## Everything CI runs
