@@ -516,6 +516,82 @@ def test_the_paired_differences_match_metrics_json() -> None:
         assert f"{mean} {interval}" in text, f"the README should say {mean} {interval}"
 
 
+def _tie_break() -> list[dict[str, Any]]:
+    loaded: dict[str, Any] = json.loads(read(RETRIEVAL / "metrics.json"))
+    strategies: list[dict[str, Any]] = loaded["tie_break"]["strategies"]
+    return strategies
+
+
+def _questions_text(found: list[str]) -> str:
+    return ", ".join(found) or "—"
+
+
+def test_the_tie_break_table_matches_metrics_json() -> None:
+    rows = table_rows(read(README))
+    for entry in _tie_break():
+        wanted: list[Expected] = [
+            entry["strategy"],
+            entry["default"]["mrr"],
+            entry["reversed"]["mrr"],
+            entry["expected"]["mrr"],
+            entry["worst_case_mrr"],
+            entry["best_case_mrr"],
+        ]
+
+        assert has_row(rows, wanted), f"the tie-break table should have the row {wanted}"
+
+
+def test_the_tie_break_questions_match_metrics_json() -> None:
+    rows = table_rows(read(README))
+    for entry in _tie_break():
+        wanted: list[Expected] = [
+            entry["strategy"],
+            _questions_text(entry["first_two_order_depends"]),
+            _questions_text(entry["outcome_depends"]),
+        ]
+
+        assert has_row(rows, wanted), f"the tie-break questions table should have the row {wanted}"
+
+
+def test_the_tie_break_prose_matches_metrics_json() -> None:
+    text = read(README)
+    metrics = json.loads(read(RETRIEVAL / "metrics.json"))
+    hybrid, policy = (_tie_break()[0], _tie_break()[1])
+    assert (hybrid["strategy"], policy["strategy"]) == ("hybrid", "hybrid+meta(demote)")
+    tied = hybrid["questions_with_exact_tie"]
+    bm25 = next(e["mrr"] for e in metrics["main"] if e["strategy"] == "bm25")
+    values = (hybrid["default"]["mrr"], hybrid["reversed"]["mrr"], hybrid["expected"]["mrr"])
+    gains = [policy[k]["mrr"] - hybrid[k]["mrr"] for k in ("default", "reversed", "expected")]
+    needles = [
+        f"En {len(tied)} de {len(metrics['per_question'])} preguntas "
+        f"({', '.join(tied[:-1])} y {tied[-1]})",
+        *(f"{value - bm25:+.3f} " for value in values),
+        *(f"{gain:+.3f} " for gain in gains),
+        f"{fmt(hybrid['reversed']['mrr'])} (invertido) a {fmt(hybrid['default']['mrr'])}",
+        f"con {fmt(hybrid['expected']['mrr'])} esperado",
+        f"de {fmt(hybrid['worst_case_mrr'])} a {fmt(hybrid['best_case_mrr'])}",
+        f"va de {fmt(policy['worst_case_mrr'])} a {fmt(policy['best_case_mrr'])}",
+    ]
+
+    missing = [needle for needle in needles if needle not in text]
+    assert not missing, f"the README should say {missing} about the RRF tie-break"
+    assert hybrid["worst_case_mrr"] < bm25, "the README says the worst order is below BM25"
+    assert hybrid["default"]["mrr"] == max(values), "the README says the default is the best"
+    assert min(values) == hybrid["reversed"]["mrr"], "the README says the reversed is the lowest"
+
+
+def test_the_headline_quotes_the_hybrid_mrr_as_a_range() -> None:
+    hybrid = _tie_break()[0]
+    text = headline()
+
+    for needle in (
+        f"({fmt(hybrid['default']['mrr'])})",
+        f"baja a {fmt(hybrid['reversed']['mrr'])}",
+        f"esperado es {fmt(hybrid['expected']['mrr'])}",
+    ):
+        assert needle in text, f"the headline should say {needle!r} about the tie-break"
+
+
 # --------------------------------------------------------------------------- the gate
 
 

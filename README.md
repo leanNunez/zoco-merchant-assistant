@@ -31,7 +31,10 @@ mienta](#cómo-se-evita-que-esta-documentación-mienta)). Lo que no se pudo medi
 
 Una sola pregunta mueve un promedio 5 puntos y los intervalos pareados (híbrido menos BM25, vigencia
 menos híbrido) llegan hasta el 0: **no se declara un ganador**, se declara qué falla en cada pregunta
-y por qué ([análisis](#qué-estrategia-gana-qué-tipo-de-pregunta)).
+y por qué ([análisis](#qué-estrategia-gana-qué-tipo-de-pregunta)). Además, **el MRR del híbrido
+(0.975) depende de un desempate arbitrario de RRF**: con el desempate invertido baja a 0.925 y su
+valor esperado es 0.950, así que su ventaja sobre BM25 (0.917) es en parte suerte
+([medición](#sensibilidad-al-desempate-de-rrf)).
 
 **Agente y evaluación (Partes 2 a 4).** 34 escenarios por 3 repeticiones. Una corrida *cumple* si pasan todos sus checks:
 
@@ -248,23 +251,43 @@ Diferencias pareadas de MRR (un intervalo que contiene el 0 no muestra una difer
 
 ### Qué estrategia gana qué tipo de pregunta
 
-El recall@3 es el mismo (0.975) para las cinco estrategias; lo que cambia es la posición del primer relevante. Vector pone primero el documento correcto en 16 de 20 preguntas (falla Q01, Q03, Q06 y Q19), BM25 en 17 (falla Q13, Q15 y Q17) y el híbrido en 19 (falla Q17). Los errores de vector y de BM25 **no se solapan**: ese es el aporte de fusionar.
+El recall@3 es el mismo (0.975) para las cinco estrategias; lo que cambia es la posición del primer relevante. Vector pone primero el documento correcto en 16 de 20 preguntas (falla Q01, Q03, Q06 y Q19), BM25 en 17 (falla Q13, Q15 y Q17) y el híbrido en 19 (falla Q17), con el desempate de producción. Los errores de vector y de BM25 **no se solapan**, pero cuánto aporta fusionar depende del desempate de RRF: con el invertido el híbrido acierta 17 (falla Q03, Q06 y Q19), como BM25 ([medición](#sensibilidad-al-desempate-de-rrf)).
 
 | Tipo de pregunta | Ejemplos | Qué pasa | Clasificación |
 |---|---|---|---|
 | Términos propios, códigos y cifras | Q05, Q07, Q08, Q16 (`ZT-PRO-2`, `REC-000123`) | Las cinco estrategias lo ponen primero. Empate | — |
 | Mismo significado, otras palabras | Q13, Q15 | BM25 falla (posiciones 2 y 3), vector acierta. Q13: "devuelve" es una palabra rara que está en DOC-11, mientras la pregunta dice "estados", que DOC-10 no contiene. Q15: "usuario" aparece en DOC-06 | **Límite de la técnica**: coincidencia léxica sin significado. No es un error del código |
 | Temas vecinos con el mismo vocabulario | Q06, Q19, Q03 | Vector falla: pone el DOC-12 histórico delante de DOC-06 y DOC-05 (en Q03, DOC-04 delante de DOC-03). BM25 acierta | **Límite de la técnica**: los embeddings no codifican la vigencia ni distinguen temas contiguos |
-| Reglas que se reemplazaron (vigencia) | Q17, Q18; también Q05, Q06, Q19 | Q17: BM25 pone primero el DOC-07 vigente porque comparte "mínimo mensual", y DOC-12 (la respuesta del período) solo coincide por "mínimo", el código del plan y el año. Q18 la resuelven todas, apoyadas en "cobraba", que solo está en DOC-12 | Q17 es **la única pregunta que mueve la política de vigencia** (+0.025 de MRR) |
+| Reglas que se reemplazaron (vigencia) | Q17, Q18; también Q05, Q06, Q19 | Q17: BM25 pone primero el DOC-07 vigente porque comparte "mínimo mensual", y DOC-12 (la respuesta del período) solo coincide por "mínimo", el código del plan y el año. Q18 la resuelven todas, apoyadas en "cobraba", que solo está en DOC-12 | Con el desempate de producción, Q17 es **la única pregunta que mueve la política de vigencia** (+0.025 de MRR) |
 | Dos documentos relevantes | Q01, Q20 | Q20 recupera los dos. Q01 es el **único fallo de recall**: DOC-01 nunca entra al top 3 de ninguna estrategia | Ver abajo: **límite de la técnica y de la etiqueta**, no un error del código |
 
 **Q01.** Lo relevante de DOC-01 es una sola línea ("El panel web de organizadores se utiliza para publicar eventos", en "Canales"), contra DOC-03, titulado "Creación y publicación de eventos". Con el documento entero ese rastro no compite. Con chunking `section` el recall es 1.000 para vector, BM25 e híbrido, pero el MRR híbrido baja de 0.975 a 0.900: es una propiedad del corte por documento entero y de una etiqueta discutible, no un defecto de la implementación.
 
-**El híbrido de Q06, Q17 y Q19 es un empate de RRF, no una victoria.** En las tres, vector y BM25 intercambian el DOC-12 histórico con el documento correcto, así que ambos suman exactamente 1/61 + 1/62. El desempate declarado en `knowledge/fusion.py` (mejor rango y luego el id) elige el id menor: acierta Q06 y Q19 y pierde Q17. Con la convención inversa, `hybrid` sobre `document` bajaría de 0.975 a 0.925 y la regla declarada elegiría `window-128-o0`; **este contrafáctico se calculó con un script descartable y no está en los resultados guardados**. Mientras tanto la política de vigencia no depende del desempate: baja el DOC-07 y el DOC-12 gana por mérito.
+### Sensibilidad al desempate de RRF
+
+**El resultado del híbrido en varias preguntas es un empate de RRF, no una victoria.** En 9 de 20 preguntas (Q03, Q06, Q08, Q09, Q11, Q12, Q17, Q19 y Q20) dos documentos suman exactamente el mismo puntaje: uno es primero en vector y segundo en BM25, el otro al revés, y ambos suman 1/61 + 1/62. El desempate de `knowledge/fusion.py` (mejor rango y luego el id ascendente) es una convención arbitraria: en Q03 compiten DOC-03 y DOC-04; en Q06 y Q19, el documento correcto y el DOC-12 histórico; en Q17, DOC-07 y DOC-12 (que es la respuesta).
+
+`make eval-retrieval` lo mide como ablación informativa (nunca cambia la selección) con un RRF propio de `evaluation/retrieval/tiebreak.py`, que reproduce las filas de la tabla principal (se verifica en cada corrida; el RRF de producción no se toca). *Por defecto* es la convención de producción; *invertido* usa el id descendente; *esperado* es el promedio **exacto** sobre todos los órdenes posibles de cada grupo de empate, ordenado al azar con igual probabilidad: se enumeran las permutaciones (los grupos son de dos documentos), sin sorteo, así que da lo mismo en cada corrida. Los números están en `evaluation/results/retrieval/metrics.json` (`tie_break`) y en `report.md`.
+
+| Estrategia | MRR por defecto | MRR invertido | MRR esperado | MRR peor orden | MRR mejor orden |
+|---|---:|---:|---:|---:|---:|
+| hybrid | 0.975 | 0.925 | 0.950 | 0.900 | 1.000 |
+| hybrid+meta(demote) | 1.000 | 0.975 | 0.988 | 0.975 | 1.000 |
+
+El recall@3 (0.975) y el hit@3 (1.000) no cambian con el desempate. Lo que cambia es la posición del primero:
+
+| Estrategia | El orden de los dos primeros depende del desempate | El rango recíproco o el recall@3 cambian |
+|---|---|---|
+| hybrid | Q03, Q06, Q08, Q09, Q17, Q19, Q20 | Q03, Q06, Q17, Q19 |
+| hybrid+meta(demote) | Q03, Q09, Q17, Q20 | Q03 |
+
+- **La ventaja del híbrido sobre BM25 es en parte suerte del desempate.** Su MRR va de 0.925 (invertido) a 0.975 (producción), con 0.950 esperado, y entre todos los órdenes posibles de 0.900 a 1.000. Contra el 0.917 de BM25 la diferencia es +0.058 con el desempate de producción, +0.033 esperada y +0.008 invertida (menos de una pregunta, que son 0.050); en el peor orden posible el híbrido queda por debajo de BM25. Con 20 preguntas **no se puede declarar un ganador entre vector, BM25 e híbrido**.
+- **El efecto de la política de vigencia es de la política, no del desempate.** Q06, Q17 y Q19 dependen del desempate en el híbrido y dejan de depender con `hybrid+meta(demote)`, que ordena por vigencia antes de mirar el empate. Lo que sí cambia es el tamaño del efecto sobre el MRR del híbrido: +0.025 con el desempate de producción (solo Q17), +0.050 con el invertido (Q06 y Q19) y +0.038 esperado. `hybrid+meta(demote)` sigue dependiendo del desempate en Q03 (DOC-03 contra DOC-04, que la política trata igual): su MRR va de 0.975 a 1.000.
+- **Lo que no se midió:** si otro desempate cambiaría el chunking elegido (la selección declarada se hizo con el de producción), ni los empates dentro de vector y de BM25 por separado.
 
 ### La metadata: vigencia y tipo
 
-- **Vigencia (usada).** `knowledge/temporal.py` lee el período que nombra la pregunta (un mes, una fecha o un año; sin nombrarlo, "hoy") y lo compara con la vigencia de cada documento. Dos modos: `filter` oculta los documentos no vigentes y `demote` los baja. El efecto medido: MRR 0.975 a 1.000 (+0.025, solo Q17; el intervalo toca el 0). `filter` y `demote` empatan; la regla declarada prefiere `demote` y el agente lo usa, porque no oculta un documento si el período se leyó mal.
+- **Vigencia (usada).** `knowledge/temporal.py` lee el período que nombra la pregunta (un mes, una fecha o un año; sin nombrarlo, "hoy") y lo compara con la vigencia de cada documento. Dos modos: `filter` oculta los documentos no vigentes y `demote` los baja. El efecto medido: MRR 0.975 a 1.000 (+0.025, solo Q17; el intervalo toca el 0), con el desempate de producción; con el invertido es +0.050 ([desempate](#sensibilidad-al-desempate-de-rrf)). `filter` y `demote` empatan; la regla declarada prefiere `demote` y el agente lo usa, porque no oculta un documento si el período se leyó mal.
 - **Tipo (descartado).** Bajar los documentos de `tipo: historico` sin mirar fechas empeora: recall@3 0.875 y MRR 0.908 (empeoran Q17 y Q18, que preguntan justamente por el pasado). El tipo no aporta nada que la vigencia no diga mejor.
 - **Otras ablaciones** (informativas, nunca cambian la selección): el stemming de plurales no ayuda (recall@3 0.950); quitar palabras funcionales mueve una pregunta (Q01); no separar `zt-pro-2` en partes, fusionar por documento y el encabezado en el híbrido sobre `document` mueven cero o una pregunta. Con 20 preguntas, una pregunta es 5 puntos de cualquier promedio y **no es evidencia**.
 
@@ -530,7 +553,7 @@ Una fila por requisito. Estados: ⬜ pendiente · 🟨 parcial · ✅ hecho. Un 
 **De la medición**
 
 - **Un solo modelo, tres repeticiones y entre 24 y 78 corridas por partición.** Los intervalos son anchos: `heldout` va de 39% a 76%, y un caso con 3/3 tiene un intervalo de [0,44; 1,00]. Las tasas por caso son señales.
-- **Las 20 preguntas de retrieval no separan las estrategias.** Una pregunta mueve 5 puntos y los intervalos pareados tocan el 0. Además, el híbrido depende del desempate de RRF en tres preguntas (ver la Parte 1).
+- **Las 20 preguntas de retrieval no separan las estrategias.** Una pregunta mueve 5 puntos y los intervalos pareados tocan el 0. Además, el MRR del híbrido depende del desempate de RRF: va de 0.925 a 0.975 (esperado 0.950) y su ventaja sobre BM25 es en parte suerte ([medición](#sensibilidad-al-desempate-de-rrf)).
 - **La partición `heldout` perdió independencia solo en el sentido documentado en el ADR-0008:** el prompt entregado nunca se ajustó con sus fallos, pero la decisión de revertir las dos reglas sí miró esos resultados (se eligió entre dos versiones con 24 corridas).
 - **Los LOCK al 100% con el modelo real son menos fuertes de lo que parecen.** En los escenarios de ataque el modelo no intentó el ataque, así que ahí lo que prueba la garantía son los modelos guionados hostiles.
 - **El cruce a SUGGEST casi no se ejerce con el modelo real.** `low_confidence` no se disparó nunca en X2 con el modelo real (0 de 3), porque el modelo no busca en la documentación las preguntas fuera de tema; SUGGEST se prueba con corridas guionadas y con los tests de operador, no con corridas reales.

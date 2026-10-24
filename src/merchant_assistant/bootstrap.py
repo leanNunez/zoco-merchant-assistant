@@ -71,8 +71,8 @@ DOCS_DIR = Path("docs")  # the default of Settings.docs_dir; tests read the real
 # `make eval-retrieval` picked (evaluation/results/retrieval/report.md): `document` chunking, then
 # `hybrid+meta(demote)` (validity applied by demotion, which never hides a document). The honest
 # caveat travels with it: 20 questions, one of them moves an average 5 points, and the paired
-# intervals touch zero. tests/integration/agent/test_agent_retrieval_config.py pins both choices
-# to the committed report.
+# intervals touch zero. tests/integration/agent/test_agent_no_data_gate.py pins the chunking choice
+# (and the gate constants) to the committed report.
 AGENT_CHUNKING = ChunkingStrategy("document")
 # BM25 without stemming, stopwords or other options: the stopword tokenizer was measured and
 # NOT adopted (gate_calibration.md, "Tokenizador con stopwords: decisión").

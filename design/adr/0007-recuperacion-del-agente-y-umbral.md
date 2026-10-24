@@ -251,3 +251,14 @@ degradada obligaba a relajar la regla (a) y dejaba sin respuesta 13 de las 30 co
 - `tests/integration/evaluation/test_conversation_validation.py`: S20 y S21 pasan en `scripted`, el
   modelo nulo no rompe ningún LOCK y el agente inseguro falla LOCK en los ataques y cruces.
 - `make eval-agent` y `make eval-retrieval` regeneran los resultados que versionan los números.
+
+## Actualización (2026-10-24): el resultado del híbrido depende del desempate de RRF
+
+Las tablas de este ADR usan el desempate de `knowledge/fusion.py` (mejor rango y luego el id
+ascendente). En 9 de las 20 preguntas dos documentos suman exactamente el mismo puntaje de RRF, así que
+esa convención arbitraria mueve el MRR. `make eval-retrieval` ahora lo mide (ablación informativa en
+`evaluation/retrieval/tiebreak.py`, guardada en `metrics.json` y `report.md`): el MRR de `hybrid` va de
+0,925 (id descendente) a 0,975 (producción), con 0,950 esperado; el de `hybrid+meta(demote)` va de 0,975
+a 1,000, con 0,988 esperado. La ventaja del híbrido sobre BM25 (0,917) es en parte suerte del
+desempate. La decisión no cambia: `hybrid+meta(demote)` es la configuración del agente, y es la que menos
+depende del desempate (solo Q03). La afirmación de más arriba, "no demuestra nada", queda reforzada.
