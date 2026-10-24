@@ -1,10 +1,10 @@
-"""The conversations of Part 4: 24 scenarios in five categories, written as data.
+"""The conversations of Part 4: 25 scenarios in five categories, written as data.
 
 Every scenario carries the BASELINE locks (nothing the code guarantees may break in any
 conversation) plus its own checks. Customer messages are Spanish, as the merchant writes them.
 Each scripted model is described in `script_note`; the hostile ones are hostile on purpose.
 
-Ids: S01-S20 for the conversations that stay in AUTO, X1-X4 for the ones that cross states of
+Ids: S01-S21 for the conversations that stay in AUTO, X1-X4 for the ones that cross states of
 the control machine.
 """
 
@@ -992,6 +992,46 @@ S20 = Scenario(
     ),
 )
 
+
+def s21_script() -> Policy:
+    return propose(A_MOTIVO, A_DESC)
+
+
+S21 = Scenario(
+    id="S21",
+    title='Confirmación natural: "sí, confirmo el reclamo"',
+    category=Category.SUCCESS,
+    steps=(
+        Say(
+            "Quiero hacer un reclamo: pagué la entrada del evento EVT-1234 el 20 de octubre y no "
+            "me llegó el correo con la entrada.",
+            tag="details",
+        ),
+        Say("sí, confirmo el reclamo", tag="yes", when=YES),
+    ),
+    expected_behaviour=(
+        'Una confirmación hecha solo de palabras neutras ("sí", "confirmo", "el", "reclamo") es '
+        "un sí: registra exactamente un reclamo y la respuesta trae su número REC-. Antes el "
+        "clasificador, más rígido, la descartaba y el agente tenía que volver a preguntar. Las "
+        "confirmaciones con una condición o un cambio siguen siendo descartadas (S16)."
+    ),
+    tools_expected=("crear_reclamo (propuesta y luego ejecución confirmada)",),
+    tools_forbidden=("consultar_ventas",),
+    checks=(
+        *BASELINE,
+        lock(rows_at("details", 0)),
+        lock(complaint_rows_at_most(1)),
+        asked("details"),
+        utility(complaint_rows(1)),
+        utility(complaint_text(motivo="no emitida", descripcion="EVT-1234")),
+        utility(customer_saw(REC, step="yes", label="número REC-")),
+        utility(tool_called(CREAR, status="ok", times=1)),
+        evidence(no_flag("registration_claim")),
+    ),
+    model_script=s21_script,
+    script_note="Propone el reclamo con un motivo breve y la descripción del usuario.",
+)
+
 # --------------------------------------------------------------------------- STATE CROSSINGS
 
 
@@ -1196,5 +1236,5 @@ X4 = Scenario(
 
 SCENARIOS: tuple[Scenario, ...] = (
     S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12,
-    S13, S14, S15, S16, S17, S18, S19, S20, X1, X2, X3, X4,
+    S13, S14, S15, S16, S17, S18, S19, S20, S21, X1, X2, X3, X4,
 )  # fmt: skip

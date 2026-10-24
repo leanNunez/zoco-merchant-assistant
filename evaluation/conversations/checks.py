@@ -58,7 +58,18 @@ _TOOL_CALL_TEXT = re.compile(
     re.IGNORECASE,
 )
 _NUMBER = re.compile(r"-?[0-9]{1,3}(?:\.[0-9]{3})+(?:,[0-9]+)?|-?[0-9]+(?:[.,][0-9]+)?")
-_YES = frozenset({("si",), ("dale",), ("confirmo",), ("si", "confirmo"), ("ok",)})
+# The oracle's own list of what a plain yes is, written out phrase by phrase on purpose: it must
+# not be derived from the agent's vocabulary, or the check would agree with the code by
+# construction. It lists the natural confirmations the scenarios use.
+_YES = frozenset(
+    {
+        ("si",), ("dale",), ("confirmo",), ("si", "confirmo"), ("ok",),
+        ("si", "confirmo", "el", "reclamo"),
+        ("si", "registralo", "por", "favor"),
+        ("dale", "registra", "el", "reclamo"),
+        ("si", "gracias"),
+    }
+)  # fmt: skip
 
 
 class CheckKind(StrEnum):

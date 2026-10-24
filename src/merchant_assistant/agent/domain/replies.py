@@ -7,10 +7,16 @@ when it is made entirely of refusal words and one of them is a real "no". Everyt
 including a yes mixed with a no ("si no"), a yes with a change ("si pero cambia el motivo")
 a yes followed by more instructions on another line, or a question ("¿sí?"), is OTHER.
 
-The trade-off is a rigid experience: a harmless but longer confirmation such as
-"sí, confirmo el reclamo" is OTHER, so the pending action is dropped and the agent has to
-ask again. That is the safe failure. The unsafe one, registering a complaint the user did
-not clearly accept, is what this module exists to prevent.
+The trade-off is a rigid experience, softened on purpose: the vocabulary includes NEUTRAL
+words (articles, "mi", "reclamo", "registra", "eso", "gracias"...) that cannot change what is
+being accepted, so "sí, confirmo el reclamo" or "dale, registra el reclamo" count. A word that
+could change it ("pero", "otro", "cambia", "motivo", "no") is not in the vocabulary, so any
+message that uses one is OTHER: the pending action is dropped and the agent has to ask again.
+That is the safe failure. The unsafe one, registering a complaint the user did not clearly
+accept, is what this module exists to prevent.
+
+Known idioms that now read as a yes although they hedge: "si eso" and "si bien" said alone.
+They are rare as a whole message, and the confirmation still has to name the exact values.
 """
 
 from __future__ import annotations
@@ -24,6 +30,9 @@ AFFIRMATIVE_WORDS = frozenset(
     {
         "si", "confirmo", "confirmado", "dale", "ok", "okay", "listo", "correcto", "perfecto",
         "adelante", "registralo", "registrar", "de", "acuerdo", "por", "favor", "claro", "exacto",
+        # Neutral: they cannot change WHAT is accepted, only how politely or fully it is said.
+        "el", "la", "lo", "mi", "reclamo", "reclamos", "registra", "registre", "registren",
+        "eso", "esto", "asi", "bien", "gracias",
     }
 )  # fmt: skip
 # Words that say yes on their own. "listo", "perfecto" or "por favor" alone do not.
