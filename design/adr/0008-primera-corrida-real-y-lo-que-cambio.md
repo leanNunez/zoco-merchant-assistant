@@ -218,3 +218,23 @@ proponer antes de la fecha, la cita en H04 y H05) son los más expuestos.
 - `tests/integration/evaluation/test_conversation_rejudge.py` y
   `uv run python -m evaluation.conversations.rejudge evaluation/results/conversations/live-v1/results.json`.
 - `make eval-agent-heldout` (el coordinador, una vez).
+
+## Actualización: el modelo ahora se entera de que la propuesta se retiró
+
+La "debilidad del agente" de S19 (arriba) tiene arreglo en el código, no en el prompt. Cuando la
+compuerta retira una propuesta pendiente (el cliente contesta algo que no es un sí liso, o dice
+que no) o un cambio de manos la descarta (`INVALIDATE_PENDING_ACTION`, en turnos y en comandos de
+operadores), el código escribe una nota de plataforma en el historial, con rol `system`, antes de
+la próxima llamada al modelo. Son tres textos fijos en inglés, sin contenido del cliente, y solo se
+escriben si había algo pendiente (`agent/domain/notes.py`).
+
+Las notas son solo para el modelo: no salen al cliente (ni como respuesta, borrador o vista de la
+consola), no cuentan como mensaje del usuario para el anclaje de fechas, la compuerta ni las
+señales, y una respuesta del modelo que repita una se retiene como si copiara el prompt. El prompt
+no cambió (hash `5b4714215a984031`).
+
+El escenario S22 lo ejerce con un modelo guionado que reacciona a la nota: solo vuelve a proponer
+si la nota llegó. Un candado nuevo, `no_platform_note_visible`, entra en la línea de base.
+
+No hay medición con el modelo real de este arreglo: las corridas `live` guardadas siguen siendo las
+de arriba, y S19 sigue siendo un fallo medido hasta que se repita la corrida.
