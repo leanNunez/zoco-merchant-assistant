@@ -6,13 +6,14 @@ cached embedder from the composition root, and the tests pass a hashing fake.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
 
 from evaluation.retrieval.scoring import Interval, StrategyRun, bootstrap_interval, evaluate
 from evaluation.retrieval.scoring import paired_difference_interval as paired
 from evaluation.retrieval.selection import ChunkingCandidate, Selection, pick_best, select_chunking
+from evaluation.retrieval.tiebreak import TieBreakRow, fuse_with_ties, tie_break_sensitivity
 from merchant_assistant.knowledge.bm25 import BM25Index
 from merchant_assistant.knowledge.chunking import Chunk, ChunkingStrategy, chunk_corpus
 from merchant_assistant.knowledge.documents import Document
@@ -105,6 +106,7 @@ class RetrievalEvaluation:
     periods: dict[str, Period]
     chunk_counts: dict[str, int]
     ablation_deltas: tuple[AblationDelta, ...] = ()
+    tie_break: tuple[TieBreakRow, ...] = ()
 
 
 def with_header_toggled(strategy: ChunkingStrategy) -> ChunkingStrategy:
@@ -244,6 +246,44 @@ def run_evaluation(
         periods={q.id: reference_period(q.text, REFERENCE_DATE) for q in questions},
         chunk_counts=counts,
         ablation_deltas=tuple(ablation_delta(run, reference) for run, reference in pairs),
+        tie_break=_tie_break(chosen, questions, by_name),
+    )
+
+
+def _tie_break(
+    chosen: _Strategies, questions: Sequence[Question], by_name: dict[str, StrategyRun]
+) -> tuple[TieBreakRow, ...]:
+    """The hybrid and the hybrid with the validity policy under other RRF tie-breaks.
+
+    The fusion is recomputed from the same two chunk rankings the hybrid retriever fuses, so
+    the default tie-break must reproduce the main table's rows exactly (it is checked).
+    """
+    depth = len(chosen.chunks)
+    doc_of = {chunk.id: chunk.doc_id for chunk in chosen.chunks}
+    fused = [
+        fuse_with_ties(
+            [
+                [found.chunk_id for found in retriever.search(question.text, depth)]
+                for retriever in (chosen.vector, chosen.bm25)
+            ]
+        )
+        for question in questions
+    ]
+    policies: tuple[tuple[str, Callable[[Retriever], Retriever]], ...] = (
+        ("hybrid", lambda base: base),
+        ("hybrid+meta(demote)", lambda base: chosen.meta("demote", base)),
+    )
+    return tuple(
+        tie_break_sensitivity(
+            strategy=name,
+            chunking=chosen.label,
+            questions=questions,
+            fused=fused,
+            doc_of=doc_of,
+            wrap=wrap,
+            reference=by_name[name].outcomes,
+        )
+        for name, wrap in policies
     )
 
 

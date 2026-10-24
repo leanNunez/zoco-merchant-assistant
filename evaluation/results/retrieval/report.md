@@ -134,6 +134,40 @@ Cada variante contra la estrategia que modifica. Una pregunta **mejora** si su p
 - Mueven exactamente una pregunta: `document+header` bm25, `document+header` hybrid, `document` bm25(stopwords), `section` hybrid(fuse by document). Una pregunta es 5 puntos de cualquier promedio: **una diferencia de una pregunta no es evidencia**, es lo que cambia un promedio por azar de redacción.
 - Mueven dos o más preguntas: `document` bm25(stem), `document+header` vector, `document` hybrid+kind-demotion(historico), `document` bm25(stopwords, stem). Con 20 preguntas y los intervalos de arriba, ni siquiera eso alcanza para cambiar lo ya elegido.
 
+## Sensibilidad al desempate de RRF
+
+Informativa: **no cambia la selección declarada**. En RRF dos documentos pueden sumar exactamente el mismo puntaje: si A es primero en vector y segundo en BM25, y B al revés, los dos suman 1/61 + 1/62. `knowledge/fusion.py` desempata por mejor rango y luego por id ascendente: una convención arbitraria, no evidencia. Acá se recalcula la fusión sobre `document` con un RRF propio de `evaluation/retrieval/tiebreak.py` (el de producción no se toca):
+
+- **por defecto**: la convención de producción; se verifica que reproduce las filas de la tabla principal.
+- **invertido**: mejor rango y luego id descendente.
+- **esperado**: promedio exacto sobre todos los órdenes posibles de cada grupo de empate exacto, ordenado al azar con igual probabilidad. Se calcula enumerando las permutaciones de cada grupo (son de dos documentos): no hay sorteo y el resultado es idéntico en cada corrida.
+- **peor / mejor orden posible**: el MRR si en cada pregunta el empate cayera siempre en el peor (o el mejor) orden.
+
+| Estrategia | Desempate | recall@3 | hit@3 | MRR |
+|---|---|---:|---:|---:|
+| hybrid | por defecto | 0.975 | 1.000 | 0.975 |
+| hybrid | invertido | 0.975 | 1.000 | 0.925 |
+| hybrid | esperado | 0.975 | 1.000 | 0.950 |
+| hybrid | peor orden posible | — | — | 0.900 |
+| hybrid | mejor orden posible | — | — | 1.000 |
+| hybrid+meta(demote) | por defecto | 0.975 | 1.000 | 1.000 |
+| hybrid+meta(demote) | invertido | 0.975 | 1.000 | 0.975 |
+| hybrid+meta(demote) | esperado | 0.975 | 1.000 | 0.988 |
+| hybrid+meta(demote) | peor orden posible | — | — | 0.975 |
+| hybrid+meta(demote) | mejor orden posible | — | — | 1.000 |
+
+- Preguntas con un empate exacto entre dos documentos (9 de 20): Q03, Q06, Q08, Q09, Q11, Q12, Q17, Q19, Q20.
+- `hybrid`: el orden de los dos primeros documentos depende del desempate en Q03, Q06, Q08, Q09, Q17, Q19, Q20; el rango recíproco o el recall@3 cambian en Q03, Q06, Q17, Q19.
+- `hybrid+meta(demote)`: el orden de los dos primeros documentos depende del desempate en Q03, Q09, Q17, Q20; el rango recíproco o el recall@3 cambian en Q03.
+
+Lectura:
+
+- **La ventaja del híbrido sobre BM25 es en parte suerte del desempate.** Con la convención de producción el MRR del híbrido es 0.975 contra 0.917 de BM25 (+0.058); con el desempate invertido es 0.925 (+0.008) y el valor esperado es 0.950 (+0.033). El rango de las tres variantes es [0.925, 0.975] y el de todos los órdenes posibles, [0.900, 1.000]. En el peor orden posible el híbrido queda por debajo de BM25.
+- Efecto de la política de vigencia sobre el MRR del híbrido: +0.025 con el desempate de producción, +0.050 invertido y +0.038 esperado.
+- Q06, Q17, Q19 dependían del desempate en el híbrido y con `hybrid+meta(demote)` ya no: la política ordena por vigencia antes de mirar el empate, así que su efecto en esas preguntas es una propiedad de la política y no del desempate.
+- `hybrid+meta(demote)` sigue dependiendo del desempate en Q03: su MRR va de 0.975 a 1.000 según el orden (esperado 0.988), porque la política no resuelve ese empate.
+- Con estas diferencias de una o dos preguntas no se puede declarar un ganador entre vector, BM25 e híbrido.
+
 ## Por pregunta
 
 Sobre `document`. Cada celda: posición del primer documento relevante (— si no aparece) y el top 3 de documentos. **✗** marca las preguntas en las que alguna estrategia deja afuera del top 3 algún documento relevante; la última columna dice cuáles.

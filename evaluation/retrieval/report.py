@@ -27,12 +27,16 @@ from evaluation.retrieval.scoring import (
     StrategyRun,
 )
 from evaluation.retrieval.selection import SELECTION_RULE
+from evaluation.retrieval.tiebreak import RRF_K, Metrics, TieBreakRow
 from merchant_assistant.knowledge.questions import Question
 
 # Six decimals are far below what 20 questions can resolve (one question moves a mean by
 # 0.05) and keep the JSON stable against last-bit float noise.
 _DECIMALS = 6
 _SHORT_QUESTION = 60
+TIE_BREAK_METHOD = "exact enumeration of the permutations inside each exact-tie group; no sampling"
+# Means of the same values in another order can differ in the last bit.
+_SAME = 1e-9
 
 
 def to_json(
@@ -68,6 +72,11 @@ def to_json(
         ],
         "ablations": [_summary(run) for run in evaluation.ablations],
         "ablation_deltas": [_delta_json(delta) for delta in evaluation.ablation_deltas],
+        "tie_break": {
+            "method": TIE_BREAK_METHOD,
+            "rrf_k": RRF_K,
+            "strategies": [_tie_break_json(row) for row in evaluation.tie_break],
+        },
         "per_question": [
             {
                 "id": question.id,
@@ -209,6 +218,7 @@ def to_markdown(
         "",
         *_movement_reading(evaluation.ablation_deltas, len(questions)),
         "",
+        *_tie_break_section(evaluation, selected),
         "## Por pregunta",
         "",
         f"Sobre `{selected}`. Cada celda: posición del primer documento relevante (— si no "
@@ -224,6 +234,140 @@ def to_markdown(
         "",
     ]
     return "\n".join(lines)
+
+
+def _tie_break_section(evaluation: RetrievalEvaluation, selected: str) -> list[str]:
+    rows = evaluation.tie_break
+    if not rows:
+        return []
+    variants = (
+        ("por defecto", "default"),
+        ("invertido", "reversed"),
+        ("esperado", "expected"),
+    )
+    table = [
+        "| Estrategia | Desempate | recall@3 | hit@3 | MRR |",
+        "|---|---|---:|---:|---:|",
+    ]
+    for row in rows:
+        for label, attribute in variants:
+            metrics: Metrics = getattr(row, attribute)
+            table.append(
+                f"| {row.strategy} | {label} | {metrics.recall_at_3:.3f} "
+                f"| {metrics.hit_at_3:.3f} | {metrics.mrr:.3f} |"
+            )
+        table.append(f"| {row.strategy} | peor orden posible | — | — | {row.worst_mrr:.3f} |")
+        table.append(f"| {row.strategy} | mejor orden posible | — | — | {row.best_mrr:.3f} |")
+    return [
+        "## Sensibilidad al desempate de RRF",
+        "",
+        "Informativa: **no cambia la selección declarada**. En RRF dos documentos pueden sumar "
+        "exactamente el mismo puntaje: si A es primero en vector y segundo en BM25, y B al "
+        f"revés, los dos suman 1/{RRF_K + 1} + 1/{RRF_K + 2}. `knowledge/fusion.py` desempata "
+        "por mejor rango y luego por id ascendente: una convención arbitraria, no evidencia. "
+        f"Acá se recalcula la fusión sobre `{selected}` con un RRF propio de "
+        "`evaluation/retrieval/tiebreak.py` (el de producción no se toca):",
+        "",
+        "- **por defecto**: la convención de producción; se verifica que reproduce las filas "
+        "de la tabla principal.",
+        "- **invertido**: mejor rango y luego id descendente.",
+        "- **esperado**: promedio exacto sobre todos los órdenes posibles de cada grupo de "
+        "empate exacto, ordenado al azar con igual probabilidad. Se calcula enumerando las "
+        "permutaciones de cada grupo (son de dos documentos): no hay sorteo y el resultado es "
+        "idéntico en cada corrida.",
+        "- **peor / mejor orden posible**: el MRR si en cada pregunta el empate cayera siempre "
+        "en el peor (o el mejor) orden.",
+        "",
+        *table,
+        "",
+        *_tie_break_lists(rows, len(evaluation.periods)),
+        "",
+        "Lectura:",
+        "",
+        *_tie_break_reading(evaluation),
+        "",
+    ]
+
+
+def _tie_break_lists(rows: Sequence[TieBreakRow], total: int) -> list[str]:
+    def ids(found: Sequence[str]) -> str:
+        return ", ".join(found) or "ninguna"
+
+    lines = [
+        f"- Preguntas con un empate exacto entre dos documentos ({len(rows[0].with_ties)} de "
+        f"{total}): {ids(rows[0].with_ties)}."
+    ]
+    lines.extend(
+        f"- `{row.strategy}`: el orden de los dos primeros documentos depende del desempate "
+        f"en {ids(row.first_two_depend)}; el rango recíproco o el recall@3 cambian en "
+        f"{ids(row.outcome_depends)}."
+        for row in rows
+    )
+    return lines
+
+
+def _tie_break_reading(evaluation: RetrievalEvaluation) -> list[str]:
+    """In plain words: how much of the hybrid advantage is tie-break luck, and the policy."""
+    rows = {row.strategy: row for row in evaluation.tie_break}
+    runs = {row.run.strategy: row.run for row in evaluation.main}
+    if not {"hybrid", "hybrid+meta(demote)"} <= rows.keys() or "bm25" not in runs:
+        return []
+    hybrid, policy, bm25 = rows["hybrid"], rows["hybrid+meta(demote)"], runs["bm25"].mrr
+    values = (hybrid.default.mrr, hybrid.reversed.mrr, hybrid.expected.mrr)
+    low, high = min(values), max(values)
+    lines = []
+    if high - low < _SAME:
+        lines.append(f"- El MRR del híbrido ({hybrid.default.mrr:.3f}) no depende del desempate.")
+    else:
+        verdict = (
+            "En el peor orden posible el híbrido queda por debajo de BM25."
+            if hybrid.worst_mrr < bm25 - _SAME
+            else "Aun en el peor orden posible el híbrido queda por encima de BM25."
+        )
+        lines.append(
+            "- **La ventaja del híbrido sobre BM25 es en parte suerte del desempate.** Con la "
+            f"convención de producción el MRR del híbrido es {hybrid.default.mrr:.3f} contra "
+            f"{bm25:.3f} de BM25 ({hybrid.default.mrr - bm25:+.3f}); con el desempate invertido "
+            f"es {hybrid.reversed.mrr:.3f} ({hybrid.reversed.mrr - bm25:+.3f}) y el valor "
+            f"esperado es {hybrid.expected.mrr:.3f} ({hybrid.expected.mrr - bm25:+.3f}). El "
+            f"rango de las tres variantes es [{low:.3f}, {high:.3f}] y el de todos los órdenes "
+            f"posibles, [{hybrid.worst_mrr:.3f}, {hybrid.best_mrr:.3f}]. {verdict}"
+        )
+    gains = [
+        policy.default.mrr - hybrid.default.mrr,
+        policy.reversed.mrr - hybrid.reversed.mrr,
+        policy.expected.mrr - hybrid.expected.mrr,
+    ]
+    lines.append(
+        f"- Efecto de la política de vigencia sobre el MRR del híbrido: {gains[0]:+.3f} con el "
+        f"desempate de producción, {gains[1]:+.3f} invertido y {gains[2]:+.3f} esperado."
+    )
+    resolved = [q for q in hybrid.outcome_depends if q not in policy.outcome_depends]
+    remaining = policy.outcome_depends
+    if resolved:
+        lines.append(
+            f"- {', '.join(resolved)} dependían del desempate en el híbrido y con "
+            "`hybrid+meta(demote)` ya no: la política ordena por vigencia antes de mirar el "
+            "empate, así que su efecto en esas preguntas es una propiedad de la política y no "
+            "del desempate."
+        )
+    if remaining:
+        lines.append(
+            f"- `hybrid+meta(demote)` sigue dependiendo del desempate en {', '.join(remaining)}: "
+            f"su MRR va de {policy.worst_mrr:.3f} a {policy.best_mrr:.3f} según el orden "
+            f"(esperado {policy.expected.mrr:.3f}), porque la política no resuelve ese "
+            "empate."
+        )
+    else:
+        lines.append(
+            f"- El MRR de `hybrid+meta(demote)` ({policy.default.mrr:.3f}) no depende del "
+            "desempate."
+        )
+    lines.append(
+        "- Con estas diferencias de una o dos preguntas no se puede declarar un ganador entre "
+        "vector, BM25 e híbrido."
+    )
+    return lines
 
 
 def _per_question_lines(
@@ -297,6 +441,29 @@ def _delta_json(delta: AblationDelta) -> dict[str, object]:
         "mrr_delta": _round(delta.mrr_delta),
         "improved": list(delta.improved),
         "worsened": list(delta.worsened),
+    }
+
+
+def _tie_break_json(row: TieBreakRow) -> dict[str, object]:
+    return {
+        "strategy": row.strategy,
+        "chunking": row.chunking,
+        "default": _metrics_json(row.default),
+        "reversed": _metrics_json(row.reversed),
+        "expected": _metrics_json(row.expected),
+        "worst_case_mrr": _round(row.worst_mrr),
+        "best_case_mrr": _round(row.best_mrr),
+        "questions_with_exact_tie": list(row.with_ties),
+        "first_two_order_depends": list(row.first_two_depend),
+        "outcome_depends": list(row.outcome_depends),
+    }
+
+
+def _metrics_json(metrics: Metrics) -> dict[str, float]:
+    return {
+        "recall_at_3": _round(metrics.recall_at_3),
+        "hit_at_3": _round(metrics.hit_at_3),
+        "mrr": _round(metrics.mrr),
     }
 
 

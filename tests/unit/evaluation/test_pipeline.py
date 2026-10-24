@@ -261,3 +261,20 @@ def test_two_runs_over_the_same_inputs_give_the_same_evaluation(
     second = run_evaluation(MINI_DOCUMENTS, MINI_QUESTIONS, HashingEmbedder())
 
     assert first == second
+
+
+def test_the_tie_break_ablation_covers_the_hybrid_and_the_hybrid_with_the_policy(
+    embedder: HashingEmbedder,
+) -> None:
+    evaluation = run_evaluation(MINI_DOCUMENTS, MINI_QUESTIONS, embedder)
+    main = {row.run.strategy: row.run for row in evaluation.main}
+
+    assert [row.strategy for row in evaluation.tie_break] == ["hybrid", "hybrid+meta(demote)"]
+    for row in evaluation.tie_break:
+        assert row.chunking == evaluation.selection.selected.label
+        # The default tie-break is the production one: it reproduces the main table.
+        assert row.default.mrr == pytest.approx(main[row.strategy].mrr)
+        assert row.default.recall_at_3 == pytest.approx(main[row.strategy].recall_at_3)
+        assert row.worst_mrr <= row.expected.mrr <= row.best_mrr
+        assert row.worst_mrr <= row.default.mrr <= row.best_mrr
+        assert row.worst_mrr <= row.reversed.mrr <= row.best_mrr

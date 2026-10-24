@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import date
 
 from evaluation.retrieval.pipeline import (
@@ -15,6 +16,7 @@ from evaluation.retrieval.provenance import Provenance
 from evaluation.retrieval.report import to_json, to_markdown
 from evaluation.retrieval.scoring import Interval, StrategyRun, score_question
 from evaluation.retrieval.selection import ChunkingCandidate, Selection
+from evaluation.retrieval.tiebreak import Metrics, TieBreakRow
 
 from merchant_assistant.knowledge.questions import Question
 from merchant_assistant.knowledge.temporal import Period
@@ -198,3 +200,86 @@ def test_the_json_keeps_the_ablation_deltas() -> None:
         "improved": ["QB"],
         "worsened": [],
     }
+
+
+TIE_BREAK = (
+    TieBreakRow(
+        "hybrid",
+        "section",
+        default=Metrics(1.0, 1.0, 0.75),
+        reversed=Metrics(1.0, 1.0, 0.5),
+        expected=Metrics(1.0, 1.0, 0.625),
+        worst_mrr=0.5,
+        best_mrr=0.75,
+        with_ties=("QA", "QB"),
+        first_two_depend=("QA", "QB"),
+        outcome_depends=("QA",),
+    ),
+    TieBreakRow(
+        "hybrid+meta(demote)",
+        "section",
+        default=Metrics(1.0, 1.0, 0.75),
+        reversed=Metrics(1.0, 1.0, 0.75),
+        expected=Metrics(1.0, 1.0, 0.75),
+        worst_mrr=0.75,
+        best_mrr=0.75,
+        with_ties=("QA", "QB"),
+        first_two_depend=("QB",),
+        outcome_depends=(),
+    ),
+)
+
+
+def with_tie_break() -> str:
+    return to_markdown(replace(evaluation(), tie_break=TIE_BREAK), PROVENANCE, QUESTIONS)
+
+
+def test_the_tie_break_section_gives_each_variant_and_the_worst_and_best_order() -> None:
+    text = with_tie_break()
+
+    assert "## Sensibilidad al desempate de RRF" in text
+    assert "| hybrid | por defecto | 1.000 | 1.000 | 0.750 |" in text
+    assert "| hybrid | invertido | 1.000 | 1.000 | 0.500 |" in text
+    assert "| hybrid | esperado | 1.000 | 1.000 | 0.625 |" in text
+    assert "| hybrid | peor orden posible | — | — | 0.500 |" in text
+    assert "| hybrid | mejor orden posible | — | — | 0.750 |" in text
+    assert "(2 de 2): QA, QB." in text
+    assert (
+        "depende del desempate en QB; el rango recíproco o el recall@3 cambian en ninguna" in text
+    )
+
+
+def test_the_tie_break_reading_says_the_hybrid_advantage_is_partly_luck() -> None:
+    text = with_tie_break()
+
+    # bm25 has MRR 0.75 in this toy; the hybrid ranges from 0.5 to 0.75 over the three variants.
+    assert "La ventaja del híbrido sobre BM25 es en parte suerte del desempate" in text
+    assert "El rango de las tres variantes es [0.500, 0.750]" in text
+    assert "En el peor orden posible el híbrido queda por debajo de BM25." in text
+
+
+def test_the_reading_says_the_policy_effect_is_the_policys_when_it_removes_the_dependence() -> None:
+    text = with_tie_break()
+
+    assert "QA dependían del desempate en el híbrido y con `hybrid+meta(demote)` ya no" in text
+    assert "El MRR de `hybrid+meta(demote)` (0.750) no depende del desempate." in text
+
+
+def test_without_tie_break_rows_the_report_has_no_such_section() -> None:
+    assert "desempate de RRF" not in markdown()
+
+
+def test_the_json_keeps_the_tie_break_numbers_and_the_method() -> None:
+    data = json.loads(to_json(replace(evaluation(), tie_break=TIE_BREAK), PROVENANCE, QUESTIONS))
+
+    tie = data["tie_break"]
+    assert tie["rrf_k"] == 60
+    assert "no sampling" in tie["method"]
+    first = tie["strategies"][0]
+    assert first["default"] == {"recall_at_3": 1.0, "hit_at_3": 1.0, "mrr": 0.75}
+    assert first["reversed"]["mrr"] == 0.5
+    assert first["expected"]["mrr"] == 0.625
+    assert (first["worst_case_mrr"], first["best_case_mrr"]) == (0.5, 0.75)
+    assert first["questions_with_exact_tie"] == ["QA", "QB"]
+    assert first["first_two_order_depends"] == ["QA", "QB"]
+    assert first["outcome_depends"] == ["QA"]

@@ -623,6 +623,100 @@
       "worsened": []
     }
   ],
+  "tie_break": {
+    "method": "exact enumeration of the permutations inside each exact-tie group; no sampling",
+    "rrf_k": 60,
+    "strategies": [
+      {
+        "strategy": "hybrid",
+        "chunking": "document",
+        "default": {
+          "recall_at_3": 0.975,
+          "hit_at_3": 1.0,
+          "mrr": 0.975
+        },
+        "reversed": {
+          "recall_at_3": 0.975,
+          "hit_at_3": 1.0,
+          "mrr": 0.925
+        },
+        "expected": {
+          "recall_at_3": 0.975,
+          "hit_at_3": 1.0,
+          "mrr": 0.95
+        },
+        "worst_case_mrr": 0.9,
+        "best_case_mrr": 1.0,
+        "questions_with_exact_tie": [
+          "Q03",
+          "Q06",
+          "Q08",
+          "Q09",
+          "Q11",
+          "Q12",
+          "Q17",
+          "Q19",
+          "Q20"
+        ],
+        "first_two_order_depends": [
+          "Q03",
+          "Q06",
+          "Q08",
+          "Q09",
+          "Q17",
+          "Q19",
+          "Q20"
+        ],
+        "outcome_depends": [
+          "Q03",
+          "Q06",
+          "Q17",
+          "Q19"
+        ]
+      },
+      {
+        "strategy": "hybrid+meta(demote)",
+        "chunking": "document",
+        "default": {
+          "recall_at_3": 0.975,
+          "hit_at_3": 1.0,
+          "mrr": 1.0
+        },
+        "reversed": {
+          "recall_at_3": 0.975,
+          "hit_at_3": 1.0,
+          "mrr": 0.975
+        },
+        "expected": {
+          "recall_at_3": 0.975,
+          "hit_at_3": 1.0,
+          "mrr": 0.9875
+        },
+        "worst_case_mrr": 0.975,
+        "best_case_mrr": 1.0,
+        "questions_with_exact_tie": [
+          "Q03",
+          "Q06",
+          "Q08",
+          "Q09",
+          "Q11",
+          "Q12",
+          "Q17",
+          "Q19",
+          "Q20"
+        ],
+        "first_two_order_depends": [
+          "Q03",
+          "Q09",
+          "Q17",
+          "Q20"
+        ],
+        "outcome_depends": [
+          "Q03"
+        ]
+      }
+    ]
+  },
   "per_question": [
     {
       "id": "Q01",
