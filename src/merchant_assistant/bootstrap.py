@@ -11,7 +11,7 @@ import random
 import secrets
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Literal
@@ -338,6 +338,10 @@ class ConsoleRuntime:
     # The roles whose PIN was generated: the console shows those, once, in its DEMO banner. A
     # configured PIN is never shown.
     generated_pins: frozenset[str]
+    # Every value that must never leave the process: both PINs and the API keys. The console
+    # refuses to forward a customer message that contains one (ADR-0005). Never printed or
+    # logged, and out of the repr like the PINs.
+    protected_secrets: tuple[str, ...] = field(repr=False)
 
 
 def build_console_runtime(
@@ -381,7 +385,24 @@ def build_console_runtime(
         operator_pin=operator_pin,
         supervisor_pin=supervisor_pin,
         generated_pins=generated,
+        protected_secrets=_protected_secrets(settings, operator_pin, supervisor_pin),
     )
+
+
+def _protected_secrets(
+    settings: Settings, operator_pin: SecretStr, supervisor_pin: SecretStr
+) -> tuple[str, ...]:
+    """The values that must not reach the model, the history or the log: the PINs in use and
+    the API keys of the chat model and of the embeddings, when there are any."""
+    wrapped = (
+        operator_pin,
+        supervisor_pin,
+        settings.effective_llm_api_key(),
+        settings.llm_api_key,
+        settings.openai_api_key,
+    )
+    values = (secret.get_secret_value() for secret in wrapped if secret is not None)
+    return tuple(dict.fromkeys(value for value in values if value))
 
 
 def _console_pins(settings: Settings) -> tuple[SecretStr, SecretStr, frozenset[str]]:

@@ -21,6 +21,10 @@ OPERATOR_HINT = (
     "Estás en la vista de operador: lo que escribas acá no se envía como cliente. "
     "Usá /reply <texto> para escribirle al cliente o /logout para volver a su vista."
 )
+CREDENTIAL_WITHHELD = (
+    "No envié ese mensaje porque parece contener una credencial. "
+    "Si querés ingresar como equipo, usá /login <rol> <pin>."
+)
 NO_CONVERSATION = "Todavía no hay una conversación."
 
 CUSTOMER_HELP = (

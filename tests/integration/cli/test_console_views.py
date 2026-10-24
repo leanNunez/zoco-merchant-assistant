@@ -5,6 +5,7 @@ model is scripted. Every test reads what a person would read on the screen, and 
 conversation where the screen cannot tell.
 """
 
+import itertools
 import json
 import re
 import unicodedata
@@ -772,6 +773,176 @@ def test_a_domain_error_is_a_generic_line_for_the_customer_and_a_refusal_for_the
         assert "internal detail" not in shown
 
 
+# --------------------------------------------------------------------------- credentials
+
+
+CREDENTIAL_NOTICE = (
+    "No envié ese mensaje porque parece contener una credencial. "
+    "Si querés ingresar como equipo, usá /login <rol> <pin>."
+)
+FULLWIDTH_OPERATOR_PIN = "\uff14\uff18\uff12\uff19\uff11\uff13"  # 482913 in full-width digits
+
+
+def seen_by_the_model(world: World) -> str:
+    return "\n".join(
+        message.content or "" for call in world.model.calls for message in call.messages
+    )
+
+
+def assert_no_secret_anywhere(world: World, secrets_: Iterable[str]) -> None:
+    """Not in what the model was given, not in the stored conversation, not in the log."""
+    state = world.store.load(CID)
+    kept = "" if state is None else repr(state)
+    log = world.log_path.read_text(encoding="utf-8") if world.log_path.exists() else ""
+    for secret in secrets_:
+        assert secret not in seen_by_the_model(world)
+        assert secret not in kept
+        assert secret not in log
+
+
+def test_a_login_typed_without_the_slash_never_reaches_the_model_the_history_or_the_log(
+    tmp_path: Path,
+) -> None:
+    world = make_world(tmp_path)
+    world.terminal.lines = [f"login operator {OPERATOR_PIN}", "/quit"]
+
+    world.console.run()
+
+    shown = world.terminal.take()
+    assert CREDENTIAL_NOTICE in shown
+    assert OPERATOR_PIN not in shown
+    assert world.model.call_count == 0
+    assert world.store.load(CID) is None
+    assert role_of(world) is Role.CUSTOMER
+    assert_no_secret_anywhere(world, [OPERATOR_PIN])
+
+
+def test_the_withheld_message_is_the_only_line_printed_and_the_customer_can_go_on(
+    tmp_path: Path,
+) -> None:
+    world = make_world(tmp_path, [text_reply("Hola.")])
+
+    withheld = world.type(f"login operator {OPERATOR_PIN}")
+    next_turn = world.type("hola")
+
+    assert withheld == CREDENTIAL_NOTICE
+    assert next_turn == "Asistente: Hola."
+    assert [m.content for m in world.stored().messages[:1]] == ["hola"]
+    assert_no_secret_anywhere(world, [OPERATOR_PIN, SUPERVISOR_PIN])
+
+
+@pytest.mark.parametrize(
+    "typed",
+    [
+        f"mi clave es {SUPERVISOR_PIN}, ¿sirve?",
+        OPERATOR_PIN,
+        f"el pin: {OPERATOR_PIN}.",
+        f"LOGIN: operator {OPERATOR_PIN}",
+        "  Login operator",
+        "login: operator",
+        f"x/login operator {OPERATOR_PIN}",
+        "probé con /login y nada",
+        f"login operator {FULLWIDTH_OPERATOR_PIN}",
+    ],
+)
+def test_a_pin_or_a_mistyped_login_in_the_customer_view_is_withheld(
+    tmp_path: Path, typed: str
+) -> None:
+    world = make_world(tmp_path)
+
+    shown = world.type(typed)
+
+    assert shown == CREDENTIAL_NOTICE
+    assert world.model.call_count == 0
+    assert world.store.load(CID) is None
+    assert_no_secret_anywhere(world, [OPERATOR_PIN, SUPERVISOR_PIN])
+
+
+def test_a_message_that_embeds_the_llm_key_is_withheld(tmp_path: Path) -> None:
+    world = make_world(tmp_path)
+
+    shown = world.type(f"usá esta clave {FAKE_KEY} para probar")
+
+    assert shown == CREDENTIAL_NOTICE
+    assert world.model.call_count == 0
+    assert_no_secret_anywhere(world, [FAKE_KEY])
+
+
+def test_the_embeddings_key_is_protected_too(tmp_path: Path) -> None:
+    embeddings_key = "sk-FAKE-embeddings-key"
+    world = make_world(tmp_path, openai_api_key=SecretStr(embeddings_key))
+
+    shown = world.type(embeddings_key)
+
+    assert shown == CREDENTIAL_NOTICE
+    assert world.model.call_count == 0
+
+
+def test_the_protected_secrets_are_the_pins_and_the_keys_and_stay_out_of_the_repr(
+    tmp_path: Path,
+) -> None:
+    world = make_world(tmp_path, openai_api_key=SecretStr("sk-FAKE-embeddings-key"))
+
+    assert set(world.runtime.protected_secrets) == {
+        OPERATOR_PIN,
+        SUPERVISOR_PIN,
+        FAKE_KEY,
+        "sk-FAKE-embeddings-key",
+    }
+    for secret in world.runtime.protected_secrets:
+        assert secret not in repr(world.runtime)
+
+
+def test_a_six_digit_number_that_is_not_a_pin_goes_through(tmp_path: Path) -> None:
+    world = make_world(tmp_path, [text_reply("Lo reviso.")])
+
+    shown = world.type("mi pedido es el 123456, no me llegó")
+
+    assert shown == "Asistente: Lo reviso."
+    assert world.model.call_count == 1
+    assert [m.content for m in world.stored().messages[:1]] == [
+        "mi pedido es el 123456, no me llegó"
+    ]
+
+
+def test_a_customer_who_only_mentions_login_in_a_sentence_is_not_stopped(tmp_path: Path) -> None:
+    world = make_world(tmp_path, [text_reply("Contame más.")])
+
+    assert world.type("no puedo hacer el login en la app") == "Asistente: Contame más."
+
+
+def test_the_guard_applies_again_right_after_a_logout(tmp_path: Path) -> None:
+    world = make_world(tmp_path)
+    world.login("operator")
+    world.type("/logout")
+
+    shown = world.type(f"login supervisor {SUPERVISOR_PIN}")
+
+    assert shown == CREDENTIAL_NOTICE
+    assert world.model.call_count == 0
+    assert world.store.load(CID) is None
+    assert_no_secret_anywhere(world, [SUPERVISOR_PIN])
+
+
+def test_a_real_login_with_the_slash_still_works(tmp_path: Path) -> None:
+    world = make_world(tmp_path)
+
+    assert world.login("operator").startswith("Vista de operator.")
+    assert world.model.call_count == 0
+
+
+def test_the_log_after_a_withheld_message_says_so_without_the_content(tmp_path: Path) -> None:
+    world = make_world(tmp_path)
+    world.terminal.lines = [f"mi pin es {OPERATOR_PIN}", "/quit"]
+
+    world.console.run()
+
+    log = world.log_path.read_text(encoding="utf-8")
+    assert "a customer message was withheld: it looked like a credential" in log
+    assert OPERATOR_PIN not in log
+    assert "mi pin es" not in log
+
+
 # --------------------------------------------------------------------------- properties
 
 
@@ -853,3 +1024,64 @@ def test_random_sessions_never_leak_a_draft_a_pin_a_key_or_a_traceback(
         if console.role is Role.CUSTOMER:
             # Nothing was ever approved, so no draft text can be on the customer's screen.
             assert MARKER not in shown
+
+
+AROUND_SECRETS = [
+    "",
+    " ",
+    "login ",
+    "login: ",
+    "  LOGIN operator ",
+    "mi pedido 123456 ",
+    "x/login ",
+    "pin=",
+    "hola ",
+    "clave:\n",
+]
+SECRETS = [OPERATOR_PIN, SUPERVISOR_PIN, FAKE_KEY]
+_AROUND = st.sampled_from(AROUND_SECRETS) | st.text(alphabet="abc 123456\n", max_size=8)
+SECRET_LINES = st.one_of(
+    st.builds(
+        lambda before, secret, after: f"{before}{secret}{after}",
+        _AROUND,
+        st.sampled_from(SECRETS),
+        _AROUND,
+    ),
+    st.sampled_from(
+        [
+            f"/login operator {OPERATOR_PIN}",
+            f"/login supervisor {SUPERVISOR_PIN}",
+            "/logout",
+            "hola",
+            "mi pedido es 123456",
+        ]
+    ),
+)
+
+
+@settings(max_examples=60)
+@given(lines=st.lists(SECRET_LINES, max_size=15))
+def test_no_secret_reaches_the_model_the_history_or_the_log_whatever_the_customer_types(
+    shared_directory: Path, lines: list[str]
+) -> None:
+    store = InMemoryConversationStore()
+    model = ScriptedChatModel(itertools.repeat(text_reply("Entendido.")))
+    runtime = build_console_runtime(
+        offline(shared_directory),
+        model=model,
+        clock=FixedClock(OPEN),
+        store=store,
+        sleeper=lambda _: None,
+    )
+    terminal = Terminal(lines=[*lines, "/quit"])
+    log_path = shared_directory / "secrets.log"
+    log_path.unlink(missing_ok=True)
+    Console(runtime, terminal.read, terminal.write, log_path=log_path, conversation_id=CID).run()
+
+    kept = repr(store.load(CID))
+    log = log_path.read_text(encoding="utf-8")
+    seen = repr(model.calls)
+    for secret in SECRETS:
+        assert secret not in seen
+        assert secret not in kept
+        assert secret not in log

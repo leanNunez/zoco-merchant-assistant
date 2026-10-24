@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import unicodedata
 import uuid
 from collections.abc import Callable, Iterable, Sequence
 from enum import StrEnum
@@ -162,6 +163,12 @@ class Console:
     def _free_text(self, line: str) -> None:
         if self._role is not Role.CUSTOMER:
             self._say(text.OPERATOR_HINT)
+            return
+        if _looks_like_a_credential(line, self._runtime.protected_secrets):
+            # Before the service: what is not sent cannot be stored or retried. The log says that
+            # a message was held back, never what it said.
+            _LOGGER.warning("a customer message was withheld: it looked like a credential")
+            self._say(text.CREDENTIAL_WITHHELD)
             return
         result = self._runtime.service.handle_user_message(self._conversation_id, line)
         self._show_customer(result.outbound)
@@ -352,6 +359,22 @@ class Console:
 
     def _say(self, message: str) -> None:
         self._output("\n".join(text.clean_lines(message)))
+
+
+def _looks_like_a_credential(line: str, secrets_: Sequence[str]) -> bool:
+    """True when a customer line holds a protected secret or reads like a login attempt.
+
+    The first is an exact, case-sensitive substring match (also on the NFKC form, so full-width
+    digits do not slip through). The second is a mistyped login: `login operator 482913` without
+    the slash, or `/login` with something in front of it. A line that STARTS with `/login` is
+    the command and never gets here. The limit is deliberate (ADR-0005): a secret that is
+    paraphrased or typed with separators is not recognised.
+    """
+    for candidate in (line, unicodedata.normalize("NFKC", line)):
+        if any(secret in candidate for secret in secrets_):
+            return True
+    folded = unicodedata.normalize("NFKC", line).strip().casefold()
+    return folded.startswith(("login ", "login:")) or "/login" in folded
 
 
 def _same_pin(typed: str, expected: SecretStr) -> bool:
