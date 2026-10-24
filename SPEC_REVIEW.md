@@ -424,6 +424,10 @@ de la conversación se deriva de él, por lo que ambos no pueden divergir.
 **Estado.** ✅ implementado en `control`. ✅ cada comando del operador o del supervisor deja un registro con
 los cinco campos, o uno REJECTED con su código, y el registro se guarda con la conversación aunque el comando
 falle (`tests/integration/agent/test_agent_control_scenarios.py::test_9_every_command_leaves_a_record_with_the_five_fields`).
+Al cargar una conversación, el registro se vuelve a reproducir y cada transición APPLIED tiene que ser una que
+las reglas permiten a ese actor: un estado guardado no puede afirmar, por ejemplo, que un operador sacó una
+conversación de BLOCKED (`tests/unit/agent/test_agent_state.py::test_a_stored_log_cannot_claim_a_transition_the_rules_do_not_allow`).
+La guarda de horario no se puede reproducir, porque la franja no forma parte del estado.
 
 ## F15. "Nadie responde" en BLOCKED es ambiguo para los mensajes entrantes
 
@@ -476,7 +480,10 @@ que una escritura entre la relectura y el guardado también termina en descarte.
 `tests/integration/agent/test_agent_control_scenarios.py::test_6_a_takeover_while_the_model_answers_drops_the_answer`
 (el mismo caso, a través de `OperatorService.takeover`), `tests/unit/agent/test_agent_memory_store.py`, y
 `tests/unit/agent/test_agent_operator.py::test_a_command_that_loses_a_race_is_replayed_on_the_fresh_state`
-(el comando que pierde la carrera se repite sobre el estado nuevo, sin pisar lo que no leyó).
+(el comando que pierde la carrera se repite sobre el estado nuevo, sin pisar lo que no leyó). Si el turno
+descartado ya había registrado un reclamo (el "sí" corre antes de la entrega), el registro no se pierde: queda
+como último reclamo de la conversación y la bandeja del operador avisa que no se anunció
+(`test_agent_control_scenarios.py::test_6_a_complaint_stored_by_a_turn_that_loses_the_race_is_recorded_for_the_team`).
 
 **Estado.** ✅ implementado en el turno del agente.
 

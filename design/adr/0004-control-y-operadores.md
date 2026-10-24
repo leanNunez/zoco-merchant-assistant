@@ -24,7 +24,10 @@ paréntesis o inventar un monto sin que nadie lo notara.
    evento por `ConversationControl`, cuyo registro es la auditoría (estado anterior, nuevo,
    evento, actor y fecha; un rechazo queda como REJECTED con su código). Los rechazos de control
    se guardan y se relanzan sin cambios. Todo comando sincroniza primero el horario, igual que un
-   turno: después del cierre la conversación vuelve al agente antes que nada.
+   turno: después del cierre la conversación vuelve al agente antes que nada. Al cargar un estado,
+   cada transición aplicada del registro se vuelve a validar contra las reglas, así que un estado
+   guardado no puede afirmar una salida de BLOCKED sin supervisor. El equipo ve los borradores
+   como `DraftView`, sin el `Confirmed` que guarda una aprobación.
 2. **Los efectos se ejecutan en un solo lugar.** `apply_effects` (`agent/domain/effects.py`) la
    usan el turno y los comandos: `INVALIDATE_PENDING_ACTION` descarta la acción pendiente,
    `DISCARD_UNAPPROVED_DRAFTS` marca como DISCARDED todo borrador pendiente (queda en el
@@ -129,6 +132,9 @@ cada lado. Ninguna pregunta fuera de tema pasa y todas las del kit pasan.
   que intenta bloquear en SUGGEST por error obliga al cliente a confirmar de nuevo.
 - El `Confirmed` vive dentro del borrador en memoria y no se puede serializar a propósito. Un
   almacén persistente necesitaría otro diseño de la prueba de confirmación.
+- Un reclamo que un turno registra y que después pierde la carrera de la entrega (un operador
+  tomó la conversación justo entonces) queda guardado y registrado en el estado, pero no se le
+  anuncia al cliente: la bandeja del operador lo avisa.
 - Los controles de salida son patrones: hay paráfrasis que no detectan (por ejemplo "ya lo dejé
   asentado", o "abrí un reclamo", que en voseo también es un imperativo) y frases que retienen de
   más.

@@ -15,6 +15,7 @@ from merchant_assistant.agent.application.executor import ToolExecutor
 from merchant_assistant.agent.application.operator import (
     OPERATOR_MESSAGE_LIMIT,
     CommandResult,
+    DraftView,
     OperatorService,
 )
 from merchant_assistant.agent.domain.drafts import Draft, DraftKind, DraftStatus
@@ -161,8 +162,22 @@ def test_the_draft_list_shows_only_what_still_waits() -> None:
     )
     store.save(ConversationState(CID, version=1, drafts=(decided, waiting)), expected_version=0)
 
-    assert team(store).drafts(CID) == (waiting,)
+    assert team(store).drafts(CID) == (DraftView("D-0002", DraftKind.REPLY, "Espera.", OPEN, 2),)
     assert team(store).drafts("nobody") == ()
+
+
+def test_the_team_sees_an_approval_without_the_confirmation_it_holds() -> None:
+    store = InMemoryConversationStore()
+    store.save(awaiting_approval(), expected_version=0)
+
+    (view,) = team(store).drafts(CID)
+
+    assert view.kind is DraftKind.ACTION_APPROVAL
+    assert not any(isinstance(value, Confirmed) for value in vars_of(view))
+
+
+def vars_of(view: DraftView) -> list[object]:
+    return [getattr(view, name) for name in view.__slots__]
 
 
 # --------------------------------------------------------------------------- approving a complaint

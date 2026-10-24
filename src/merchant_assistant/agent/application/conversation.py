@@ -82,6 +82,8 @@ from merchant_assistant.agent.domain.pending import (
     Invalidated,
     NothingPending,
     PendingAction,
+    PendingState,
+    RegisteredRef,
     decide,
     invalidate,
     mark_registered,
@@ -94,7 +96,7 @@ from merchant_assistant.agent.domain.signals import (
     looks_like_tool_call,
     wants_human,
 )
-from merchant_assistant.agent.domain.state import ConversationState
+from merchant_assistant.agent.domain.state import ConversationState, OperatorNotice
 from merchant_assistant.agent.domain.templates import (
     action_approval_summary,
     answer_withheld,
@@ -228,6 +230,8 @@ class _Turn:
     human_refused: bool = False
     dropped: str | None = None
     drafts: list[str] = field(default_factory=list)
+    # Complaints this turn stored, so a dropped turn still records them (see `_drop`).
+    stored_refs: list[RegisteredRef] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -457,6 +461,7 @@ class ConversationService:
             return state, _Reply(execution_failed())
         pending_state, outcome = mark_registered(state.pending, confirmed, execution.complaint_id)
         turn.registered.append(execution.complaint_id)
+        turn.stored_refs.append(outcome.ref)
         turn.tools.append(
             ToolRecord(
                 CREAR_RECLAMO,
@@ -719,10 +724,15 @@ class ConversationService:
 
         Everything the turn computed (tool results, a proposal, the answer) is discarded and
         only the user's message is added to the state as it is stored now, so it is never lost.
+        One thing cannot be discarded: a complaint the turn already stored. It is recorded as
+        the last registration (its pending action, if still there, is cleared) and the team's
+        inbox says it was not announced, because the state no longer lets the turn say so.
         """
         turn.dropped = "control_changed"
         for _ in range(_SAVE_ATTEMPTS):
             fresh = self._store.load(conversation_id) or ConversationState(conversation_id)
+            for ref in turn.stored_refs:
+                fresh = _record_unannounced(fresh, ref, self._clock.now())
             updated = replace(
                 fresh.with_messages(user_message), turn=fresh.turn + 1, version=fresh.version + 1
             )
@@ -735,6 +745,20 @@ class ConversationService:
 
 
 # ---------------------------------------------------------------------- helpers
+
+
+def _record_unannounced(
+    state: ConversationState, ref: RegisteredRef, now: datetime
+) -> ConversationState:
+    pending = state.pending.pending
+    if pending is not None and pending.fingerprint == ref.fingerprint:
+        pending = None
+    notice = OperatorNotice(now, "complaint_registered_unannounced", ref.complaint_id)
+    return replace(
+        state,
+        pending=PendingState(pending=pending, last_registered=ref),
+        inbox=(*state.inbox, notice),
+    )
 
 
 def _found_nothing(state: ConversationState, reply: _Reply, turn: _Turn) -> bool:

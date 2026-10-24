@@ -11,7 +11,7 @@ import functools
 import json
 import random
 import tempfile
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, time
 from pathlib import Path
@@ -35,9 +35,13 @@ from merchant_assistant.agent.application.conversation import (
     TurnResult,
 )
 from merchant_assistant.agent.application.executor import ToolExecutor
-from merchant_assistant.agent.application.operator import CommandResult, OperatorService
+from merchant_assistant.agent.application.operator import (
+    CommandResult,
+    DraftView,
+    OperatorService,
+)
 from merchant_assistant.agent.application.prompts import describe_hours
-from merchant_assistant.agent.domain.drafts import Draft, DraftKind
+from merchant_assistant.agent.domain.drafts import DraftKind
 from merchant_assistant.agent.domain.errors import (
     CommandError,
     CommandNotAllowed,
@@ -170,6 +174,7 @@ def make_world(
     now: datetime = OPEN,
     search: KnowledgeSearch | None = None,
     complaints: ComplaintRegistry | None = None,
+    around_complaints: Callable[[ComplaintRegistry], ComplaintRegistry] | None = None,
 ) -> World:
     clock = MovableClock(now)
     sales_path = directory / "ventas.json"
@@ -178,6 +183,8 @@ def make_world(
     repository = SqliteComplaintRepository(directory / "reclamos.db")
     repository.initialize()
     registry = complaints or ComplaintsAdapter(ComplaintService(repository, clock))
+    if around_complaints is not None:
+        registry = around_complaints(registry)
     recording = RecordingSearch(search or real_search())
     executor = ToolExecutor(
         recording,
@@ -247,13 +254,13 @@ def enter_suggest(world: World) -> None:
     )
 
 
-def only_draft(world: World, kind: DraftKind) -> Draft:
+def only_draft(world: World, kind: DraftKind) -> DraftView:
     (draft,) = world.team.drafts(CID)
     assert draft.kind is kind
     return draft
 
 
-def ask_in_suggest(world: World) -> Draft:
+def ask_in_suggest(world: World) -> DraftView:
     """The model proposes a complaint in SUGGEST; the operator lets the question through."""
     proposed = world.say("Quiero reclamar: pagué la entrada y no me llegó el correo.")
     question = only_draft(world, DraftKind.CONFIRMATION_REQUEST)
@@ -645,6 +652,38 @@ def test_6_a_takeover_while_the_model_answers_drops_the_answer(tmp_path: Path) -
     assert [m.content for m in world.stored().messages if m.role is Role.USER] == [
         "hola",
         "¿y ahora?",
+    ]
+
+
+def test_6_a_complaint_stored_by_a_turn_that_loses_the_race_is_recorded_for_the_team(
+    tmp_path: Path,
+) -> None:
+    box: list[World] = []
+
+    class TakeoverWhileStoring:
+        """The real registry; an operator takes over while the row is being written."""
+
+        def __init__(self, inner: ComplaintRegistry) -> None:
+            self._inner = inner
+
+        def register(self, reason: str, description: str, conversation_id: str) -> Registration:
+            box[0].team.takeover(CID, Actor.OPERATOR)
+            return self._inner.register(reason, description, conversation_id)
+
+    world = make_world(tmp_path, [propose_reply(A)], around_complaints=TakeoverWhileStoring)
+    box.append(world)
+    world.say("Quiero reclamar: pagué la entrada y no me llegó el correo.")
+
+    result = world.say("sí")
+
+    assert world.rows == 1
+    assert (result.dropped, result.outbound) == ("control_changed", ())
+    stored = world.stored()
+    assert stored.control_state is State.HUMAN
+    assert stored.last_registered_id == "REC-000001"
+    assert stored.pending.pending is None
+    assert [(n.code, n.detail) for n in stored.inbox] == [
+        ("complaint_registered_unannounced", "REC-000001")
     ]
 
 

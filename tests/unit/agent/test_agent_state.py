@@ -90,3 +90,35 @@ def test_a_broken_control_log_cannot_be_stored() -> None:
 def test_counters_and_the_identifier_are_validated(change: dict[str, object]) -> None:
     with pytest.raises(InvalidConversationState):
         replace(ConversationState("conv-1"), **change)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("previous", "event", "new", "actor"),
+    [
+        pytest.param(
+            State.BLOCKED, Event.OPERATOR_RELEASE, State.AUTO, Actor.OPERATOR,
+            id="an operator leaving BLOCKED",
+        ),
+        pytest.param(
+            State.AUTO, Event.OPERATOR_TAKEOVER, State.BLOCKED, Actor.OPERATOR,
+            id="a transition to the wrong state",
+        ),
+        pytest.param(
+            State.AUTO, Event.OPERATOR_RELEASE, State.AUTO, Actor.OPERATOR,
+            id="an undefined pair recorded as applied",
+        ),
+    ],
+)  # fmt: skip
+def test_a_stored_log_cannot_claim_a_transition_the_rules_do_not_allow(
+    previous: State, event: Event, new: State, actor: Actor
+) -> None:
+    records: list[TransitionRecord] = []
+    if previous is State.BLOCKED:
+        records.append(
+            TransitionRecord(State.AUTO, State.BLOCKED, Event.ABUSE_DETECTED, Actor.SYSTEM, AT,
+                             AttemptOutcome.APPLIED)
+        )  # fmt: skip
+    records.append(TransitionRecord(previous, new, event, actor, AT, AttemptOutcome.APPLIED))
+
+    with pytest.raises(InvalidConversationState):
+        ConversationState("conv-1", control_log=tuple(records))

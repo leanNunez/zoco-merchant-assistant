@@ -16,7 +16,15 @@ from merchant_assistant.agent.domain.drafts import Draft, pending_drafts
 from merchant_assistant.agent.domain.errors import InvalidConversationState
 from merchant_assistant.agent.domain.messages import Message
 from merchant_assistant.agent.domain.pending import PendingState
-from merchant_assistant.control import ConversationControl, State, TransitionLog, TransitionRecord
+from merchant_assistant.control import (
+    AttemptOutcome,
+    ControlError,
+    ConversationControl,
+    State,
+    TransitionLog,
+    TransitionRecord,
+    transition,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,10 +100,23 @@ class ConversationState:
 
 
 def _rebuild(records: tuple[TransitionRecord, ...]) -> TransitionLog:
+    """Replay the log: every record must continue the chain, and every APPLIED record must be a
+    transition the rules allow to that actor. A stored state cannot claim, for example, that an
+    operator took a conversation out of BLOCKED. (The open-hours guard cannot be replayed: the
+    window is not part of the state, so a guarded record is judged as if the hours were open.)
+    """
     log = TransitionLog()
     try:
         for record in records:
+            if record.outcome is AttemptOutcome.APPLIED:
+                allowed = transition(
+                    record.previous_state, record.event, record.actor, hours_open=True
+                )
+                if allowed.new is not record.new_state:
+                    raise ValueError(f"{record.event} does not lead to {record.new_state}")
             log.append(record)
+    except ControlError as forbidden:
+        raise InvalidConversationState(f"control log: {forbidden.code}") from None
     except ValueError as broken:
         raise InvalidConversationState(f"control log: {broken}") from None
     return log

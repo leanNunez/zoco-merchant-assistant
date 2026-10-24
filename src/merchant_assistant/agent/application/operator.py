@@ -96,6 +96,18 @@ class CommandResult:
     registered: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class DraftView:
+    """A draft as the team sees it. The gate's `Confirmed` an ACTION_APPROVAL holds stays
+    inside the service: only `approve_draft` can turn it into an effect."""
+
+    id: str
+    kind: DraftKind
+    text: str
+    created_at: datetime
+    created_turn: int
+
+
 @dataclass
 class _Change:
     """A command's work on one loaded state. Private and mutable while the command runs."""
@@ -164,10 +176,14 @@ class OperatorService:
 
     # ------------------------------------------------------------------ drafts
 
-    def drafts(self, conversation_id: str) -> tuple[Draft, ...]:
+    def drafts(self, conversation_id: str) -> tuple[DraftView, ...]:
         """The drafts still waiting for a decision, oldest first."""
         state = self._store.load(conversation_id)
-        return () if state is None else state.pending_drafts
+        waiting = () if state is None else state.pending_drafts
+        return tuple(
+            DraftView(draft.id, draft.kind, draft.text, draft.created_at, draft.created_turn)
+            for draft in waiting
+        )
 
     def approve_draft(self, conversation_id: str, draft_id: str, actor: Actor) -> CommandResult:
         """Approve a pending draft while the conversation is still in SUGGEST.
