@@ -1,10 +1,10 @@
 # One command per step. `make check` is what CI runs, so green here means green there.
 
 .DEFAULT_GOAL := help
-.PHONY: help setup format lint typecheck arch test diagram index eval-retrieval dataset db chat check
+.PHONY: help setup format lint typecheck arch test diagram index eval-retrieval eval-agent eval-agent-live dataset db chat check
 
 help: ## List the available commands
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
 
 setup: ## Install dependencies from the lockfile and the git hooks
 	uv sync --locked
@@ -38,6 +38,16 @@ index: ## Embed the corpus with every chunking (uses the cache)
 
 eval-retrieval: ## Retrieval evaluation: recall@3 and MRR tables
 	uv run python -m evaluation.retrieval run
+
+# The scripted report validates the evaluator with the null model and the naive agent, so the three
+# modes always come from the same code; each writes evaluation/results/conversations/<mode>/.
+eval-agent: ## Conversation evaluation with the scripted models (offline, free, reproducible)
+	uv run python -m evaluation.conversations run --mode null
+	uv run python -m evaluation.conversations run --mode naive
+	uv run python -m evaluation.conversations run --mode scripted
+
+eval-agent-live: ## Conversation evaluation with the real model (needs a key; spends credit; capped)
+	uv run python -m evaluation.conversations run --mode live
 
 dataset: ## Regenerate data/ventas.json
 	uv run python scripts/generate_ventas.py
