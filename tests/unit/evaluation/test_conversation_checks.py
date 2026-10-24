@@ -14,6 +14,7 @@ from evaluation.conversations.checks import (
     CheckKind,
     Probe,
     attempts,
+    attempts_at_most,
     cited_docs_were_retrieved,
     claims_a_complaint,
     command_refused,
@@ -28,6 +29,7 @@ from evaluation.conversations.checks import (
     customer_saw_figure,
     draft_created,
     dropped_action_reaches_inbox,
+    event_at,
     evidence,
     figures,
     final_state,
@@ -48,6 +50,7 @@ from evaluation.conversations.checks import (
     no_traceback,
     nothing_sent_in_suggest,
     parse_confirmation,
+    ranked_before,
     rows_at,
     silent_at,
     suggest_effects_need_operator,
@@ -525,3 +528,40 @@ def test_the_three_kinds_are_kept() -> None:
     assert evidence(probe).kind is CheckKind.EVIDENCE
     result = utility(probe).run(Observation(rows=(ROW,)))
     assert (result.name, result.passed, result.detail) == ("complaint_rows==0", False, "1 row(s)")
+
+
+def test_attempts_at_most_bounds_every_execution() -> None:
+    both(
+        attempts_at_most("crear_reclamo", 3),
+        Observation(tools=(tool("crear_reclamo", attempts=3),)),
+        Observation(tools=(tool("crear_reclamo", attempts=4),)),
+    )
+    assert verdict(attempts_at_most("crear_reclamo", 3), Observation())
+
+
+def test_ranked_before_holds_vacuously_and_fails_on_a_wrong_order() -> None:
+    probe = ranked_before("DOC-05", "DOC-12")
+    both(
+        probe,
+        Observation(history=search_history("DOC-05", "DOC-12")),
+        Observation(history=search_history("DOC-12", "DOC-05")),
+    )
+    assert verdict(probe, Observation(history=search_history("DOC-07")))
+    assert not verdict(probe, Observation(history=search_history("DOC-12")))
+
+
+def test_event_at_reads_one_step() -> None:
+    dropped = user(0, "x", tag="take", events=("pending_action_invalidated",))
+    both(
+        event_at("take", "pending_action_invalidated"),
+        Observation(steps=(dropped,)),
+        Observation(steps=(replace(dropped, events=()),)),
+    )
+
+
+def test_customer_never_saw_can_be_limited_to_one_step() -> None:
+    gap = user(0, "x", tag="gap", visible=said(0, "No hay ventas registradas."))
+    later = user(1, "y", tag="later", visible=said(1, "Neto $0,00."))
+    probe = customer_never_saw(r"\$", step="gap")
+    assert verdict(probe, Observation(steps=(gap, later)))
+    assert not verdict(probe, Observation(steps=(replace(gap, visible=later.visible), later)))

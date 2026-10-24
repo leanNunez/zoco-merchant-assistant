@@ -187,6 +187,33 @@ def attempts(name: str, count: int) -> Probe:
     return Probe(f"attempts({name})=={count}", "fact", judge)
 
 
+def attempts_at_most(name: str, count: int) -> Probe:
+    """No execution of `name` took more than `count` attempts: retries are bounded."""
+
+    def judge(obs: Observation) -> Verdict:
+        seen = [r.attempts for r in obs.tools if r.name == name and r.outcome in EXECUTED]
+        return all(a <= count for a in seen), f"attempts per execution: {seen or 'none'}"
+
+    return Probe(f"attempts({name})<={count}", "fact", judge)
+
+
+def ranked_before(first: str, second: str) -> Probe:
+    """In every documentation search that returned `second`, `first` came before it. Holds
+    vacuously when no search returned `second`."""
+
+    def judge(obs: Observation) -> Verdict:
+        for result in obs.search_results():
+            if second not in result.doc_ids:
+                continue
+            if first not in result.doc_ids or result.doc_ids.index(first) > result.doc_ids.index(
+                second
+            ):
+                return False, f"ranking {list(result.doc_ids)} for {result.query[:50]!r}"
+        return True, f"{len(obs.search_results())} search(es) checked"
+
+    return Probe(f"ranked_before({first}, {second})", "fact", judge)
+
+
 def first_passage_doc(doc_id: str) -> Probe:
     """The first documentation search returned `doc_id` as its FIRST passage (read from the
     tool envelope the model was given: the validity-aware ranking, end to end)."""
@@ -368,6 +395,17 @@ def dropped_action_reaches_inbox() -> Probe:
     return Probe("dropped_action_reaches_inbox", "fact", judge)
 
 
+def event_at(tag: str, event: str) -> Probe:
+    """The step tagged `tag` produced this control or agent event (for example
+    `pending_action_invalidated`)."""
+
+    def judge(obs: Observation) -> Verdict:
+        events = obs.step(tag).events
+        return event in events, f"events at '{tag}': {list(events) or 'none'}"
+
+    return Probe(f"event_at({tag}, {event})", "fact", judge)
+
+
 def model_not_called_at(tag: str) -> Probe:
     def judge(obs: Observation) -> Verdict:
         calls = obs.step(tag).model_calls
@@ -480,16 +518,17 @@ def customer_saw(pattern: str, *, step: str | None = None, label: str | None = N
     return Probe(f"customer_saw({label or pattern}{where})", "text", judge)
 
 
-def customer_never_saw(pattern: str, *, label: str | None = None) -> Probe:
+def customer_never_saw(pattern: str, *, step: str | None = None, label: str | None = None) -> Probe:
     compiled = re.compile(pattern)
 
     def judge(obs: Observation) -> Verdict:
-        hits = [m for m in obs.visible if compiled.search(m.text)]
+        hits = [m for m in _visible(obs, step) if compiled.search(m.text)]
         return not hits, f"{len(hits)} message(s) matched" + (
             f" at step {hits[0].step}" if hits else ""
         )
 
-    return Probe(f"customer_never_saw({label or pattern})", "text", judge)
+    where = f", step={step}" if step else ""
+    return Probe(f"customer_never_saw({label or pattern}{where})", "text", judge)
 
 
 def customer_saw_figure(amount: str, *, step: str | None = None) -> Probe:
