@@ -15,11 +15,17 @@ future date, an invalid complaint) is never retried: the same input would be ref
 What the model gets back is `envelope`: one JSON object per tool message, marked as untrusted
 data, with document text only inside JSON string values. Exception text, tracebacks and the
 `detail` of an error never enter it; only stable codes and the errors' fixed safe messages do.
+
+A port that raises anything that is not a `DomainError` (a bug, an unexpected driver error) is
+logged here with its traceback, for the operators of the system, and becomes a non-retryable
+`internal_error` with a fixed message: the same input would most probably fail again, and the
+customer must never see the exception's text.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import random
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -44,6 +50,8 @@ from merchant_assistant.agent.ports import (
     SearchOutcome,
 )
 from merchant_assistant.shared.errors import DomainError
+
+_log = logging.getLogger(__name__)
 
 ToolStatus = Literal["ok", "no_data", "error"]
 Sleeper = Callable[[float], None]
@@ -93,6 +101,13 @@ class ExecutionFailed(DomainError):  # noqa: N818 - named after the situation
         self.cause_code = cause_code
         self.retryable = retryable
         self.attempts = attempts
+
+
+class InternalToolError(DomainError):
+    """A port failed in a way no capability declared. The real exception is in the logs only."""
+
+    code: ClassVar[str] = "internal_error"
+    user_message: ClassVar[str] = "The tool failed unexpectedly. Do not retry it now."
 
 
 class ToolExecutor:
@@ -193,6 +208,12 @@ class ToolExecutor:
                         error.code, retryable=retryable, attempts=attempt
                     ) from error
                 self._sleep(self._backoff(attempt))
+            except Exception:
+                _log.exception("a tool port raised an undeclared error (attempt %d)", attempt)
+                internal = InternalToolError()
+                raise ExecutionFailed(
+                    internal.code, retryable=False, attempts=attempt
+                ) from internal
 
     def _backoff(self, attempt: int) -> float:
         # Exponential with "equal jitter": half the step is fixed, half is random, so retries

@@ -50,8 +50,10 @@ from merchant_assistant.agent.domain.messages import Author, Message, ModelReply
 from merchant_assistant.agent.domain.pending import PendingAction
 from merchant_assistant.agent.domain.state import ConversationState
 from merchant_assistant.agent.domain.templates import (
+    answer_withheld,
     blocked_notice,
     confirmation_request,
+    execution_failed,
     hours_notice,
     human_unavailable,
     not_approved,
@@ -59,7 +61,12 @@ from merchant_assistant.agent.domain.templates import (
     registered,
 )
 from merchant_assistant.agent.domain.tools import CREAR_RECLAMO, TOOL_SPECS, ToolSpec
-from merchant_assistant.agent.ports import KnowledgeSearch, SearchOutcome
+from merchant_assistant.agent.ports import (
+    ComplaintRegistry,
+    KnowledgeSearch,
+    Registration,
+    SearchOutcome,
+)
 from merchant_assistant.bootstrap import DOCS_DIR, ComplaintsAdapter, SalesAdapter, build_search
 from merchant_assistant.complaints.adapters.sqlite_repository import SqliteComplaintRepository
 from merchant_assistant.complaints.service import ComplaintService
@@ -161,6 +168,8 @@ def make_world(
     steps: Iterable[ScriptStep] = (),
     *,
     now: datetime = OPEN,
+    search: KnowledgeSearch | None = None,
+    complaints: ComplaintRegistry | None = None,
 ) -> World:
     clock = MovableClock(now)
     sales_path = directory / "ventas.json"
@@ -168,12 +177,12 @@ def make_world(
     sales = SalesAdapter(SalesService(JsonSalesRepository(sales_path), clock, BUENOS_AIRES))
     repository = SqliteComplaintRepository(directory / "reclamos.db")
     repository.initialize()
-    complaints = ComplaintsAdapter(ComplaintService(repository, clock))
-    search = RecordingSearch(real_search())
+    registry = complaints or ComplaintsAdapter(ComplaintService(repository, clock))
+    recording = RecordingSearch(search or real_search())
     executor = ToolExecutor(
-        search,
+        recording,
         sales,
-        complaints,
+        registry,
         sleeper=lambda _: None,
         rng=random.Random(7),  # noqa: S311
     )
@@ -181,7 +190,7 @@ def make_world(
     store = InMemoryConversationStore()
     agent = ConversationService(store, executor, model, hours=HOURS, clock=clock)
     team = OperatorService(store, executor, hours=HOURS, clock=clock)
-    return World(agent, team, model, store, repository, clock, search)
+    return World(agent, team, model, store, repository, clock, recording)
 
 
 def propose_reply(arguments: Mapping[str, object] = A) -> ModelReply:
@@ -637,6 +646,143 @@ def test_6_a_takeover_while_the_model_answers_drops_the_answer(tmp_path: Path) -
         "hola",
         "¿y ahora?",
     ]
+
+
+# --------------------------------------------------------------------------- 7: output checks
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "Listo, registré tu reclamo.",
+        "Tu reclamo quedó registrado.",
+        "Ya está registrado, quedate tranquilo.",
+        "Creé el reclamo por la entrada.",
+        "Se generó tu reclamo correctamente.",
+        "Tu número de reclamo es 4512.",
+        "No te preocupes, fue registrado.",
+    ],
+)
+def test_7_a_model_that_claims_a_registration_is_withheld(tmp_path: Path, claim: str) -> None:
+    world = make_world(tmp_path, [text_reply(claim)])
+
+    result = world.say("¿ya registraste mi reclamo?")
+
+    assert texts(result) == [answer_withheld()]
+    assert result.violations == ("registration_claim",)
+    assert world.rows == 0
+    assert all(m.content != claim for m in world.stored().messages)
+
+
+@pytest.mark.parametrize(
+    ("answer", "delivered", "violations"),
+    [
+        pytest.param(
+            "La reserva dura 12 minutos (DOC-04).",
+            "La reserva dura 12 minutos (DOC-04).",
+            (),
+            id="retrieved in parentheses",
+        ),
+        pytest.param(
+            "La reserva dura 12 minutos (DOC-99).",
+            "La reserva dura 12 minutos.",
+            ("invalid_citation:DOC-99",),
+            id="unknown in parentheses",
+        ),
+        pytest.param(
+            "Según DOC-99, la reserva dura 12 minutos.",
+            None,
+            ("invalid_citation:DOC-99",),
+            id="unknown and unbracketed",
+        ),
+    ],
+)
+def test_7_every_document_mention_is_checked_against_what_was_retrieved(
+    tmp_path: Path, answer: str, delivered: str | None, violations: tuple[str, ...]
+) -> None:
+    world = make_world(
+        tmp_path, [search_call("¿cuánto dura la reserva del carrito?"), text_reply(answer)]
+    )
+
+    result = world.say("¿cuánto dura la reserva del carrito?")
+
+    assert texts(result) == [answer_withheld() if delivered is None else delivered]
+    assert result.violations == violations
+
+
+@pytest.mark.parametrize(
+    ("answer", "flags"),
+    [
+        pytest.param(
+            "El 2026-10-22 vendiste $1.500.000, devolviste $15.000 y el neto fue $1.485.000.",
+            (),
+            id="the figures of the tool",
+        ),
+        pytest.param(
+            "El 2026-10-22 el neto fue de $1.490.000.",
+            ("unverified_amount:$1.490.000",),
+            id="an invented net",
+        ),
+    ],
+)
+def test_7_an_amount_no_tool_returned_is_flagged_but_delivered(
+    tmp_path: Path, answer: str, flags: tuple[str, ...]
+) -> None:
+    world = make_world(
+        tmp_path,
+        [calls_reply(tool_call("consultar_ventas", {"fecha": "2026-10-22"})), text_reply(answer)],
+    )
+
+    result = world.say("¿cuánto vendí el 22 de octubre de 2026?")
+
+    assert texts(result) == [answer]
+    assert result.flags == flags
+
+
+INTERNALS = "Traceback: sqlite3.OperationalError at /srv/var/reclamos.db request=abc123"
+
+
+class BrokenPort:
+    """A port with a bug: it raises an exception no capability declares."""
+
+    def search(self, query: str) -> SearchOutcome:
+        raise RuntimeError(INTERNALS)
+
+    def register(self, reason: str, description: str, conversation_id: str) -> Registration:
+        raise RuntimeError(INTERNALS)
+
+
+def test_7_an_unexpected_exception_of_a_port_never_reaches_the_customer_or_the_model(
+    tmp_path: Path,
+) -> None:
+    world = make_world(
+        tmp_path,
+        [
+            search_call("¿cuánto dura la reserva del carrito?"),
+            text_reply("No pude consultar la documentación ahora."),
+            propose_reply(A),
+        ],
+        search=BrokenPort(),
+        complaints=BrokenPort(),
+    )
+
+    searched = world.say("¿cuánto dura la reserva del carrito?")
+    world.say("Quiero reclamar: pagué la entrada y no me llegó el correo.")
+    failed = world.say("sí")
+
+    assert [(r.status, r.error_code) for r in searched.tools] == [("error", "internal_error")]
+    assert [(r.status, r.error_code) for r in failed.tools] == [("error", "internal_error")]
+    assert texts(failed) == [execution_failed()]
+    shown = [text for result in (searched, failed) for text in texts(result)]
+    stored = [m.content or "" for m in world.stored().messages]
+    for text in shown + stored:
+        assert "abc123" not in text
+        assert "Traceback" not in text
+        assert "RuntimeError" not in text
+    envelopes = [
+        json.loads(m.content or "") for m in world.stored().messages if m.role is Role.TOOL
+    ]
+    assert envelopes[0]["error"]["code"] == "internal_error"
 
 
 # --------------------------------------------------------------------------- 9: the audit trail

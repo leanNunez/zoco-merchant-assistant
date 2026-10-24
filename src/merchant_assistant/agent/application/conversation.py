@@ -17,8 +17,10 @@
    Every call crosses `authorize`; a sales date must be grounded in what the user said; the
    first accepted `crear_reclamo` only creates a pending action and ends the turn with the
    code-owned confirmation question.
-6. Output checks on the model's answer: no tool call written as text, no citation of a
-   document no tool returned in this conversation, no complaint number nobody mentioned.
+6. Output checks on the model's answer: no tool call written as text, no claim that a
+   complaint was registered (only code templates say that), no complaint number nobody
+   mentioned, no mention of a document no search returned in this conversation; and an
+   amount of money no tool payload contains is FLAGGED (not withheld).
    Then, in AUTO, if the model searched the documentation and EVERY search came back
    `no_data` (the search's calibrated relevance floor, never the model's own confidence),
    the turn fires `low_confidence` (SYSTEM). In hours the conversation moves to SUGGEST and
@@ -41,6 +43,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Literal
 
 from merchant_assistant.agent.application.executor import (
@@ -66,6 +69,13 @@ from merchant_assistant.agent.domain.errors import (
 )
 from merchant_assistant.agent.domain.guards import ValidatedCall, authorize
 from merchant_assistant.agent.domain.messages import Message, Role, ToolCall
+from merchant_assistant.agent.domain.output_checks import (
+    canonical_doc_id,
+    claims_registration,
+    money_amounts,
+    rewrite_citations,
+    unverified_amounts,
+)
 from merchant_assistant.agent.domain.pending import (
     Cancelled,
     Confirmed,
@@ -137,8 +147,7 @@ MAX_ROUNDS = 4
 ABUSE_STRIKES_TO_BLOCK = 2
 _SAVE_ATTEMPTS = 3
 
-_CITATION_GROUP = re.compile(r"\[\s*(DOC-[0-9]+(?:\s*[,;]\s*DOC-[0-9]+)*)\s*\]")
-_DOC_ID = re.compile(r"DOC-[0-9]+")
+_SALES_FIGURES = ("bruto", "devoluciones", "neto")
 _COMPLAINT_ID = re.compile(r"REC-[0-9]{6}")
 _UNAVAILABLE_TOOL = "<unavailable>"
 
@@ -183,7 +192,7 @@ class TurnResult:
     outbound: tuple[Outbound, ...]
     tools: tuple[ToolRecord, ...]
     model_usage: tuple[ModelUsage, ...]
-    violations: tuple[str, ...]
+    violations: tuple[str, ...]  # what was withheld or removed from the model's answer
     pending: PendingView | None
     registered: tuple[str, ...]
     dropped: str | None
@@ -192,6 +201,7 @@ class TurnResult:
     injection_markers: int
     events: tuple[str, ...]  # control events this turn, "event:applied" or "event:rejected:code"
     drafts: tuple[str, ...] = ()  # drafts this turn created for an operator (SUGGEST)
+    flags: tuple[str, ...] = ()  # delivered but unverified, e.g. "unverified_amount:$45.000"
 
     @property
     def model_calls(self) -> int:
@@ -209,6 +219,7 @@ class _Turn:
     tools: list[ToolRecord] = field(default_factory=list)
     usage: list[ModelUsage] = field(default_factory=list)
     violations: list[str] = field(default_factory=list)
+    flags: list[str] = field(default_factory=list)
     registered: list[str] = field(default_factory=list)
     events: list[str] = field(default_factory=list)
     gate: str | None = None
@@ -606,15 +617,25 @@ class ConversationService:
         if looks_like_tool_call(text):
             turn.violations.append("tool_call_in_text")
             return answer_withheld()
+        if claims_registration(text):
+            # Registrations are told by code templates only: the model's claim is false.
+            turn.violations.append("registration_claim")
+            return answer_withheld()
         known_ids = _complaint_ids_mentioned(state)
         unknown = sorted(set(_COMPLAINT_ID.findall(text)) - known_ids)
         if unknown:
             turn.violations.extend(f"unknown_complaint_id:{cid}" for cid in unknown)
             return answer_withheld()
-        retrieved = _retrieved_doc_ids(state)
-        cleaned, invalid = _strip_citations(text, retrieved)
-        turn.violations.extend(f"invalid_citation:{doc_id}" for doc_id in invalid)
-        return cleaned if cleaned.strip() else answer_withheld()
+        citations = rewrite_citations(text, _retrieved_doc_ids(state))
+        turn.violations.extend(f"invalid_citation:{doc_id}" for doc_id in citations.invalid)
+        if citations.withhold or not citations.text.strip():
+            return answer_withheld()
+        known_amounts = _amounts_in_payloads(state)
+        turn.flags.extend(
+            f"unverified_amount:{amount.written}"
+            for amount in unverified_amounts(citations.text, known_amounts)
+        )
+        return citations.text
 
     # ------------------------------------------------------------------ delivery
 
@@ -771,13 +792,12 @@ def _zone(hours: BusinessHours) -> str:
 def _retrieved_doc_ids(state: ConversationState) -> frozenset[str]:
     """Doc ids that a documentation search returned in this conversation (from our envelopes)."""
     found: set[str] = set()
-    for message in state.messages:
-        if message.role is not Role.TOOL or message.content is None:
-            continue
-        payload = json.loads(message.content)
+    for payload in _tool_payloads(state):
+        data = payload.get("data")
         if payload.get("tool") != BUSCAR_DOCUMENTACION or payload.get("status") != "ok":
             continue
-        found.update(passage["doc_id"] for passage in payload["data"]["passages"])
+        if isinstance(data, dict):
+            found.update(canonical_doc_id(str(p["doc_id"])) for p in data.get("passages", ()))
     return frozenset(found)
 
 
@@ -789,20 +809,30 @@ def _complaint_ids_mentioned(state: ConversationState) -> frozenset[str]:
     return frozenset(found)
 
 
-def _strip_citations(text: str, valid: frozenset[str]) -> tuple[str, list[str]]:
-    invalid: list[str] = []
+def _amounts_in_payloads(state: ConversationState) -> frozenset[Decimal]:
+    """Every figure a tool gave in this conversation: sales and money in document text."""
+    found: set[Decimal] = set()
+    for payload in _tool_payloads(state):
+        data = payload.get("data")
+        if not isinstance(data, dict) or payload.get("status") != "ok":
+            continue
+        if payload.get("tool") == CONSULTAR_VENTAS:
+            found.update(abs(Decimal(str(data[key]))) for key in _SALES_FIGURES if key in data)
+        elif payload.get("tool") == BUSCAR_DOCUMENTACION:
+            for passage in data.get("passages", ()):
+                found.update(amount.value for amount in money_amounts(str(passage["text"])))
+    return frozenset(found)
 
-    def rewrite(match: re.Match[str]) -> str:
-        ids = _DOC_ID.findall(match.group(1))
-        kept = [doc_id for doc_id in ids if doc_id in valid]
-        invalid.extend(doc_id for doc_id in ids if doc_id not in valid and doc_id not in invalid)
-        return f"[{', '.join(kept)}]" if kept else ""
 
-    cleaned = _CITATION_GROUP.sub(rewrite, text)
-    if invalid:
-        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
-        cleaned = re.sub(r"[ \t]+([.,;:])", r"\1", cleaned).strip()
-    return cleaned, invalid
+def _tool_payloads(state: ConversationState) -> list[dict[str, object]]:
+    """The envelopes this agent wrote in the history (one JSON object per tool message)."""
+    payloads: list[dict[str, object]] = []
+    for message in state.messages:
+        if message.role is Role.TOOL and message.content is not None:
+            payload = json.loads(message.content)
+            if isinstance(payload, dict):
+                payloads.append(payload)
+    return payloads
 
 
 def _result(state: ConversationState, outbound: list[Outbound], turn: _Turn) -> TurnResult:
@@ -824,4 +854,5 @@ def _result(state: ConversationState, outbound: list[Outbound], turn: _Turn) -> 
         injection_markers=turn.injection,
         events=tuple(turn.events),
         drafts=tuple(turn.drafts),
+        flags=tuple(turn.flags),
     )

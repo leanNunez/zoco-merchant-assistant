@@ -381,3 +381,83 @@ def test_when_every_attempt_fails_the_failure_carries_the_last_code_and_the_atte
 def test_an_effect_needs_a_real_confirmation() -> None:
     with pytest.raises(TypeError):
         executor().execute_confirmed(object(), "conv-1")  # type: ignore[arg-type]
+
+
+# --------------------------------------------------------------------------- undeclared errors
+
+INTERNALS = "sqlite3.OperationalError: disk I/O error at /srv/var/reclamos.db, request=abc123"
+
+
+class BrokenSearch:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def search(self, query: str) -> SearchOutcome:
+        self.calls += 1
+        raise RuntimeError(INTERNALS)
+
+
+class BrokenRegistry:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def register(self, reason: str, description: str, conversation_id: str) -> Registration:
+        self.calls += 1
+        raise KeyError(INTERNALS)
+
+
+def broken(search: BrokenSearch, registry: BrokenRegistry) -> ToolExecutor:
+    return ToolExecutor(
+        search,
+        FakeSales(Script([], SALES_OK)),
+        registry,
+        sleeper=lambda _: None,
+        rng=random.Random(0),  # noqa: S311
+    )
+
+
+def test_an_undeclared_error_of_a_read_becomes_internal_error_once_and_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    search = BrokenSearch()
+
+    with caplog.at_level("ERROR", logger="merchant_assistant.agent.application.executor"):
+        outcome = broken(search, BrokenRegistry()).run_read(
+            read("buscar_documentacion", '{"consulta": "comisión"}')
+        )
+
+    assert (outcome.status, outcome.error_code, outcome.retryable, outcome.attempts) == (
+        "error",
+        "internal_error",
+        False,
+        1,
+    )
+    assert search.calls == 1  # never retried: the same input would fail the same way
+    content = outcome_envelope("buscar_documentacion", outcome)
+    assert json.loads(content)["error"] == {
+        "code": "internal_error",
+        "retryable": False,
+        "attempts": 1,
+        "message": "The tool failed unexpectedly. Do not retry it now.",
+    }
+    assert "abc123" not in content
+    assert "RuntimeError" not in content
+    # The operators of the system do get the real exception, in the logs.
+    (record,) = caplog.records
+    assert record.exc_info is not None
+    assert record.exc_info[0] is RuntimeError
+
+
+def test_an_undeclared_error_of_the_effect_is_an_execution_failure_without_its_text() -> None:
+    registry = BrokenRegistry()
+
+    with pytest.raises(ExecutionFailed) as failed:
+        broken(BrokenSearch(), registry).execute_confirmed(confirmed(), "conv-1")
+
+    assert (failed.value.cause_code, failed.value.retryable, failed.value.attempts) == (
+        "internal_error",
+        False,
+        1,
+    )
+    assert registry.calls == 1
+    assert "abc123" not in str(failed.value.public())
