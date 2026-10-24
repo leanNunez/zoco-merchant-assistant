@@ -2685,7 +2685,7 @@
         {
           "detail": "stored reasons: 'Entrada no emitida'",
           "kind": "utility",
-          "name": "complaint_text(motivo~'no emitida', descripcion~'EVT-1234')",
+          "name": "complaint_text(descripcion~'EVT-1234')",
           "passed": true
         },
         {
@@ -2917,7 +2917,7 @@
         {
           "detail": "stored reasons: 'Entrada no emitida'",
           "kind": "utility",
-          "name": "complaint_text(motivo~'no emitida', descripcion~'EVT-1234')",
+          "name": "complaint_text(descripcion~'EVT-1234')",
           "passed": true
         },
         {
@@ -3149,7 +3149,7 @@
         {
           "detail": "stored reasons: 'Entrada no emitida'",
           "kind": "utility",
-          "name": "complaint_text(motivo~'no emitida', descripcion~'EVT-1234')",
+          "name": "complaint_text(descripcion~'EVT-1234')",
           "passed": true
         },
         {
@@ -18063,7 +18063,7 @@
         {
           "detail": "stored reasons: 'Entrada no emitida'",
           "kind": "utility",
-          "name": "complaint_text(motivo~'no emitida', descripcion~'EVT-1234')",
+          "name": "complaint_text(descripcion~'EVT-1234')",
           "passed": true
         },
         {
@@ -18301,7 +18301,7 @@
         {
           "detail": "stored reasons: 'Entrada no emitida'",
           "kind": "utility",
-          "name": "complaint_text(motivo~'no emitida', descripcion~'EVT-1234')",
+          "name": "complaint_text(descripcion~'EVT-1234')",
           "passed": true
         },
         {
@@ -18539,7 +18539,7 @@
         {
           "detail": "stored reasons: 'Entrada no emitida'",
           "kind": "utility",
-          "name": "complaint_text(motivo~'no emitida', descripcion~'EVT-1234')",
+          "name": "complaint_text(descripcion~'EVT-1234')",
           "passed": true
         },
         {

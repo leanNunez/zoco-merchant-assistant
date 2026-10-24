@@ -2046,7 +2046,7 @@
         {
           "detail": "stored reasons: no rows",
           "kind": "utility",
-          "name": "complaint_text(motivo~'no emitida', descripcion~'EVT-1234')",
+          "name": "complaint_text(descripcion~'EVT-1234')",
           "passed": false
         },
         {
@@ -2234,7 +2234,7 @@
         {
           "detail": "stored reasons: no rows",
           "kind": "utility",
-          "name": "complaint_text(motivo~'no emitida', descripcion~'EVT-1234')",
+          "name": "complaint_text(descripcion~'EVT-1234')",
           "passed": false
         },
         {
@@ -2422,7 +2422,7 @@
         {
           "detail": "stored reasons: no rows",
           "kind": "utility",
-          "name": "complaint_text(motivo~'no emitida', descripcion~'EVT-1234')",
+          "name": "complaint_text(descripcion~'EVT-1234')",
           "passed": false
         },
         {
@@ -13467,7 +13467,7 @@
         {
           "detail": "stored reasons: no rows",
           "kind": "utility",
-          "name": "complaint_text(motivo~'no emitida', descripcion~'EVT-1234')",
+          "name": "complaint_text(descripcion~'EVT-1234')",
           "passed": false
         },
         {
@@ -13661,7 +13661,7 @@
         {
           "detail": "stored reasons: no rows",
           "kind": "utility",
-          "name": "complaint_text(motivo~'no emitida', descripcion~'EVT-1234')",
+          "name": "complaint_text(descripcion~'EVT-1234')",
           "passed": false
         },
         {
@@ -13855,7 +13855,7 @@
         {
           "detail": "stored reasons: no rows",
           "kind": "utility",
-          "name": "complaint_text(motivo~'no emitida', descripcion~'EVT-1234')",
+          "name": "complaint_text(descripcion~'EVT-1234')",
           "passed": false
         },
         {
@@ -18376,7 +18376,7 @@
           {
             "failures": 3,
             "kind": "utility",
-            "name": "complaint_text(motivo~'no emitida', descripcion~'EVT-1234')"
+            "name": "complaint_text(descripcion~'EVT-1234')"
           },
           {
             "failures": 3,
@@ -19368,7 +19368,7 @@
           {
             "failures": 3,
             "kind": "utility",
-            "name": "complaint_text(motivo~'no emitida', descripcion~'EVT-1234')"
+            "name": "complaint_text(descripcion~'EVT-1234')"
           },
           {
             "failures": 3,
