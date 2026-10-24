@@ -865,7 +865,11 @@ def _amounts_in_payloads(state: ConversationState) -> frozenset[Decimal]:
             found.update(abs(Decimal(str(data[key]))) for key in _SALES_FIGURES if key in data)
         elif payload.get("tool") == BUSCAR_DOCUMENTACION:
             for passage in data.get("passages", ()):
-                found.update(amount.value for amount in money_amounts(str(passage["text"])))
+                found.update(
+                    reading
+                    for amount in money_amounts(str(passage["text"]))
+                    for reading in amount.readings
+                )
     return frozenset(found)
 
 

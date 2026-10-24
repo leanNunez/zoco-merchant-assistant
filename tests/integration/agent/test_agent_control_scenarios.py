@@ -891,6 +891,17 @@ def test_7_every_document_mention_is_checked_against_what_was_retrieved(
             ("unverified_amount:$1.490.000",),
             id="an invented net",
         ),
+        pytest.param(
+            "El 2026-10-22 vendiste 1,500,000.00 ARS, devolviste 15,000.00 ARS y el neto fue "
+            "1,485,000.00 ARS.",
+            (),
+            id="the figures of the tool, copied with US separators (live-v1)",
+        ),
+        pytest.param(
+            "El 2026-10-22 el neto fue de 1,490,000.00 ARS.",
+            ("unverified_amount:1,490,000.00 ARS",),
+            id="an invented net, written with US separators",
+        ),
     ],
 )
 def test_7_an_amount_no_tool_returned_is_flagged_but_delivered(

@@ -142,6 +142,92 @@ def test_amounts_of_money_are_read_in_argentine_format(text: str, values: list[D
     assert [amount.value for amount in money_amounts(text)] == values
 
 
+# The strings are copied from the first run against the real model (live-v1): the tools print
+# "1630000.00" and the model writes it back with US separators.
+@pytest.mark.parametrize(
+    ("text", "values"),
+    [
+        pytest.param("el neto fue de 1,630,000.00 ARS.", [Decimal(1630000)], id="live-v1 S03 net"),
+        pytest.param("bruto de 1,650,000.00 ARS.", [Decimal(1650000)], id="live-v1 S05 gross"),
+        pytest.param("devoluciones de 20,000.00 ARS", [Decimal(20000)], id="live-v1 S03 returns"),
+        pytest.param("neto de -15,000.00 ARS.", [Decimal(15000)], id="live-v1 negative net"),
+        pytest.param("ingreso neto de 3,940,200.00 ARS", [Decimal("3940200")], id="live-v1 S06"),
+        pytest.param("Total: $1,630,000.50", [Decimal("1630000.50")], id="US with a $ prefix"),
+        pytest.param("Total: $1.630.000,50", [Decimal("1630000.50")], id="Argentine with a $"),
+        pytest.param("Son 1.630.000,50 ARS.", [Decimal("1630000.50")], id="Argentine with ARS"),
+        pytest.param("Son 1,630,000.50 ARS.", [Decimal("1630000.50")], id="US with ARS"),
+        pytest.param("Son 1630000.50 pesos.", [Decimal("1630000.50")], id="plain with a dot"),
+        pytest.param("Son 1630000,50 pesos.", [Decimal("1630000.50")], id="plain with a comma"),
+        pytest.param("Son $1630000.", [Decimal(1630000)], id="plain integer"),
+        pytest.param("Es $12,500 en total.", [Decimal("12.500")], id="one comma, 3 digits"),
+        pytest.param("Cobra $45,5.", [Decimal("45.5")], id="one comma, one digit"),
+        pytest.param("Cobra $450.5 ARS.", [Decimal("450.5")], id="one dot, one digit"),
+        pytest.param("Cobra $0,500.", [Decimal("0.500")], id="leading zero is a decimal"),
+    ],
+)
+def test_amounts_of_money_are_read_in_both_number_styles(text: str, values: list[Decimal]) -> None:
+    assert [amount.value for amount in money_amounts(text)] == values
+
+
+@pytest.mark.parametrize(
+    ("text", "readings"),
+    [
+        pytest.param("$1.630", (Decimal(1630), Decimal("1.630")), id="dot and 3 digits"),
+        pytest.param("1,630 ARS", (Decimal("1.630"), Decimal(1630)), id="comma and 3 digits"),
+        pytest.param("$1.630,00", (Decimal(1630),), id="both marks: only one reading"),
+        pytest.param("$16.300", (Decimal(16300), Decimal("16.300")), id="two-digit group"),
+        pytest.param("$1630,50", (Decimal("1630.50"),), id="not a group: a decimal"),
+    ],
+)
+def test_a_token_that_can_be_written_both_ways_keeps_every_reading(
+    text: str, readings: tuple[Decimal, ...]
+) -> None:
+    (amount,) = money_amounts(text)
+
+    assert amount.readings == readings
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        "1,630,000.00 ARS",
+        "$1.630.000,00",
+        "1.630.000,00 ARS",
+        "$1,630,000.00",
+        "1630000.00 ARS",
+        "$1630000",
+        "ARS 1,630,000",
+    ],
+)
+def test_the_same_figure_in_any_style_is_backed_by_the_payload(written: str) -> None:
+    known = frozenset({Decimal("1630000.00")})
+
+    assert unverified_amounts(f"El neto fue {written}.", known) == ()
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        "1,630,001.00 ARS",  # the right style, one peso off
+        "$1.630.001,00",
+        "1,630.00 ARS",  # 1630: a dropped group is a different number, not a format
+        "$163.000.000,00",
+    ],
+)
+def test_a_different_figure_is_flagged_whatever_the_style(written: str) -> None:
+    known = frozenset({Decimal("1630000.00")})
+
+    flagged = unverified_amounts(f"El neto fue {written}.", known)
+
+    assert [amount.written for amount in flagged] == [written]
+
+
+def test_an_ambiguous_token_is_backed_when_either_reading_is_a_known_figure() -> None:
+    assert unverified_amounts("Cobra $1.630.", frozenset({Decimal(1630)})) == ()
+    assert unverified_amounts("Cobra $1.630.", frozenset({Decimal("1.63")})) == ()
+    assert len(unverified_amounts("Cobra $1.630.", frozenset({Decimal(99)}))) == 1
+
+
 def test_an_amount_is_unverified_unless_a_payload_has_the_same_figure() -> None:
     known = frozenset({Decimal("1500000.00"), Decimal("15000.00")})
 

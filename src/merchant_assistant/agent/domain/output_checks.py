@@ -8,8 +8,9 @@
 - `leaks_prompt`: a customer-bound answer that contains a run of at least 40 characters of the
   CURRENT system prompt (case-, accent- and whitespace-insensitive) is withheld: the prompt is
   the model's instructions, not something the customer is shown.
-- `money_amounts`: the amounts of money written in a text, so the turn can FLAG those no tool
-  payload contains. Derived values (a fee computed from a documented rate) are legitimate, so
+- `money_amounts`: the amounts of money written in a text, in Argentine ("$1.630.000,50") or US
+  ("1,630,000.50 ARS") format, so the turn can FLAG those no tool payload contains, compared as
+  numbers. Derived values (a fee computed from a documented rate) are legitimate, so
   an unverified amount is reported, not withheld.
 
 These are vocabularies and patterns: each function says what it does not catch. None of them
@@ -213,9 +214,15 @@ def rewrite_citations(text: str, known: frozenset[str]) -> CitationCheck:
 
 # --------------------------------------------------------------------------- amounts of money
 
-# Argentine format first: "." groups thousands and "," marks decimals ("45.000,50"). A plain
-# "1500000.00" (two decimals after a dot) is read as a decimal point, the way tools print it.
-_NUMBER = r"[0-9]{1,3}(?:\.[0-9]{3})+(?:,[0-9]+)?|[0-9]+(?:,[0-9]+|\.[0-9]{1,2}(?![0-9]))?"
+# Three shapes, tried in this order. Argentine: "." groups thousands and "," marks decimals
+# ("1.630.000,50"). US, which the model copies from the tools' decimals: "," groups thousands
+# and "." marks decimals ("1,630,000.50"). Plain: no grouping, one separator at most
+# ("1630000.00", "1630000,50"). The tail check keeps a match from stopping inside a longer number.
+_NUMBER = (
+    r"(?:[0-9]{1,3}(?:\.[0-9]{3})+(?:,[0-9]+)?"
+    r"|[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?"
+    r"|[0-9]+(?:[.,][0-9]+)?)(?![0-9])"
+)
 _MONEY = re.compile(
     rf"(?:(?:\$|\bARS)\s?-?\s?(?P<prefixed>{_NUMBER})(?:\s?(?:ARS|pesos)\b)?)"
     rf"|(?:\b(?P<suffixed>{_NUMBER})\s?(?:ARS|pesos)\b)",
@@ -227,35 +234,81 @@ _MONEY = re.compile(
 class Amount:
     written: str  # as it appears in the text, trimmed
     value: Decimal  # the absolute value: "-15.000" and "15.000" are the same figure
+    # Other readings of a token that can be written both ways ("1.630" is 1630 in Argentine
+    # format and 1.63 in US format). `value` is the Argentine reading; a figure counts as backed
+    # if ANY reading matches, so an ambiguous token is never flagged for choosing the wrong one.
+    alternatives: tuple[Decimal, ...] = ()
+
+    @property
+    def readings(self) -> tuple[Decimal, ...]:
+        return (self.value, *self.alternatives)
 
 
 def money_amounts(text: str) -> tuple[Amount, ...]:
     """Every amount of money: a `$` or `ARS` prefix, or an `ARS`/`pesos` suffix.
 
+    Reads both number styles, because a model copies the decimals of a tool and writes
+    "1,630,000.00 ARS": Argentine ("$1.630.000,50", "1.630.000,50 ARS") and US ("1,630,000.50
+    ARS"), plus the plain ones ("1630000.50"). When both separators appear, the LAST one is the
+    decimal mark. A token with a single separator followed by exactly three digits ("1.630",
+    "1,630") is ambiguous: it keeps both readings (see `Amount.alternatives`).
+
     Does NOT catch: amounts without a currency mark ("cobrás 45.000"), amounts in words
-    ("cuarenta y cinco mil pesos"), other currencies, or English formats ("$45,000.50" is read
-    as 45 with decimals 000, which simply will not match a payload and is flagged).
+    ("cuarenta y cinco mil pesos"), other currencies, spaces or apostrophes as thousands
+    separators ("1 630 000", "1'630'000"), or abbreviations ("1,6 M", "1630k"). It does not judge
+    whether the figure is plausible either, only whether a tool returned the same number.
     """
     found: list[Amount] = []
     for match in _MONEY.finditer(text):
         raw = match.group("prefixed") or match.group("suffixed")
-        value = _parse_number(raw)
-        if value is not None:
-            found.append(Amount(match.group(0).strip(), abs(value)))
+        readings = _readings(raw)
+        if readings:
+            found.append(Amount(match.group(0).strip(), readings[0], readings[1:]))
     return tuple(found)
 
 
 def unverified_amounts(text: str, known: frozenset[Decimal]) -> tuple[Amount, ...]:
-    """The amounts of `text` that no known figure equals (compared as absolute values)."""
-    return tuple(amount for amount in money_amounts(text) if amount.value not in known)
+    """The amounts of `text` that no known figure equals (compared as absolute values, by number:
+    "1,630,000.00", "1.630.000,00" and "1630000" are all the figure 1630000)."""
+    return tuple(
+        amount
+        for amount in money_amounts(text)
+        if not any(reading in known for reading in amount.readings)
+    )
 
 
-def _parse_number(raw: str) -> Decimal | None:
-    if re.fullmatch(r"[0-9]{1,3}(?:\.[0-9]{3})+(?:,[0-9]+)?", raw):
-        normalized = raw.replace(".", "").replace(",", ".")
+def _readings(raw: str) -> tuple[Decimal, ...]:
+    """The numbers a token can mean, the Argentine reading first; none if it is not a number."""
+    dots, commas = raw.count("."), raw.count(",")
+    if dots and commas:
+        # The last separator is the decimal mark; the other one groups thousands.
+        decimal_mark = "." if raw.rfind(".") > raw.rfind(",") else ","
+        group_mark = "," if decimal_mark == "." else "."
+        candidates = [raw.replace(group_mark, "").replace(decimal_mark, ".")]
+    elif dots > 1:
+        candidates = [raw.replace(".", "")]
+    elif commas > 1:
+        candidates = [raw.replace(",", "")]
+    elif dots or commas:
+        mark = "." if dots else ","
+        whole, _, fraction = raw.partition(mark)
+        grouped = len(fraction) == 3 and 1 <= len(whole) <= 3 and whole != "0"
+        as_decimal = f"{whole}.{fraction}"
+        as_thousands = f"{whole}{fraction}"
+        # "1.630" is thousands in Argentine format; "1,630" is thousands in US format only.
+        candidates = (
+            ([as_thousands, as_decimal] if mark == "." else [as_decimal, as_thousands])
+            if grouped
+            else [as_decimal]
+        )
     else:
-        normalized = raw.replace(",", ".")
-    try:
-        return Decimal(normalized)
-    except InvalidOperation:
-        return None
+        candidates = [raw]
+    values: list[Decimal] = []
+    for candidate in candidates:
+        try:
+            value = Decimal(candidate)
+        except InvalidOperation:
+            continue
+        if value not in values:
+            values.append(value)
+    return tuple(values)
