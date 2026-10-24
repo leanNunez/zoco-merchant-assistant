@@ -239,30 +239,41 @@ si la nota llegó. Un candado nuevo, `no_platform_note_visible`, entra en la lí
 No hay medición con el modelo real de este arreglo: las corridas `live` guardadas siguen siendo las
 de arriba, y S19 sigue siendo un fallo medido hasta que se repita la corrida.
 
-## Actualización: dos reglas generales nuevas en el prompt tras la primera medición `heldout`
+## Actualización: dos reglas generales probadas tras la primera medición `heldout`, y revertidas
 
-La primera medición con el modelo real sobre el split `heldout` (`live-heldout-v5`) mostró dos
-fallos que son defectos generales del prompt, no de un escenario:
+La primera medición con el modelo real sobre el split `heldout` (hoy en `live-heldout/`, prompt
+`5b4714215a984031`, 14/24 corridas) mostró dos fallos que parecían defectos generales del prompt:
 
-- **H02 (3/3): preguntaba de más por una fecha explícita.** El prompt pide confirmar las fechas
-  relativas o ambiguas, y el modelo también pidió confirmar una fecha escrita con día, mes y año.
-- **H01 (3/3): el reclamo omitía un identificador.** El cliente nombró un identificador de evento
-  en un mensaje anterior y el texto propuesto del reclamo no lo traía.
+- **H02 (3/3):** pedía confirmar una fecha completa y explícita ("5 de octubre de 2026").
+- **H01 (3/3):** el reclamo registrado omitía el identificador de evento que el cliente había dado.
 
-Se agregaron dos reglas cortas, en el estilo de las existentes y sin contenido de ningún escenario
-(el guardia `test_the_prompt_gives_no_scenario_content` sigue en pie):
+Se probaron dos reglas cortas, sin contenido de ningún escenario: usar directo una fecha completa, y
+llevar a la descripción del reclamo todo identificador que el cliente dio. El prompt pasó a
+`1c9532b7ba6a39da` (3650 caracteres). Se midió con el modelo real (guardado en
+`live-v6-attempt/` y `live-heldout-v6-attempt/`):
 
-1. Una fecha dada completa (día, mes y año, en palabras o como AAAA-MM-DD) es explícita: se usa
-   directo, sin pedir confirmación. Las relativas o ambiguas se siguen confirmando como antes.
-2. Al preparar un reclamo, la descripción lleva todo identificador y dato que el cliente dio en la
-   conversación (números de evento, orden o ticket, fechas, montos) y nada que no haya dicho.
+| Split | Prompt entregado (`5b47…`) | Con las dos reglas (`1c95…`) |
+|---|---|---|
+| `dev` (26 escenarios) | 72/78 (92%) | 70/78 (90%) |
+| `heldout` (8 escenarios) | 14/24 (58%) | 15/24 (62%) |
 
-El prompt pasó de 3328 a 3650 caracteres (de 20 a 22 líneas); el techo del test de largo subió de
-3600 a 3700. Su hash cambió de `5b4714215a984031` a `1c9532b7ba6a39da`, y un test comprueba que
-quitando solo las dos reglas se recupera el hash anterior. Los resultados `scripted`, `null` y
-`naive` se regeneraron con ese hash; `scripted` sigue cumpliendo el 100% (102/102).
+Las diferencias están dentro del ruido (24 corridas: el intervalo de Wilson de 62% es [43%; 79%]), y
+el detalle es peor que el promedio: H02 sigue en 0/3 (la regla de las fechas no cambió el
+comportamiento); H01 sigue en 0/3 pero ahora porque el modelo a veces ni propone el reclamo; y S07
+pasó de 3/3 a 0/3 en `dev`. Una regla que no mejora lo que quería mejorar y empeora otro caso no se
+queda: **se revirtió** (`git revert`), y el prompt entregado vuelve a `5b4714215a984031`.
 
-**Advertencia: el split `heldout` ya no es independiente.** Estas reglas se escribieron mirando
-sus fallos. La primera medición (`live-heldout-v5`) es el número honesto; cualquier medición
-`heldout` posterior es posterior al triaje y no mide generalización sin sesgo. No hay medición
-con el modelo real de estas dos reglas todavía.
+El intento queda documentado y con sus resultados, porque es información: agregar reglas a un prompt
+largo no es monótono, y con tan pocas corridas un parche general puede ser indistinguible del azar.
+
+**Mapa de directorios de resultados reales** (`evaluation/results/conversations/`):
+
+- `live-v1` a `live-v4`: iteraciones del prompt y del evaluador durante el triaje (arriba).
+- `live`: split `dev` con el prompt entregado y la nota de propuesta retirada (92%, optimista).
+- `live-heldout`: split `heldout` con el prompt entregado, medido una vez (58%, el número honesto).
+- `live-v6-attempt`, `live-heldout-v6-attempt`: el intento revertido.
+
+**Sobre la independencia del `heldout`.** El prompt entregado nunca se ajustó con sus fallos. Pero la
+decisión de revertir las dos reglas sí miró esos resultados: es un efecto de selección mínimo (se
+eligió entre dos versiones con 24 corridas) y como la versión descartada no fue mejor en ningún
+caso, no cambia el número. Aun así, el 58% debe leerse con el intervalo [39%; 76%].
