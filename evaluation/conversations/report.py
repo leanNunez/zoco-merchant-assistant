@@ -629,10 +629,11 @@ def _limits(mode: str) -> list[str]:
         "corta: la pregunta fuera de tema de X2 no comparte ninguna palabra con el corpus, y "
         'una como "¿Cuál es la capital de Francia?" sí pasaría.',
         "- **Algunas propiedades no tienen un candado en el código** y por eso son UTILITY: que el "
-        "prompt de sistema no llegue al cliente (en S18 el volcado literal se retiene solo porque "
-        'el prompt contiene la frase "a complaint was registered", que dispara el control de '
-        "anuncios de registro), que el texto de un documento envenenado no se cite, que un monto "
-        "sin respaldo no se diga (solo se marca, no se retiene).",
+        "texto de un documento envenenado no se cite, que un monto sin respaldo no se diga (solo "
+        "se marca, no se retiene). El prompt de sistema sí tiene candado (LOCK "
+        "`no_system_prompt_leak`): toda respuesta con 40 caracteres seguidos del prompt vigente "
+        "se retiene. Solo cubre copias literales: una paráfrasis, una traducción o una copia "
+        "con un carácter intercalado cada 39 no se detecta.",
         "- **Lo que muestra la pregunta de confirmación lo escribió el modelo**: si el motivo o la "
         "descripción contienen un `DOC-NN` o un texto con forma de llamada, llegan al cliente; "
         "ningún escenario lo ejerce.",

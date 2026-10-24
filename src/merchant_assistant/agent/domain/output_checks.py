@@ -5,6 +5,9 @@
 - `rewrite_citations`: every `DOC-NN` mention must name a document a search returned in the
   conversation. Citation groups in brackets or parentheses lose the unknown ids; an unknown id
   anywhere else cannot be cut out of a sentence cleanly, so it withholds the answer.
+- `leaks_prompt`: a customer-bound answer that contains a run of at least 40 characters of the
+  CURRENT system prompt (case-, accent- and whitespace-insensitive) is withheld: the prompt is
+  the model's instructions, not something the customer is shown.
 - `money_amounts`: the amounts of money written in a text, so the turn can FLAG those no tool
   payload contains. Derived values (a fee computed from a documented rate) are legitimate, so
   an unverified amount is reported, not withheld.
@@ -18,6 +21,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
@@ -103,6 +107,50 @@ def _clauses(text: str) -> list[str]:
     folded = "".join(c for c in decomposed if unicodedata.category(c) != "Mn").casefold()
     pieces = re.split(r"[.,;:!?¡¿\n()\[\]\"«»]+", folded)
     return [" ".join(re.sub(r"[^\w]+", " ", piece).split()) for piece in pieces if piece.strip()]
+
+
+# --------------------------------------------------------------------------- prompt leaks
+
+PROMPT_LEAK_WINDOW = 40  # characters of the prompt, in a row, that make an answer a leak
+_SEPARATOR = "\0"  # never in normalized text: it keeps a window from crossing a removed span
+
+
+def leaks_prompt(text: str, prompt: str, *, public: Iterable[str] = ()) -> bool:
+    """Whether `text` contains a run of `PROMPT_LEAK_WINDOW` characters of `prompt`.
+
+    Both are compared folded (NFKC, no accents, casefolded) with every run of whitespace turned
+    into one space, so changing the case, the line breaks or the indentation of a pasted prompt
+    does not hide it, and a paste of several lines is one run.
+
+    `public` lists texts the merchant shows customers on purpose and the prompt also says (the
+    attention hours): they are cut out of the prompt first, so quoting them is not a leak.
+
+    Does NOT catch: a paraphrase or a translation of the prompt, a copy interleaved with other
+    characters (one every 39), or a leak split across two answers. It is a floor under a
+    careless or hostile verbatim copy, not a proof that the instructions stay private.
+    """
+    reference = _squash(prompt)
+    for shown in public:
+        folded = _squash(shown)
+        if folded:
+            reference = reference.replace(folded, _SEPARATOR)
+    if len(reference) < PROMPT_LEAK_WINDOW:
+        return False
+    windows = {
+        reference[start : start + PROMPT_LEAK_WINDOW]
+        for start in range(len(reference) - PROMPT_LEAK_WINDOW + 1)
+    }
+    answer = _squash(text).replace(_SEPARATOR, " ")
+    return any(
+        answer[start : start + PROMPT_LEAK_WINDOW] in windows
+        for start in range(len(answer) - PROMPT_LEAK_WINDOW + 1)
+    )
+
+
+def _squash(text: str) -> str:
+    decomposed = unicodedata.normalize("NFD", unicodedata.normalize("NFKC", text))
+    folded = "".join(char for char in decomposed if unicodedata.category(char) != "Mn")
+    return " ".join(folded.casefold().split())
 
 
 # --------------------------------------------------------------------------- citations

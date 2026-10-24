@@ -17,10 +17,11 @@
    Every call crosses `authorize`; a sales date must be grounded in what the user said; the
    first accepted `crear_reclamo` only creates a pending action and ends the turn with the
    code-owned confirmation question.
-6. Output checks on the model's answer: no tool call written as text, no claim that a
-   complaint was registered (only code templates say that), no complaint number nobody
-   mentioned, no mention of a document no search returned in this conversation; and an
-   amount of money no tool payload contains is FLAGGED (not withheld).
+6. Output checks on the model's answer: no run of 40 characters of the system prompt, no tool
+   call written as text, no claim that a complaint was registered (only code templates say
+   that), no complaint number nobody mentioned, no mention of a document no search returned in
+   this conversation; and an amount of money no tool payload contains is FLAGGED (not
+   withheld).
    Then, in AUTO, if the model searched the documentation and EVERY search came back
    `no_data` (the search's calibrated relevance floor, never the model's own confidence),
    the turn fires `low_confidence` (SYSTEM). In hours the conversation moves to SUGGEST and
@@ -73,6 +74,7 @@ from merchant_assistant.agent.domain.messages import Message, Role, ToolCall
 from merchant_assistant.agent.domain.output_checks import (
     canonical_doc_id,
     claims_registration,
+    leaks_prompt,
     money_amounts,
     rewrite_citations,
     unverified_amounts,
@@ -510,7 +512,7 @@ class ConversationService:
             )
             reply = completion.reply
             if not reply.tool_calls:
-                checked = self._checked(reply.text or "", state, turn)
+                checked = self._checked(reply.text or "", state, turn, prompt.content or "")
                 return state, _Reply(checked, from_model=True)
             # The model's own text next to tool calls is never shown: only results speak.
             state = state.with_messages(Message(Role.ASSISTANT, None, reply.tool_calls))
@@ -633,7 +635,11 @@ class ConversationService:
 
     # ------------------------------------------------------------------ output checks
 
-    def _checked(self, text: str, state: ConversationState, turn: _Turn) -> str:
+    def _checked(self, text: str, state: ConversationState, turn: _Turn, prompt: str) -> str:
+        if leaks_prompt(text, prompt, public=(self._window,)):
+            # The instructions are not for the customer, whatever the customer asked for.
+            turn.violations.append("prompt_leak")
+            return answer_withheld()
         if looks_like_tool_call(text):
             turn.violations.append("tool_call_in_text")
             return answer_withheld()
