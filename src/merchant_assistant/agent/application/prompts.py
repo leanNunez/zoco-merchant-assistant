@@ -14,7 +14,6 @@ from merchant_assistant.control import BusinessHours
 
 WEEKDAYS_EN = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 _WEEKDAYS_ES = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
-_WORKWEEK = frozenset(range(5))
 
 
 def system_prompt(
@@ -48,18 +47,34 @@ def system_prompt(
 
 
 def describe_hours(hours: BusinessHours) -> str:
-    """The window in Spanish, for the user: "de lunes a viernes, de 9:00 a 18:00 (...)"."""
-    days = sorted(hours.weekdays)
-    if frozenset(days) == _WORKWEEK:
-        span = "de lunes a viernes"
-    elif len(days) == 1:
-        span = f"los {_WEEKDAYS_ES[days[0]]}"
-    else:
-        names = [_WEEKDAYS_ES[day] for day in days]
-        span = f"los {', '.join(names[:-1])} y {names[-1]}"
-    zone = getattr(hours.tz, "key", None) or str(hours.tz)
-    return f"{span}, de {_clock(hours.opens)} a {_clock(hours.closes)} (hora de {zone})"
+    """The window in Spanish, for the customer.
+
+    For example "de lunes a viernes de 09:00 a 18:00, hora de Buenos Aires". Consecutive days
+    read as a range, others as a list; the zone is named by its city, as people say it.
+    """
+    days = _days(sorted(hours.weekdays))
+    span = f"de {_clock(hours.opens)} a {_clock(hours.closes)}"
+    return f"{days} {span}, hora de {_city(hours)}"
+
+
+def _days(days: list[int]) -> str:
+    names = [_plural(_WEEKDAYS_ES[day]) for day in days]
+    consecutive = days == list(range(days[0], days[-1] + 1))
+    if len(days) >= 3 and consecutive:
+        return f"de {_WEEKDAYS_ES[days[0]]} a {_WEEKDAYS_ES[days[-1]]}"
+    if len(days) == 1:
+        return f"los {names[0]}"
+    return f"los {', '.join(names[:-1])} y {names[-1]}"
+
+
+def _plural(day: str) -> str:
+    return day if day.endswith("s") else f"{day}s"
+
+
+def _city(hours: BusinessHours) -> str:
+    zone: str = getattr(hours.tz, "key", None) or str(hours.tz)
+    return zone.rsplit("/", 1)[-1].replace("_", " ")
 
 
 def _clock(moment: time) -> str:
-    return f"{moment.hour}:{moment.minute:02d}"
+    return f"{moment:%H:%M}"

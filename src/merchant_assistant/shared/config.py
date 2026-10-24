@@ -8,6 +8,7 @@ so only the code that really needs the provider complains when the key is missin
 
 from __future__ import annotations
 
+from datetime import time
 from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -34,6 +35,15 @@ class Settings(BaseSettings):
     sales_path: Path = Path("data/ventas.json")
     # Runtime state, git-ignored. The committed data/reclamos.db is only the empty template.
     complaints_db_path: Path = Path("var/reclamos.db")
+    docs_dir: Path = Path("docs")
+
+    # The human attention window. The brief does not define it: this default is an
+    # ASSUMPTION (SPEC_REVIEW.md, Supuestos). Wall-clock times in BUSINESS_TIMEZONE; the start
+    # is inclusive and the end exclusive. `shared` cannot import `control`, so bootstrap.py
+    # turns these values into a `BusinessHours`.
+    human_hours_start: time = time(9, 0)
+    human_hours_end: time = time(18, 0)
+    human_hours_days: str = "mon,tue,wed,thu,fri"
 
     @field_validator("openai_api_key", mode="before")
     @classmethod
@@ -76,6 +86,32 @@ class Settings(BaseSettings):
         _parse_modes(value)
         return value
 
+    @field_validator("human_hours_start", "human_hours_end")
+    @classmethod
+    def _wall_clock(cls, value: time) -> time:
+        if value.tzinfo is not None:
+            raise ValueError(
+                "HUMAN_HOURS_START and HUMAN_HOURS_END are wall-clock times in BUSINESS_TIMEZONE; "
+                "write them without an offset, e.g. 09:00"
+            )
+        return value
+
+    @field_validator("human_hours_days")
+    @classmethod
+    def _days_are_known(cls, value: str) -> str:
+        _parse_days(value)
+        return value
+
+    @model_validator(mode="after")
+    def _window_is_ordered(self) -> Settings:
+        if not self.human_hours_start < self.human_hours_end:
+            raise ValueError(
+                f"HUMAN_HOURS_START ({self.human_hours_start:%H:%M}) must be earlier than "
+                f"HUMAN_HOURS_END ({self.human_hours_end:%H:%M}); windows across midnight are "
+                "not supported"
+            )
+        return self
+
     @model_validator(mode="after")
     def _failures_have_a_mode(self) -> Settings:
         if self.tool_failure_rate > 0 and not _parse_modes(self.tool_failure_modes):
@@ -96,6 +132,11 @@ class Settings(BaseSettings):
     def timezone(self) -> ZoneInfo:
         return ZoneInfo(self.business_timezone)
 
+    @property
+    def human_weekdays(self) -> frozenset[int]:
+        """The attention days as weekday numbers, Monday being 0."""
+        return _parse_days(self.human_hours_days)
+
 
 _ALLOWED_MODES = ", ".join(mode.value for mode in FaultMode)
 
@@ -109,6 +150,25 @@ def _parse_modes(csv: str) -> frozenset[FaultMode]:
             f"allowed: {_ALLOWED_MODES}"
         )
     return frozenset(FaultMode(name) for name in names)
+
+
+WEEKDAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def _parse_days(csv: str) -> frozenset[int]:
+    names = [item.strip().lower() for item in csv.split(",") if item.strip()]
+    allowed = ", ".join(WEEKDAY_NAMES)
+    if not names:
+        raise ValueError(f"HUMAN_HOURS_DAYS must list at least one day; allowed: {allowed}")
+    unknown = [name for name in names if name not in WEEKDAY_NAMES]
+    if unknown:
+        raise ValueError(
+            f"HUMAN_HOURS_DAYS has unknown day(s) {', '.join(unknown)}; allowed: {allowed}"
+        )
+    repeated = sorted({name for name in names if names.count(name) > 1})
+    if repeated:
+        raise ValueError(f"HUMAN_HOURS_DAYS repeats {', '.join(repeated)}; list each day once")
+    return frozenset(WEEKDAY_NAMES.index(name) for name in names)
 
 
 @lru_cache(maxsize=1)

@@ -58,7 +58,7 @@ from merchant_assistant.shared.clock import Clock, business_today
 from merchant_assistant.shared.config import Settings
 from merchant_assistant.shared.faults import FaultInjector
 
-DOCS_DIR = Path("docs")
+DOCS_DIR = Path("docs")  # the default of Settings.docs_dir; tests read the real corpus here
 # Provisional until the measured selection of `make eval-retrieval` replaces it: sections are
 # the corpus' own units, and validity is applied by demotion, which never hides a document
 # (the tie preference the evaluation declares before measuring).
@@ -66,6 +66,20 @@ AGENT_CHUNKING = ChunkingStrategy("section")
 PASSAGES_PER_SEARCH = 4
 
 SearchMode = Literal["hybrid", "degraded"]
+
+
+def build_business_hours(settings: Settings) -> BusinessHours:
+    """The human attention window of the settings, judged in the business timezone.
+
+    `shared` may not import `control`, so the settings carry plain values and this is where
+    they become the control machine's guard.
+    """
+    return BusinessHours(
+        tz=settings.timezone,
+        opens=settings.human_hours_start,
+        closes=settings.human_hours_end,
+        weekdays=settings.human_weekdays,
+    )
 
 
 def build_embedder(settings: Settings) -> CachedEmbedder:
@@ -152,7 +166,7 @@ class SearchBuild:
 
 
 def build_search(
-    settings: Settings, *, today: Callable[[], date], docs_dir: Path = DOCS_DIR
+    settings: Settings, *, today: Callable[[], date], docs_dir: Path | None = None
 ) -> SearchBuild:
     """Hybrid retrieval when it can work; BM25 with the validity policy otherwise.
 
@@ -160,7 +174,7 @@ def build_search(
     must be embedded. Without either, the agent runs in DEGRADED mode: BM25 with the same
     validity demotion. Building never calls the embeddings API: only cached vectors are read.
     """
-    documents = load_documents(docs_dir)
+    documents = load_documents(settings.docs_dir if docs_dir is None else docs_dir)
     chunks = chunk_corpus(documents, AGENT_CHUNKING)
     bm25 = BM25Retriever(BM25Index(chunks, Tokenizer(stem=False)))
 
@@ -203,15 +217,17 @@ def build_agent_service(
     *,
     clock: Clock,
     model: ChatModel,
-    hours: BusinessHours,
     store: ConversationStore,
+    hours: BusinessHours | None = None,
     sleeper: Sleeper = time.sleep,
     retry_seed: int = 0,
-    docs_dir: Path = DOCS_DIR,
+    docs_dir: Path | None = None,
 ) -> AgentBuild:
     """The conversation service over the real capabilities, with the simulated failures the
-    environment asks for (`TOOL_FAILURE_*`), one fault injector per tool."""
+    environment asks for (`TOOL_FAILURE_*`), one fault injector per tool. The attention window
+    comes from the settings unless `hours` is given."""
     tz = settings.timezone
+    hours = build_business_hours(settings) if hours is None else hours
     search = build_search(settings, today=lambda: business_today(clock, tz), docs_dir=docs_dir)
 
     sales_repository = FaultySalesRepository(

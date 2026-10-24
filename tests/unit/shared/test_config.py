@@ -1,3 +1,4 @@
+from datetime import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -17,6 +18,10 @@ VARIABLES = (
     "TOOL_FAILURE_MODES",
     "SALES_PATH",
     "COMPLAINTS_DB_PATH",
+    "DOCS_DIR",
+    "HUMAN_HOURS_START",
+    "HUMAN_HOURS_END",
+    "HUMAN_HOURS_DAYS",
 )
 
 
@@ -193,4 +198,85 @@ def test_failures_with_no_mode_stop_the_load_but_no_failures_do_not(
 
     monkeypatch.setenv("TOOL_FAILURE_RATE", "0.5")
     with pytest.raises(ValidationError, match="at least one mode"):
+        Settings(_env_file=None)
+
+
+# --------------------------------------------------------------------------- attention window
+
+
+def test_the_attention_window_defaults_to_weekdays_from_nine_to_six() -> None:
+    settings = Settings(_env_file=None)
+
+    assert (settings.human_hours_start, settings.human_hours_end) == (time(9, 0), time(18, 0))
+    assert settings.human_weekdays == frozenset({0, 1, 2, 3, 4})
+    assert settings.docs_dir == Path("docs")
+
+
+def test_the_attention_window_comes_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HUMAN_HOURS_START", "10:30")
+    monkeypatch.setenv("HUMAN_HOURS_END", "14:00")
+    monkeypatch.setenv("HUMAN_HOURS_DAYS", " SAT , sun ")
+    monkeypatch.setenv("DOCS_DIR", "elsewhere/docs")
+
+    settings = Settings(_env_file=None)
+
+    assert (settings.human_hours_start, settings.human_hours_end) == (time(10, 30), time(14, 0))
+    assert settings.human_weekdays == frozenset({5, 6})
+    assert settings.docs_dir == Path("elsewhere/docs")
+
+
+@pytest.mark.parametrize(
+    ("days", "message"),
+    [
+        pytest.param("", "HUMAN_HOURS_DAYS must list at least one day", id="empty"),
+        pytest.param(" , ", "HUMAN_HOURS_DAYS must list at least one day", id="only commas"),
+        pytest.param("mon,lunes", "HUMAN_HOURS_DAYS has unknown day(s) lunes", id="spanish name"),
+        pytest.param("monday", "HUMAN_HOURS_DAYS has unknown day(s) monday", id="long name"),
+        pytest.param("mon,Mon", "HUMAN_HOURS_DAYS repeats mon", id="repeated"),
+    ],
+)
+def test_a_wrong_list_of_days_stops_the_load_and_says_what_is_allowed(
+    monkeypatch: pytest.MonkeyPatch, days: str, message: str
+) -> None:
+    monkeypatch.setenv("HUMAN_HOURS_DAYS", days)
+
+    with pytest.raises(ValidationError) as refused:
+        Settings(_env_file=None)
+
+    assert message in str(refused.value)
+    if "repeats" not in message:
+        assert "mon, tue, wed, thu, fri, sat, sun" in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        pytest.param("18:00", "09:00", id="reversed"),
+        pytest.param("09:00", "09:00", id="empty window"),
+        pytest.param("22:00", "02:00", id="across midnight"),
+    ],
+)
+def test_a_window_that_does_not_open_before_it_closes_stops_the_load(
+    monkeypatch: pytest.MonkeyPatch, start: str, end: str
+) -> None:
+    monkeypatch.setenv("HUMAN_HOURS_START", start)
+    monkeypatch.setenv("HUMAN_HOURS_END", end)
+
+    with pytest.raises(ValidationError, match="must be earlier than HUMAN_HOURS_END"):
+        Settings(_env_file=None)
+
+
+def test_a_time_with_an_offset_is_refused_because_the_window_is_in_the_business_zone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HUMAN_HOURS_START", "09:00-03:00")
+
+    with pytest.raises(ValidationError, match="write them without an offset"):
+        Settings(_env_file=None)
+
+
+def test_a_time_that_is_not_a_time_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HUMAN_HOURS_END", "seis de la tarde")
+
+    with pytest.raises(ValidationError, match="human_hours_end"):
         Settings(_env_file=None)

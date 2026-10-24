@@ -1,7 +1,7 @@
 """The composition root wires the real capabilities to the agent's ports, offline."""
 
 import json
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -21,6 +21,7 @@ from merchant_assistant.bootstrap import (
     ComplaintsAdapter,
     SalesAdapter,
     build_agent_service,
+    build_business_hours,
     build_search,
 )
 from merchant_assistant.complaints.adapters.sqlite_repository import SqliteComplaintRepository
@@ -30,6 +31,7 @@ from merchant_assistant.knowledge.adapters.filesystem import load_documents
 from merchant_assistant.knowledge.adapters.sqlite_cache import SqliteEmbeddingCache
 from merchant_assistant.knowledge.chunking import chunk_corpus
 from merchant_assistant.knowledge.embedding import embedding_key
+from merchant_assistant.knowledge.errors import DocumentFormatError
 from merchant_assistant.sales.adapters.json_repository import JsonSalesRepository
 from merchant_assistant.sales.errors import FutureSalesDate
 from merchant_assistant.sales.service import SalesService
@@ -177,3 +179,49 @@ def test_the_whole_agent_runs_a_turn_offline_over_the_real_capabilities(tmp_path
         "La reserva dura 12 minutos [DOC-04]."
     ]
     assert result.violations == ()
+
+
+def test_the_attention_window_of_the_settings_becomes_the_control_guard(tmp_path: Path) -> None:
+    settings = offline(
+        tmp_path,
+        human_hours_start=time(10, 0),
+        human_hours_end=time(13, 0),
+        human_hours_days="sat",
+        business_timezone="America/Argentina/Buenos_Aires",
+    )
+
+    hours = build_business_hours(settings)
+
+    saturday = datetime(2026, 10, 24, 10, 0, tzinfo=BUENOS_AIRES)
+    assert hours.is_open(saturday)
+    assert not hours.is_open(saturday - timedelta(minutes=1))
+    assert not hours.is_open(saturday.replace(hour=13))
+    assert not hours.is_open(NOW)  # a Friday
+
+
+def test_without_explicit_hours_the_agent_answers_with_the_window_of_the_settings(
+    tmp_path: Path,
+) -> None:
+    model = ScriptedChatModel([text_reply("Hola.")])
+    built = build_agent_service(
+        offline(tmp_path, human_hours_days="sat,sun"),
+        clock=FixedClock(NOW),  # a Friday: closed under these settings
+        model=model,
+        store=InMemoryConversationStore(),
+        sleeper=lambda _: None,
+    )
+
+    result = built.service.handle_user_message("conv-1", "hola")
+
+    (outbound,) = result.outbound
+    assert outbound.text.endswith(
+        "atiende los sábados y domingos de 09:00 a 18:00, hora de Buenos Aires."
+    )
+
+
+def test_the_documents_directory_comes_from_the_settings(tmp_path: Path) -> None:
+    empty = tmp_path / "no-docs"
+    empty.mkdir()
+
+    with pytest.raises(DocumentFormatError, match="no DOC-"):
+        build_search(offline(tmp_path, docs_dir=empty), today=lambda: TODAY)

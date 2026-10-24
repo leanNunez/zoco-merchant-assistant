@@ -9,7 +9,7 @@ from merchant_assistant.agent.application.prompts import describe_hours, system_
 from merchant_assistant.control import BusinessHours
 
 BUENOS_AIRES = ZoneInfo("America/Argentina/Buenos_Aires")
-WINDOW = "de lunes a viernes, de 9:00 a 18:00"
+WINDOW = "de lunes a viernes de 09:00 a 18:00, hora de Buenos Aires"
 ALL_TOOLS = ["buscar_documentacion", "consultar_ventas", "crear_reclamo"]
 
 
@@ -51,7 +51,9 @@ def test_the_prompt_carries_every_rule_of_record(clause: str) -> None:
     ("weekdays", "expected"),
     [
         pytest.param(range(5), "de lunes a viernes", id="workweek"),
-        pytest.param([5], "los sábado", id="one day"),
+        pytest.param(range(6), "de lunes a sábado", id="monday to saturday"),
+        pytest.param([5], "los sábados", id="one day"),
+        pytest.param([5, 6], "los sábados y domingos", id="weekend"),
         pytest.param([0, 2, 4], "los lunes, miércoles y viernes", id="some days"),
     ],
 )
@@ -60,6 +62,12 @@ def test_the_window_is_written_for_people(weekdays: range | list[int], expected:
         tz=BUENOS_AIRES, opens=time(9, 0), closes=time(18, 30), weekdays=frozenset(weekdays)
     )
 
-    assert describe_hours(hours) == (
-        f"{expected}, de 9:00 a 18:30 (hora de America/Argentina/Buenos_Aires)"
+    assert describe_hours(hours) == f"{expected} de 09:00 a 18:30, hora de Buenos Aires"
+
+
+def test_a_zone_without_a_city_is_named_as_it_is() -> None:
+    hours = BusinessHours(
+        tz=ZoneInfo("UTC"), opens=time(8, 5), closes=time(12, 0), weekdays=frozenset({0})
     )
+
+    assert describe_hours(hours) == "los lunes de 08:05 a 12:00, hora de UTC"

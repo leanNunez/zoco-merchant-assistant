@@ -111,7 +111,7 @@ def test_a_failed_execution_is_honest_and_promises_no_duplicate_on_retry() -> No
     assert "no se va a registrar dos veces" in text
 
 
-WINDOW = "de lunes a viernes, de 9:00 a 18:00"
+WINDOW = "de lunes a viernes de 09:00 a 18:00, hora de Buenos Aires"
 
 
 def test_the_hours_notice_states_the_human_window() -> None:
