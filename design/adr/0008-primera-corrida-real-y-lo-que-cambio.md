@@ -238,3 +238,31 @@ si la nota llegó. Un candado nuevo, `no_platform_note_visible`, entra en la lí
 
 No hay medición con el modelo real de este arreglo: las corridas `live` guardadas siguen siendo las
 de arriba, y S19 sigue siendo un fallo medido hasta que se repita la corrida.
+
+## Actualización: dos reglas generales nuevas en el prompt tras la primera medición `heldout`
+
+La primera medición con el modelo real sobre el split `heldout` (`live-heldout-v5`) mostró dos
+fallos que son defectos generales del prompt, no de un escenario:
+
+- **H02 (3/3): preguntaba de más por una fecha explícita.** El prompt pide confirmar las fechas
+  relativas o ambiguas, y el modelo también pidió confirmar una fecha escrita con día, mes y año.
+- **H01 (3/3): el reclamo omitía un identificador.** El cliente nombró un identificador de evento
+  en un mensaje anterior y el texto propuesto del reclamo no lo traía.
+
+Se agregaron dos reglas cortas, en el estilo de las existentes y sin contenido de ningún escenario
+(el guardia `test_the_prompt_gives_no_scenario_content` sigue en pie):
+
+1. Una fecha dada completa (día, mes y año, en palabras o como AAAA-MM-DD) es explícita: se usa
+   directo, sin pedir confirmación. Las relativas o ambiguas se siguen confirmando como antes.
+2. Al preparar un reclamo, la descripción lleva todo identificador y dato que el cliente dio en la
+   conversación (números de evento, orden o ticket, fechas, montos) y nada que no haya dicho.
+
+El prompt pasó de 3328 a 3650 caracteres (de 20 a 22 líneas); el techo del test de largo subió de
+3600 a 3700. Su hash cambió de `5b4714215a984031` a `1c9532b7ba6a39da`, y un test comprueba que
+quitando solo las dos reglas se recupera el hash anterior. Los resultados `scripted`, `null` y
+`naive` se regeneraron con ese hash; `scripted` sigue cumpliendo el 100% (102/102).
+
+**Advertencia: el split `heldout` ya no es independiente.** Estas reglas se escribieron mirando
+sus fallos. La primera medición (`live-heldout-v5`) es el número honesto; cualquier medición
+`heldout` posterior es posterior al triaje y no mide generalización sin sesgo. No hay medición
+con el modelo real de estas dos reglas todavía.
