@@ -9,10 +9,12 @@ import pytest
 from evaluation.retrieval.pipeline import (
     MAIN_STRATEGIES,
     REFERENCE_DATE,
+    ablation_delta,
     chunkings_to_index,
     run_evaluation,
     texts_to_index,
 )
+from evaluation.retrieval.scoring import StrategyRun, score_question
 from numpy.typing import NDArray
 
 from merchant_assistant.knowledge.documents import Document, Section
@@ -70,6 +72,9 @@ MINI_DOCUMENTS = (
         ),
     ),
 )
+
+Q_A = Question("QA", "qa", frozenset({"D1"}))
+Q_B = Question("QB", "qb", frozenset({"D2"}))
 
 MINI_QUESTIONS = (
     Question("Q1", "¿Cuánto cobra el plan pro?", frozenset({"D-CUR"})),
@@ -178,21 +183,66 @@ def test_the_period_of_each_question_is_recorded(embedder: HashingEmbedder) -> N
     }
 
 
-def test_the_ablations_are_stemming_the_header_toggle_and_kind_demotion(
+def test_the_ablations_are_the_classic_ones_and_the_tokenizer_and_fusion_variants(
     embedder: HashingEmbedder,
 ) -> None:
     evaluation = run_evaluation(MINI_DOCUMENTS, MINI_QUESTIONS, embedder)
     selected = evaluation.selection.selected.label
     toggled = selected.removesuffix("+header") if "+header" in selected else f"{selected}+header"
 
-    assert [(run.chunking, run.strategy) for run in evaluation.ablations] == [
+    expected = [
         (selected, "bm25(stem)"),
         (toggled, "vector"),
         (toggled, "bm25"),
         (toggled, "hybrid"),
         (selected, "hybrid+kind-demotion(historico)"),
+        (selected, "bm25(no parts)"),
+        (selected, "bm25(stopwords)"),
+        (selected, "bm25(stopwords, stem)"),
+        (selected, "hybrid(stopwords)"),
+        (selected, "hybrid+meta(demote)(stopwords)"),
+        (selected, "hybrid(fuse by document)"),
+        (selected, "hybrid+meta(demote)(fuse by document)"),
     ]
+    if selected != "section":
+        expected.append(("section", "hybrid(fuse by document)"))
+    assert [(run.chunking, run.strategy) for run in evaluation.ablations] == expected
     assert evaluation.chunk_counts[toggled] > 0
+
+
+def test_every_ablation_is_compared_with_the_strategy_it_varies(
+    embedder: HashingEmbedder,
+) -> None:
+    evaluation = run_evaluation(MINI_DOCUMENTS, MINI_QUESTIONS, embedder)
+
+    references = {
+        (delta.chunking, delta.strategy): delta.reference for delta in evaluation.ablation_deltas
+    }
+    assert len(evaluation.ablation_deltas) == len(evaluation.ablations)
+    assert [(d.chunking, d.strategy) for d in evaluation.ablation_deltas] == [
+        (run.chunking, run.strategy) for run in evaluation.ablations
+    ]
+    selected = evaluation.selection.selected.label
+    assert references[(selected, "bm25(no parts)")] == "bm25"
+    assert references[(selected, "bm25(stopwords, stem)")] == "bm25"
+    assert references[(selected, "hybrid(stopwords)")] == "hybrid"
+    assert references[(selected, "hybrid+meta(demote)(stopwords)")] == "hybrid+meta(demote)"
+    assert references[(selected, "hybrid+meta(demote)(fuse by document)")] == (
+        "hybrid+meta(demote)"
+    )
+
+
+def test_a_delta_counts_the_questions_that_moved_and_not_only_the_mean() -> None:
+    better = StrategyRun(
+        "b", "c", 1, (score_question(["D1"], Q_A), score_question(["X", "D2"], Q_B))
+    )
+    base = StrategyRun("a", "c", 1, (score_question(["X", "D1"], Q_A), score_question(["D2"], Q_B)))
+
+    delta = ablation_delta(better, base)
+
+    assert (delta.improved, delta.worsened, delta.moved) == (("QA",), ("QB",), 2)
+    assert delta.mrr_delta == pytest.approx(0.0)  # +0.5 and -0.5 cancel in the mean
+    assert (delta.reference_chunking, delta.reference) == ("c", "a")
 
 
 def test_the_paired_comparisons_name_what_they_compare(embedder: HashingEmbedder) -> None:

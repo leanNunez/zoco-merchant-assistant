@@ -84,9 +84,15 @@ Diferencia por pregunta y bootstrap de su promedio. Un intervalo que contiene el
 
 ## Ablaciones
 
+Informativas: **nunca cambian la selección declarada** (el chunking y los modos de la tabla principal se eligieron antes de mirarlas).
+
 - `bm25(stem)`: BM25 con el stemming de plurales, sobre `document`.
 - La misma tabla con el encabezado (título, tipo y vigencia) cambiado: `document+header`.
 - `hybrid+kind-demotion(historico)`: baja los documentos de tipo `historico` sin mirar fechas, para ver si el tipo aporta algo que la vigencia no aporte.
+- `bm25(no parts)`: BM25 que emite `zt-pro-2` sin sus partes (`zt`, `pro`, `2`).
+- `bm25(stopwords)` y `bm25(stopwords, stem)`: BM25 sin una lista conservadora de palabras funcionales del español (artículos, preposiciones, conjunciones, pronombres, formas de ser, estar, haber e ir, interrogativos), sin y con stemming. Nunca quita `no`, `sin`, `mas`, `solo`, números ni palabras que puedan cambiar una política.
+- `hybrid(stopwords)` y `hybrid+meta(demote)(stopwords)`: el mismo híbrido con el BM25 sin palabras funcionales (el lado vectorial no cambia).
+- `hybrid(fuse by document)` y `hybrid+meta(demote)(fuse by document)`: RRF sobre documentos (cada uno en la posición de su mejor chunk) en lugar de sobre chunks. Con el chunking `document` hay un chunk por documento y la fusión no puede cambiar nada por construcción; por eso, si el chunking elegido no es `section`, se corre también sobre `section`.
 
 | Chunking | Estrategia | recall@3 | hit@3 | MRR |
 |---|---|---:|---:|---:|
@@ -95,6 +101,38 @@ Diferencia por pregunta y bootstrap de su promedio. Un intervalo que contiene el
 | `document+header` | bm25 | 0.975 | 1.000 | 0.942 |
 | `document+header` | hybrid | 0.975 | 1.000 | 1.000 |
 | `document` | hybrid+kind-demotion(historico) | 0.875 | 0.900 | 0.908 |
+| `document` | bm25(no parts) | 0.975 | 1.000 | 0.917 |
+| `document` | bm25(stopwords) | 1.000 | 1.000 | 0.917 |
+| `document` | bm25(stopwords, stem) | 0.950 | 0.950 | 0.912 |
+| `document` | hybrid(stopwords) | 0.975 | 1.000 | 0.975 |
+| `document` | hybrid+meta(demote)(stopwords) | 0.975 | 1.000 | 1.000 |
+| `document` | hybrid(fuse by document) | 0.975 | 1.000 | 0.975 |
+| `document` | hybrid+meta(demote)(fuse by document) | 0.975 | 1.000 | 1.000 |
+| `section` | hybrid(fuse by document) | 1.000 | 1.000 | 0.925 |
+
+### Qué se movió
+
+Cada variante contra la estrategia que modifica. Una pregunta **mejora** si su par (rango recíproco, recall@3) sube y **empeora** si baja.
+
+| Variante | Contra | Δ recall@3 | Δ hit@3 | Δ MRR | Mejoran | Empeoran |
+|---|---|---:|---:|---:|---|---|
+| `document` bm25(stem) | `document` bm25 | -0.025 | -0.050 | -0.004 | Q01 | Q15 |
+| `document+header` vector | `document` vector | +0.000 | +0.000 | +0.050 | Q06, Q19 | — |
+| `document+header` bm25 | `document` bm25 | +0.000 | +0.000 | +0.025 | Q13 | — |
+| `document+header` hybrid | `document` hybrid | +0.000 | +0.000 | +0.025 | Q17 | — |
+| `document` hybrid+kind-demotion(historico) | `document` hybrid | -0.100 | -0.100 | -0.067 | — | Q17, Q18 |
+| `document` bm25(no parts) | `document` bm25 | +0.000 | +0.000 | +0.000 | — | — |
+| `document` bm25(stopwords) | `document` bm25 | +0.025 | +0.000 | +0.000 | Q01 | — |
+| `document` bm25(stopwords, stem) | `document` bm25 | -0.025 | -0.050 | -0.004 | Q01 | Q15 |
+| `document` hybrid(stopwords) | `document` hybrid | +0.000 | +0.000 | +0.000 | — | — |
+| `document` hybrid+meta(demote)(stopwords) | `document` hybrid+meta(demote) | +0.000 | +0.000 | +0.000 | — | — |
+| `document` hybrid(fuse by document) | `document` hybrid | +0.000 | +0.000 | +0.000 | — | — |
+| `document` hybrid+meta(demote)(fuse by document) | `document` hybrid+meta(demote) | +0.000 | +0.000 | +0.000 | — | — |
+| `section` hybrid(fuse by document) | `section` hybrid | +0.000 | +0.000 | +0.025 | Q03 | — |
+
+- No mueven ninguna de las 20 preguntas: `document` bm25(no parts), `document` hybrid(stopwords), `document` hybrid+meta(demote)(stopwords), `document` hybrid(fuse by document), `document` hybrid+meta(demote)(fuse by document).
+- Mueven exactamente una pregunta: `document+header` bm25, `document+header` hybrid, `document` bm25(stopwords), `section` hybrid(fuse by document). Una pregunta es 5 puntos de cualquier promedio: **una diferencia de una pregunta no es evidencia**, es lo que cambia un promedio por azar de redacción.
+- Mueven dos o más preguntas: `document` bm25(stem), `document+header` vector, `document` hybrid+kind-demotion(historico), `document` bm25(stopwords, stem). Con 20 preguntas y los intervalos de arriba, ni siquiera eso alcanza para cambiar lo ya elegido.
 
 ## Por pregunta
 

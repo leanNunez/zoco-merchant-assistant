@@ -20,6 +20,7 @@ from merchant_assistant.knowledge.ports import Embedder
 from merchant_assistant.knowledge.questions import Question
 from merchant_assistant.knowledge.retrievers import (
     BM25Retriever,
+    FusionUnit,
     HybridRetriever,
     KindDemotionRetriever,
     MetadataMode,
@@ -72,6 +73,29 @@ class PairedComparison:
 
 
 @dataclass(frozen=True, slots=True)
+class AblationDelta:
+    """What an informational variant moved, question by question, against its reference.
+
+    A question "improves" when its (reciprocal rank, recall@3) pair is higher, and "worsens"
+    when it is lower. `reference` names the strategy compared against, on `reference_chunking`.
+    """
+
+    chunking: str
+    strategy: str
+    reference_chunking: str
+    reference: str
+    recall_delta: float
+    hit_delta: float
+    mrr_delta: float
+    improved: tuple[str, ...]
+    worsened: tuple[str, ...]
+
+    @property
+    def moved(self) -> int:
+        return len(self.improved) + len(self.worsened)
+
+
+@dataclass(frozen=True, slots=True)
 class RetrievalEvaluation:
     grid: tuple[StrategyRun, ...]
     selection: Selection
@@ -80,6 +104,7 @@ class RetrievalEvaluation:
     ablations: tuple[StrategyRun, ...]
     periods: dict[str, Period]
     chunk_counts: dict[str, int]
+    ablation_deltas: tuple[AblationDelta, ...] = ()
 
 
 def with_header_toggled(strategy: ChunkingStrategy) -> ChunkingStrategy:
@@ -121,12 +146,25 @@ class _Strategies:
         self.hybrid = HybridRetriever([self.vector, self.bm25], depth=len(self.chunks))
         self._documents = documents
 
-    def bm25_stemmed(self) -> Retriever:
-        return BM25Retriever(BM25Index(self.chunks, Tokenizer(stem=True)), name="bm25(stem)")
+    def bm25_variant(self, tokenizer: Tokenizer, name: str) -> Retriever:
+        return BM25Retriever(BM25Index(self.chunks, tokenizer), name=name)
 
-    def meta(self, mode: MetadataMode) -> Retriever:
+    def bm25_stemmed(self) -> Retriever:
+        return self.bm25_variant(Tokenizer(stem=True), "bm25(stem)")
+
+    def hybrid_of(
+        self, lexical: Retriever, name: str, *, fuse_by: FusionUnit = "chunk"
+    ) -> Retriever:
+        return HybridRetriever(
+            [self.vector, lexical], depth=len(self.chunks), name=name, fuse_by=fuse_by
+        )
+
+    def meta(self, mode: MetadataMode, base: Retriever | None = None) -> Retriever:
         return MetadataRetriever(
-            self.hybrid, self._documents, mode=mode, today=lambda: REFERENCE_DATE
+            self.hybrid if base is None else base,
+            self._documents,
+            mode=mode,
+            today=lambda: REFERENCE_DATE,
         )
 
     def kind_demotion(self) -> Retriever:
@@ -187,14 +225,13 @@ def run_evaluation(
     )
 
     toggled = _Strategies(documents, with_header_toggled(GRID[_grid_index(chosen.label)]), embedder)
-    ablations = (
-        chosen.run(chosen.bm25_stemmed(), questions),
-        *(
-            toggled.run(retriever, questions)
-            for retriever in (toggled.vector, toggled.bm25, toggled.hybrid)
-        ),
-        chosen.run(chosen.kind_demotion(), questions),
-    )
+    classic = [
+        (chosen.run(chosen.bm25_stemmed(), questions), by_name["bm25"]),
+        *((toggled.run(r, questions), by_name[r.name]) for r in (toggled.vector, toggled.bm25)),
+        (toggled.run(toggled.hybrid, questions), by_name["hybrid"]),
+        (chosen.run(chosen.kind_demotion(), questions), by_name["hybrid"]),
+    ]
+    pairs = [*classic, *_variants(chosen, built, questions, by_name, grid)]
 
     counts = {strategies.label: len(strategies.chunks) for strategies in built}
     counts[toggled.label] = len(toggled.chunks)
@@ -203,9 +240,75 @@ def run_evaluation(
         selection=selection,
         main=main,
         paired=comparisons,
-        ablations=ablations,
+        ablations=tuple(run for run, _ in pairs),
         periods={q.id: reference_period(q.text, REFERENCE_DATE) for q in questions},
         chunk_counts=counts,
+        ablation_deltas=tuple(ablation_delta(run, reference) for run, reference in pairs),
+    )
+
+
+def _variants(
+    chosen: _Strategies,
+    built: Sequence[_Strategies],
+    questions: Sequence[Question],
+    by_name: dict[str, StrategyRun],
+    grid: Sequence[StrategyRun],
+) -> list[tuple[StrategyRun, StrategyRun]]:
+    """The informational tokenizer and fusion variants, each with the run it varies.
+
+    They never take part in the pre-declared selection. The fusion by document is also run on
+    the `section` chunking when that is not the selected one, because with one chunk per
+    document (the `document` chunking) the fusion unit cannot matter by construction.
+    """
+
+    def named(run: StrategyRun, name: str) -> StrategyRun:
+        return replace(run, strategy=name)
+
+    stop = Tokenizer(stopwords=True)
+    stop_bm25 = chosen.bm25_variant(stop, "bm25(stopwords)")
+    stop_hybrid = chosen.hybrid_of(stop_bm25, "hybrid(stopwords)")
+    by_document = chosen.hybrid_of(chosen.bm25, "hybrid(fuse by document)", fuse_by="document")
+    pairs = [
+        (chosen.run(chosen.bm25_variant(Tokenizer(emit_parts=False), "bm25(no parts)"), questions),
+         by_name["bm25"]),
+        (chosen.run(stop_bm25, questions), by_name["bm25"]),
+        (chosen.run(chosen.bm25_variant(Tokenizer(stopwords=True, stem=True),
+                                        "bm25(stopwords, stem)"), questions), by_name["bm25"]),
+        (chosen.run(stop_hybrid, questions), by_name["hybrid"]),
+        (named(chosen.run(chosen.meta("demote", stop_hybrid), questions),
+               "hybrid+meta(demote)(stopwords)"), by_name["hybrid+meta(demote)"]),
+        (chosen.run(by_document, questions), by_name["hybrid"]),
+        (named(chosen.run(chosen.meta("demote", by_document), questions),
+               "hybrid+meta(demote)(fuse by document)"), by_name["hybrid+meta(demote)"]),
+    ]  # fmt: skip
+    if chosen.label != "section":
+        sections = next(strategies for strategies in built if strategies.label == "section")
+        reference = next(r for r in grid if (r.chunking, r.strategy) == ("section", "hybrid"))
+        fused = sections.hybrid_of(sections.bm25, "hybrid(fuse by document)", fuse_by="document")
+        pairs.append((sections.run(fused, questions), reference))
+    return pairs
+
+
+def ablation_delta(run: StrategyRun, reference: StrategyRun) -> AblationDelta:
+    improved: list[str] = []
+    worsened: list[str] = []
+    for outcome, base in zip(run.outcomes, reference.outcomes, strict=True):
+        now = (outcome.reciprocal_rank, outcome.recall_at_3)
+        before = (base.reciprocal_rank, base.recall_at_3)
+        if now > before:
+            improved.append(outcome.question_id)
+        elif now < before:
+            worsened.append(outcome.question_id)
+    return AblationDelta(
+        chunking=run.chunking,
+        strategy=run.strategy,
+        reference_chunking=reference.chunking,
+        reference=reference.strategy,
+        recall_delta=run.recall_at_3 - reference.recall_at_3,
+        hit_delta=run.hit_at_3 - reference.hit_at_3,
+        mrr_delta=run.mrr - reference.mrr,
+        improved=tuple(improved),
+        worsened=tuple(worsened),
     )
 
 

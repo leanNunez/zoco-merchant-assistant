@@ -390,6 +390,237 @@
       "recall_at_3": 0.875,
       "hit_at_3": 0.9,
       "mrr": 0.908333
+    },
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "bm25(no parts)",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.916667
+    },
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "bm25(stopwords)",
+      "recall_at_3": 1.0,
+      "hit_at_3": 1.0,
+      "mrr": 0.916667
+    },
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "bm25(stopwords, stem)",
+      "recall_at_3": 0.95,
+      "hit_at_3": 0.95,
+      "mrr": 0.9125
+    },
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "hybrid(stopwords)",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.975
+    },
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "hybrid+meta(demote)(stopwords)",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 1.0
+    },
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "hybrid(fuse by document)",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 0.975
+    },
+    {
+      "chunking": "document",
+      "chunks": 12,
+      "strategy": "hybrid+meta(demote)(fuse by document)",
+      "recall_at_3": 0.975,
+      "hit_at_3": 1.0,
+      "mrr": 1.0
+    },
+    {
+      "chunking": "section",
+      "chunks": 49,
+      "strategy": "hybrid(fuse by document)",
+      "recall_at_3": 1.0,
+      "hit_at_3": 1.0,
+      "mrr": 0.925
+    }
+  ],
+  "ablation_deltas": [
+    {
+      "chunking": "document",
+      "strategy": "bm25(stem)",
+      "reference_chunking": "document",
+      "reference": "bm25",
+      "recall_at_3_delta": -0.025,
+      "hit_at_3_delta": -0.05,
+      "mrr_delta": -0.004167,
+      "improved": [
+        "Q01"
+      ],
+      "worsened": [
+        "Q15"
+      ]
+    },
+    {
+      "chunking": "document+header",
+      "strategy": "vector",
+      "reference_chunking": "document",
+      "reference": "vector",
+      "recall_at_3_delta": 0.0,
+      "hit_at_3_delta": 0.0,
+      "mrr_delta": 0.05,
+      "improved": [
+        "Q06",
+        "Q19"
+      ],
+      "worsened": []
+    },
+    {
+      "chunking": "document+header",
+      "strategy": "bm25",
+      "reference_chunking": "document",
+      "reference": "bm25",
+      "recall_at_3_delta": 0.0,
+      "hit_at_3_delta": 0.0,
+      "mrr_delta": 0.025,
+      "improved": [
+        "Q13"
+      ],
+      "worsened": []
+    },
+    {
+      "chunking": "document+header",
+      "strategy": "hybrid",
+      "reference_chunking": "document",
+      "reference": "hybrid",
+      "recall_at_3_delta": 0.0,
+      "hit_at_3_delta": 0.0,
+      "mrr_delta": 0.025,
+      "improved": [
+        "Q17"
+      ],
+      "worsened": []
+    },
+    {
+      "chunking": "document",
+      "strategy": "hybrid+kind-demotion(historico)",
+      "reference_chunking": "document",
+      "reference": "hybrid",
+      "recall_at_3_delta": -0.1,
+      "hit_at_3_delta": -0.1,
+      "mrr_delta": -0.066667,
+      "improved": [],
+      "worsened": [
+        "Q17",
+        "Q18"
+      ]
+    },
+    {
+      "chunking": "document",
+      "strategy": "bm25(no parts)",
+      "reference_chunking": "document",
+      "reference": "bm25",
+      "recall_at_3_delta": 0.0,
+      "hit_at_3_delta": 0.0,
+      "mrr_delta": 0.0,
+      "improved": [],
+      "worsened": []
+    },
+    {
+      "chunking": "document",
+      "strategy": "bm25(stopwords)",
+      "reference_chunking": "document",
+      "reference": "bm25",
+      "recall_at_3_delta": 0.025,
+      "hit_at_3_delta": 0.0,
+      "mrr_delta": 0.0,
+      "improved": [
+        "Q01"
+      ],
+      "worsened": []
+    },
+    {
+      "chunking": "document",
+      "strategy": "bm25(stopwords, stem)",
+      "reference_chunking": "document",
+      "reference": "bm25",
+      "recall_at_3_delta": -0.025,
+      "hit_at_3_delta": -0.05,
+      "mrr_delta": -0.004167,
+      "improved": [
+        "Q01"
+      ],
+      "worsened": [
+        "Q15"
+      ]
+    },
+    {
+      "chunking": "document",
+      "strategy": "hybrid(stopwords)",
+      "reference_chunking": "document",
+      "reference": "hybrid",
+      "recall_at_3_delta": 0.0,
+      "hit_at_3_delta": 0.0,
+      "mrr_delta": 0.0,
+      "improved": [],
+      "worsened": []
+    },
+    {
+      "chunking": "document",
+      "strategy": "hybrid+meta(demote)(stopwords)",
+      "reference_chunking": "document",
+      "reference": "hybrid+meta(demote)",
+      "recall_at_3_delta": 0.0,
+      "hit_at_3_delta": 0.0,
+      "mrr_delta": 0.0,
+      "improved": [],
+      "worsened": []
+    },
+    {
+      "chunking": "document",
+      "strategy": "hybrid(fuse by document)",
+      "reference_chunking": "document",
+      "reference": "hybrid",
+      "recall_at_3_delta": 0.0,
+      "hit_at_3_delta": 0.0,
+      "mrr_delta": 0.0,
+      "improved": [],
+      "worsened": []
+    },
+    {
+      "chunking": "document",
+      "strategy": "hybrid+meta(demote)(fuse by document)",
+      "reference_chunking": "document",
+      "reference": "hybrid+meta(demote)",
+      "recall_at_3_delta": 0.0,
+      "hit_at_3_delta": 0.0,
+      "mrr_delta": 0.0,
+      "improved": [],
+      "worsened": []
+    },
+    {
+      "chunking": "section",
+      "strategy": "hybrid(fuse by document)",
+      "reference_chunking": "section",
+      "reference": "hybrid",
+      "recall_at_3_delta": 0.0,
+      "hit_at_3_delta": 0.0,
+      "mrr_delta": 0.025,
+      "improved": [
+        "Q03"
+      ],
+      "worsened": []
     }
   ],
   "per_question": [

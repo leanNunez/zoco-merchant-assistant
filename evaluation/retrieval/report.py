@@ -14,6 +14,7 @@ from evaluation.retrieval.pipeline import (
     MAIN_STRATEGIES,
     META_PREFERENCE,
     SINGLE_PREFERENCE,
+    AblationDelta,
     MainRow,
     RetrievalEvaluation,
 )
@@ -66,6 +67,7 @@ def to_json(
             for comparison in evaluation.paired
         ],
         "ablations": [_summary(run) for run in evaluation.ablations],
+        "ablation_deltas": [_delta_json(delta) for delta in evaluation.ablation_deltas],
         "per_question": [
             {
                 "id": question.id,
@@ -167,11 +169,26 @@ def to_markdown(
         "",
         "## Ablaciones",
         "",
+        "Informativas: **nunca cambian la selección declarada** (el chunking y los modos de la "
+        "tabla principal se eligieron antes de mirarlas).",
+        "",
         f"- `bm25(stem)`: BM25 con el stemming de plurales, sobre `{selected}`.",
         "- La misma tabla con el encabezado (título, tipo y vigencia) cambiado: "
-        f"`{_toggled_label(evaluation, selected)}`.",
+        f"`{_toggled_label(selected)}`.",
         "- `hybrid+kind-demotion(historico)`: baja los documentos de tipo `historico` sin "
         "mirar fechas, para ver si el tipo aporta algo que la vigencia no aporte.",
+        "- `bm25(no parts)`: BM25 que emite `zt-pro-2` sin sus partes (`zt`, `pro`, `2`).",
+        "- `bm25(stopwords)` y `bm25(stopwords, stem)`: BM25 sin una lista conservadora de "
+        "palabras funcionales del español (artículos, preposiciones, conjunciones, pronombres, "
+        "formas de ser, estar, haber e ir, interrogativos), sin y con stemming. Nunca quita "
+        "`no`, `sin`, `mas`, `solo`, números ni palabras que puedan cambiar una política.",
+        "- `hybrid(stopwords)` y `hybrid+meta(demote)(stopwords)`: el mismo híbrido con el BM25 "
+        "sin palabras funcionales (el lado vectorial no cambia).",
+        "- `hybrid(fuse by document)` y `hybrid+meta(demote)(fuse by document)`: RRF sobre "
+        "documentos (cada uno en la posición de su mejor chunk) en lugar de sobre chunks. Con el "
+        "chunking `document` hay un chunk por documento y la fusión no puede cambiar nada por "
+        "construcción; por eso, si el chunking elegido no es `section`, se corre también sobre "
+        "`section`.",
         "",
         "| Chunking | Estrategia | recall@3 | hit@3 | MRR |",
         "|---|---|---:|---:|---:|",
@@ -180,6 +197,17 @@ def to_markdown(
             f"| {run.mrr:.3f} |"
             for run in evaluation.ablations
         ),
+        "",
+        "### Qué se movió",
+        "",
+        "Cada variante contra la estrategia que modifica. Una pregunta **mejora** si su par "
+        "(rango recíproco, recall@3) sube y **empeora** si baja.",
+        "",
+        "| Variante | Contra | Δ recall@3 | Δ hit@3 | Δ MRR | Mejoran | Empeoran |",
+        "|---|---|---:|---:|---:|---|---|",
+        *(_delta_line(delta) for delta in evaluation.ablation_deltas),
+        "",
+        *_movement_reading(evaluation.ablation_deltas, len(questions)),
         "",
         "## Por pregunta",
         "",
@@ -226,9 +254,56 @@ def _per_question_lines(
     return lines
 
 
-def _toggled_label(evaluation: RetrievalEvaluation, selected: str) -> str:
-    labels = {run.chunking for run in evaluation.ablations} - {selected}
-    return ", ".join(sorted(labels))
+def _label(chunking: str, strategy: str) -> str:
+    return f"`{chunking}` {strategy}"
+
+
+def _delta_line(delta: AblationDelta) -> str:
+    return (
+        f"| {_label(delta.chunking, delta.strategy)} "
+        f"| {_label(delta.reference_chunking, delta.reference)} "
+        f"| {delta.recall_delta:+.3f} | {delta.hit_delta:+.3f} | {delta.mrr_delta:+.3f} "
+        f"| {', '.join(delta.improved) or '—'} | {', '.join(delta.worsened) or '—'} |"
+    )
+
+
+def _movement_reading(deltas: Sequence[AblationDelta], total: int) -> list[str]:
+    """In plain words: which variants moved no question, one, or several."""
+    still = [d for d in deltas if d.moved == 0]
+    one = [d for d in deltas if d.moved == 1]
+    several = [d for d in deltas if d.moved >= 2]
+
+    def names(group: Sequence[AblationDelta]) -> str:
+        return ", ".join(_label(d.chunking, d.strategy) for d in group) or "ninguna"
+
+    return [
+        f"- No mueven ninguna de las {total} preguntas: {names(still)}.",
+        f"- Mueven exactamente una pregunta: {names(one)}. Una pregunta es "
+        f"{100 / total:g} puntos de cualquier promedio: **una diferencia de una pregunta no es "
+        "evidencia**, es lo que cambia un promedio por azar de redacción.",
+        f"- Mueven dos o más preguntas: {names(several)}. Con {total} preguntas y los "
+        "intervalos de arriba, ni siquiera eso alcanza para cambiar lo ya elegido.",
+    ]
+
+
+def _delta_json(delta: AblationDelta) -> dict[str, object]:
+    return {
+        "chunking": delta.chunking,
+        "strategy": delta.strategy,
+        "reference_chunking": delta.reference_chunking,
+        "reference": delta.reference,
+        "recall_at_3_delta": _round(delta.recall_delta),
+        "hit_at_3_delta": _round(delta.hit_delta),
+        "mrr_delta": _round(delta.mrr_delta),
+        "improved": list(delta.improved),
+        "worsened": list(delta.worsened),
+    }
+
+
+def _toggled_label(selected: str) -> str:
+    return (
+        selected.removesuffix("+header") if selected.endswith("+header") else f"{selected}+header"
+    )
 
 
 def _main_line(row: MainRow) -> str:

@@ -6,6 +6,7 @@ from datetime import date
 
 from evaluation.retrieval.pipeline import (
     MAIN_STRATEGIES,
+    AblationDelta,
     MainRow,
     PairedComparison,
     RetrievalEvaluation,
@@ -44,6 +45,15 @@ RANKINGS: dict[str, dict[str, list[str]]] = {
 }
 
 
+DELTAS = (
+    AblationDelta("section", "bm25(stem)", "section", "bm25", 0.0, 0.0, 0.0, (), ()),
+    AblationDelta("section", "bm25(stopwords)", "section", "bm25", 0.25, 0.0, 0.25, ("QB",), ()),
+    AblationDelta(
+        "section", "hybrid(stopwords)", "section", "hybrid", -0.5, 0.0, 0.0, ("QA",), ("QB",)
+    ),
+)
+
+
 def evaluation() -> RetrievalEvaluation:
     main = tuple(
         MainRow(run(name, RANKINGS[name]), Interval(0.25, 1.0), Interval(0.125, 1.0))
@@ -66,6 +76,7 @@ def evaluation() -> RetrievalEvaluation:
             "QB": Period(date(2026, 7, 1), date(2026, 7, 31), "question"),
         },
         chunk_counts={"section": 4},
+        ablation_deltas=DELTAS,
     )
 
 
@@ -150,3 +161,40 @@ def test_a_negative_zero_is_saved_as_a_plain_zero() -> None:
 
     assert "-0.0" not in text
     assert json.loads(text)["paired_differences"][0]["mean_difference"] == 0.0
+
+
+def test_the_report_says_which_questions_each_variant_moved() -> None:
+    text = markdown()
+
+    assert (
+        "| `section` bm25(stopwords) | `section` bm25 | +0.250 | +0.000 | +0.250 | QB | — |" in text
+    )
+    assert (
+        "| `section` hybrid(stopwords) | `section` hybrid | -0.500 | +0.000 | +0.000 | QA | QB |"
+        in text
+    )
+
+
+def test_the_report_groups_the_variants_by_how_many_questions_they_moved() -> None:
+    text = markdown()
+
+    assert "- No mueven ninguna de las 2 preguntas: `section` bm25(stem)." in text
+    assert "- Mueven exactamente una pregunta: `section` bm25(stopwords)." in text
+    assert "- Mueven dos o más preguntas: `section` hybrid(stopwords)." in text
+    assert "**una diferencia de una pregunta no es evidencia**" in text
+
+
+def test_the_json_keeps_the_ablation_deltas() -> None:
+    data = json.loads(to_json(evaluation(), PROVENANCE, QUESTIONS))
+
+    assert data["ablation_deltas"][1] == {
+        "chunking": "section",
+        "strategy": "bm25(stopwords)",
+        "reference_chunking": "section",
+        "reference": "bm25",
+        "recall_at_3_delta": 0.25,
+        "hit_at_3_delta": 0.0,
+        "mrr_delta": 0.25,
+        "improved": ["QB"],
+        "worsened": [],
+    }

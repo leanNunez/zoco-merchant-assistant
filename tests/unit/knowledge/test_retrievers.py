@@ -245,6 +245,15 @@ def test_hybrid_fuses_by_chunk_unless_told_otherwise() -> None:
     assert ids(HybridRetriever([first], depth=2, fuse_by="document").search("q", k=2)) == ["A#0"]
 
 
+def test_fusing_by_document_equals_fusing_by_chunk_when_every_document_is_one_chunk() -> None:
+    embedder = HashingEmbedder()
+    by_chunk = HybridRetriever([mini_vector(embedder), mini_bm25()], depth=3)
+    by_document = HybridRetriever([mini_vector(embedder), mini_bm25()], depth=3, fuse_by="document")
+
+    for query in ("una entrada puede transferirse una vez", "cuanto cobraba el plan pro"):
+        assert by_document.search(query, k=3) == by_chunk.search(query, k=3)
+
+
 def test_hybrid_refuses_an_unknown_fusion_unit() -> None:
     with pytest.raises(ValueError, match="fuse_by"):
         HybridRetriever([StaticRetriever("a", [])], depth=1, fuse_by="paragraph")  # type: ignore[arg-type]
