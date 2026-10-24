@@ -182,6 +182,74 @@ def test_hybrid_over_the_mini_corpus_puts_the_lexical_and_semantic_winner_first(
     assert hybrid.name == "hybrid"
 
 
+def test_hybrid_fusing_by_document_counts_a_document_once_per_ranking() -> None:
+    # Chunk by chunk, A#0 and A#1 would each collect a contribution from the first list.
+    first = StaticRetriever("a", ["A#0", "A#1", "B#0"])
+    second = StaticRetriever("b", ["B#1", "C#0"])
+
+    results = HybridRetriever([first, second], depth=3, fuse_by="document").search("q", k=3)
+
+    # Documents per list: a = A, B (B at 2); b = B, C. B: 1/62 + 1/61 = 0.032522;
+    # A: 1/61 = 0.016393; C: 1/62 = 0.016129.
+    assert [r.doc_id for r in results] == ["B", "A", "C"]
+    assert [r.score for r in results] == pytest.approx([1 / 62 + 1 / 61, 1 / 61, 1 / 62])
+
+
+def test_hybrid_fusing_by_chunk_would_rank_the_same_input_differently() -> None:
+    first = StaticRetriever("a", ["A#0", "A#1", "B#0"])
+    second = StaticRetriever("b", ["B#1", "C#0"])
+
+    results = HybridRetriever([first, second], depth=3).search("q", k=5)
+
+    # A#0 1/61, B#1 1/61 (best rank 1 in both: A#0 first by the id tie-break), A#1 1/62,
+    # C#0 1/62, B#0 1/63: five chunks, two of them from A.
+    assert ids(results) == ["A#0", "B#1", "A#1", "C#0", "B#0"]
+
+
+def test_hybrid_by_document_returns_the_chunk_ranked_highest_in_any_list() -> None:
+    first = StaticRetriever("a", ["A#0", "B#0", "B#1"])
+    second = StaticRetriever("b", ["B#1", "A#1"])
+
+    results = HybridRetriever([first, second], depth=3, fuse_by="document").search("q", k=2)
+
+    # A: 1/61 + 1/62, B: 1/62 + 1/61, a real tie: A's best rank is 1 (list a), B's is 1 (list b),
+    # so the id breaks it. The representative of B is B#1 (rank 1 in b); of A it is A#0.
+    assert ids(results) == ["A#0", "B#1"]
+    assert [r.score for r in results] == pytest.approx([1 / 61 + 1 / 62] * 2)
+
+
+def test_hybrid_by_document_prefers_the_earlier_retriever_on_equal_chunk_ranks() -> None:
+    first = StaticRetriever("a", ["A#1"])
+    second = StaticRetriever("b", ["A#0"])
+
+    assert ids(HybridRetriever([first, second], depth=1, fuse_by="document").search("q", 1)) == [
+        "A#1"
+    ]
+
+
+def test_hybrid_by_document_honours_k_and_the_depth_of_each_retriever() -> None:
+    first = StaticRetriever("a", ["A#0", "B#0", "C#0"])
+    second = StaticRetriever("b", ["C#0", "B#0", "A#0"])
+
+    results = HybridRetriever([first, second], depth=2, fuse_by="document").search("q", k=1)
+
+    assert (first.depths, second.depths) == ([2], [2])
+    # depth 2: A and C get 1/61 once; B gets 1/62 twice = 0.032258
+    assert [r.doc_id for r in results] == ["B"]
+
+
+def test_hybrid_fuses_by_chunk_unless_told_otherwise() -> None:
+    first = StaticRetriever("a", ["A#0", "A#1"])
+
+    assert ids(HybridRetriever([first], depth=2).search("q", k=2)) == ["A#0", "A#1"]
+    assert ids(HybridRetriever([first], depth=2, fuse_by="document").search("q", k=2)) == ["A#0"]
+
+
+def test_hybrid_refuses_an_unknown_fusion_unit() -> None:
+    with pytest.raises(ValueError, match="fuse_by"):
+        HybridRetriever([StaticRetriever("a", [])], depth=1, fuse_by="paragraph")  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize(("depth", "fragment"), [(0, "depth"), (-1, "depth")])
 def test_hybrid_refuses_a_depth_below_one(depth: int, fragment: str) -> None:
     with pytest.raises(ValueError, match=fragment):

@@ -1,7 +1,8 @@
 """The retrieval strategies behind one interface, so the evaluation can compare them.
 
 - `BM25Retriever` and `VectorRetriever` wrap an index.
-- `HybridRetriever` fuses the CHUNK rankings of several retrievers with RRF.
+- `HybridRetriever` fuses the rankings of several retrievers with RRF, by chunk (the default)
+  or by document (`fuse_by="document"`).
 - `MetadataRetriever` applies the validity policy: it filters out, or demotes, chunks of
   documents that were not valid during the period the question is about.
 - `KindDemotionRetriever` is an ablation: it demotes a document `tipo` regardless of the
@@ -20,11 +21,12 @@ from merchant_assistant.knowledge.bm25 import BM25Index
 from merchant_assistant.knowledge.documents import Document
 from merchant_assistant.knowledge.fusion import reciprocal_rank_fusion
 from merchant_assistant.knowledge.ports import Embedder
-from merchant_assistant.knowledge.ranking import ScoredChunk
+from merchant_assistant.knowledge.ranking import ScoredChunk, best_chunk_per_document
 from merchant_assistant.knowledge.temporal import is_valid_during, reference_period
 from merchant_assistant.knowledge.vector import VectorIndex
 
 MetadataMode = Literal["filter", "demote"]
+FusionUnit = Literal["chunk", "document"]
 
 
 class Retriever(Protocol):
@@ -67,6 +69,13 @@ class HybridRetriever:
 
     `depth` is how far down each list the fusion looks. A chunk only one retriever finds
     still gets that retriever's contribution, so lexical and semantic matches both count.
+
+    `fuse_by` is the unit that is fused. With `"chunk"` (the default) every chunk is a
+    candidate of its own. With `"document"` each retriever's ranking is first reduced to its
+    documents (a document sits at the position of its best chunk, so a document with many
+    chunks cannot collect several contributions from one list), the document ids are fused,
+    and each fused document is represented by its best chunk: the one ranked highest in any
+    list, the earlier retriever winning a tie.
     """
 
     def __init__(
@@ -76,15 +85,19 @@ class HybridRetriever:
         depth: int,
         rrf_k: int = 60,
         name: str = "hybrid",
+        fuse_by: FusionUnit = "chunk",
     ) -> None:
         if not retrievers:
             raise ValueError("a hybrid retriever needs at least one retriever")
         if depth < 1:
             raise ValueError("depth must be >= 1")
+        if fuse_by not in ("chunk", "document"):
+            raise ValueError("fuse_by must be 'chunk' or 'document'")
         self._retrievers = tuple(retrievers)
         self._depth = depth
         self._rrf_k = rrf_k
         self._name = name
+        self._fuse_by: FusionUnit = fuse_by
 
     @property
     def name(self) -> str:
@@ -92,16 +105,32 @@ class HybridRetriever:
 
     def search(self, query: str, k: int) -> list[ScoredChunk]:
         _validate_k(k)
+        results = [retriever.search(query, self._depth) for retriever in self._retrievers]
+        if self._fuse_by == "document":
+            return self._fuse_documents(results)[:k]
         doc_of_chunk: dict[str, str] = {}
         rankings: list[list[str]] = []
-        for retriever in self._retrievers:
-            results = retriever.search(query, self._depth)
-            doc_of_chunk.update((result.chunk_id, result.doc_id) for result in results)
-            rankings.append([result.chunk_id for result in results])
+        for found in results:
+            doc_of_chunk.update((result.chunk_id, result.doc_id) for result in found)
+            rankings.append([result.chunk_id for result in found])
         fused = reciprocal_rank_fusion(rankings, k=self._rrf_k)
         return [ScoredChunk(chunk_id, doc_of_chunk[chunk_id], score) for chunk_id, score in fused][
             :k
         ]
+
+    def _fuse_documents(self, results: list[list[ScoredChunk]]) -> list[ScoredChunk]:
+        reduced = [best_chunk_per_document(found) for found in results]
+        # The representative of a document: the chunk it had at the best position anywhere.
+        representative: dict[str, tuple[int, int, str]] = {}
+        for source, found in enumerate(reduced):
+            for rank, chunk in enumerate(found, start=1):
+                candidate = (rank, source, chunk.chunk_id)
+                if chunk.doc_id not in representative or candidate < representative[chunk.doc_id]:
+                    representative[chunk.doc_id] = candidate
+        fused = reciprocal_rank_fusion(
+            [[chunk.doc_id for chunk in found] for found in reduced], k=self._rrf_k
+        )
+        return [ScoredChunk(representative[doc_id][2], doc_id, score) for doc_id, score in fused]
 
 
 class MetadataRetriever:
