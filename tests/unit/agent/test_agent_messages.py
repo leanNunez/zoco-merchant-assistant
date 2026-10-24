@@ -1,7 +1,7 @@
 import pytest
 
 from merchant_assistant.agent.domain.errors import AgentError, InvalidMessage
-from merchant_assistant.agent.domain.messages import Message, ModelReply, Role, ToolCall
+from merchant_assistant.agent.domain.messages import Author, Message, ModelReply, Role, ToolCall
 
 CALL = ToolCall(id="call_1", name="consultar_ventas", arguments='{"fecha": "2026-10-03"}')
 
@@ -86,3 +86,29 @@ def test_a_model_reply_cannot_repeat_a_tool_call_id() -> None:
 def test_message_errors_belong_to_the_agent_family() -> None:
     assert issubclass(InvalidMessage, AgentError)
     assert InvalidMessage.code == "invalid_message"
+
+
+def test_an_operator_message_is_an_assistant_message_marked_with_its_author() -> None:
+    message = Message(Role.ASSISTANT, "Hola, soy Ana del equipo.", author=Author.OPERATOR)
+
+    assert message.author is Author.OPERATOR
+    assert message != Message(Role.ASSISTANT, "Hola, soy Ana del equipo.")
+    assert Message(Role.ASSISTANT, "Hola.").author is Author.AGENT
+
+
+@pytest.mark.parametrize(
+    ("role", "content", "tool_calls", "tool_call_id"),
+    [
+        pytest.param(Role.USER, "hola", (), None, id="as the customer"),
+        pytest.param(Role.SYSTEM, "rules", (), None, id="as the system prompt"),
+        pytest.param(Role.TOOL, "{}", (), "call_1", id="as a tool result"),
+        pytest.param(Role.ASSISTANT, None, (CALL,), None, id="with a tool call"),
+        pytest.param(Role.ASSISTANT, "ok", (CALL,), None, id="with text and a tool call"),
+        pytest.param(Role.ASSISTANT, "  ", (), None, id="blank"),
+    ],
+)
+def test_an_operator_writes_only_plain_text_to_the_customer(
+    role: Role, content: str | None, tool_calls: tuple[ToolCall, ...], tool_call_id: str | None
+) -> None:
+    with pytest.raises(InvalidMessage):
+        Message(role, content, tool_calls, tool_call_id, author=Author.OPERATOR)

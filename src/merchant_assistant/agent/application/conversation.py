@@ -45,6 +45,7 @@ from merchant_assistant.agent.domain.dates import (
     dates_stated_by_assistant,
     is_grounded,
 )
+from merchant_assistant.agent.domain.effects import apply_effects
 from merchant_assistant.agent.domain.errors import (
     ActionIgnored,
     AgentError,
@@ -104,7 +105,6 @@ from merchant_assistant.control import (
     ControlError,
     ConversationControl,
     Delivery,
-    Effect,
     Event,
     Outcome,
     State,
@@ -113,7 +113,9 @@ from merchant_assistant.control import (
 from merchant_assistant.shared.clock import Clock, business_today
 from merchant_assistant.shared.errors import DomainError
 
-OutboundKind = Literal["reply", "draft", "notice"]
+# reply: the agent's answer or a code template; notice: a template announcing a change of hands;
+# operator: written by a person in HUMAN; draft: NOT sent, waiting for an operator in SUGGEST.
+OutboundKind = Literal["reply", "draft", "notice", "operator"]
 ToolCallOutcome = Literal["executed", "rejected", "proposed", "ignored", "deduplicated"]
 
 MAX_ROUNDS = 4
@@ -277,13 +279,8 @@ class ConversationService:
         if outcome is None:
             return state
         turn.events.append(f"{outcome.event}:applied")
-        if Effect.INVALIDATE_PENDING_ACTION in outcome.effects:
-            state = replace(state, pending=invalidate(state.pending)[0])
-        if Effect.DISCARD_UNAPPROVED_DRAFTS in outcome.effects:
-            # No draft outbox exists yet (operator block): recorded so the effect is visible.
-            turn.events.append("discard_unapproved_drafts")
-        if Effect.NOTIFY_OPERATOR in outcome.effects:
-            turn.events.append("notify_operator")
+        state, facts = apply_effects(state, outcome, at=self._clock.now())
+        turn.events.extend(facts)
         return state
 
     def _fire(

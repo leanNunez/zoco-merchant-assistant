@@ -3,6 +3,11 @@
 These are provider-neutral. An adapter translates them to and from a provider's wire format;
 nothing here knows any provider. A tool call keeps its arguments as the raw JSON text the
 model produced, because validating them is the guards' job, not the parser's.
+
+An assistant message says who wrote it: the agent (the model, or a code-owned template) or a
+person of the merchant's team who answered while the conversation was in HUMAN. Both reach the
+customer from the merchant's side, so both are `Role.ASSISTANT`; the `author` keeps them apart
+in the stored history and the transcripts, and a provider adapter can map it.
 """
 
 from __future__ import annotations
@@ -18,6 +23,11 @@ class Role(StrEnum):
     USER = "user"
     ASSISTANT = "assistant"
     TOOL = "tool"
+
+
+class Author(StrEnum):
+    AGENT = "agent"  # the model or a template owned by the code
+    OPERATOR = "operator"  # a person of the merchant's team, answering in HUMAN
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,8 +49,14 @@ class Message:
     content: str | None
     tool_calls: tuple[ToolCall, ...] = ()
     tool_call_id: str | None = None
+    author: Author = Author.AGENT
 
     def __post_init__(self) -> None:
+        if self.author is Author.OPERATOR:
+            if self.role is not Role.ASSISTANT:
+                raise InvalidMessage("only a message to the customer can be written by an operator")
+            if self.tool_calls or self.content is None or not self.content.strip():
+                raise InvalidMessage("an operator message is plain text, without tool calls")
         match self.role:
             case Role.ASSISTANT:
                 if self.tool_call_id is not None:

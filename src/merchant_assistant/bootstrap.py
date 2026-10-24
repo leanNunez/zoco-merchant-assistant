@@ -19,6 +19,7 @@ import openai
 
 from merchant_assistant.agent.application.conversation import ConversationService
 from merchant_assistant.agent.application.executor import Sleeper, ToolExecutor
+from merchant_assistant.agent.application.operator import OperatorService
 from merchant_assistant.agent.ports import (
     ChatModel,
     ConversationStore,
@@ -207,7 +208,10 @@ def _adapter(
 
 @dataclass(frozen=True, slots=True)
 class AgentBuild:
+    """The customer's side (`service`) and the team's side (`operators`) over ONE store."""
+
     service: ConversationService
+    operators: OperatorService
     search_mode: SearchMode
     search_reason: str
 
@@ -251,4 +255,5 @@ def build_agent_service(
         rng=random.Random(retry_seed),  # noqa: S311
     )
     service = ConversationService(store, executor, model, hours=hours, clock=clock)
-    return AgentBuild(service, search.mode, search.reason)
+    operators = OperatorService(store, hours=hours, clock=clock)
+    return AgentBuild(service, operators, search.mode, search.reason)

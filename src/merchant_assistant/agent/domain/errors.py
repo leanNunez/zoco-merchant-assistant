@@ -142,3 +142,61 @@ class ConcurrentUpdate(AgentError):  # noqa: N818 - named after the situation
 
     code: ClassVar[str] = "concurrent_update"
     user_message: ClassVar[str] = "The conversation changed while the message was processed."
+
+
+class CommandError(AgentError):
+    """An operator or supervisor command the conversation does not allow right now.
+
+    Control refusals (`InvalidTransition`, `UnauthorizedActor`, `GuardRejected`) are not these:
+    they come from the control machine, unchanged, and are logged there.
+    """
+
+
+class CommandNotAllowed(CommandError):  # noqa: N818 - named after the situation
+    """Only an operator or a supervisor may answer a customer or decide on a draft."""
+
+    code: ClassVar[str] = "command_not_allowed"
+    user_message: ClassVar[str] = "Only an operator or a supervisor can do that."
+
+
+class OperatorReplyNotAllowed(CommandError):  # noqa: N818 - named after the situation
+    """An operator writes to the customer only while the conversation is in HUMAN."""
+
+    code: ClassVar[str] = "operator_reply_not_allowed"
+    user_message: ClassVar[str] = "Take over the conversation before writing to the customer."
+
+
+class InvalidOperatorMessage(CommandError):  # noqa: N818 - named after the situation
+    """An operator message that is blank or too long."""
+
+    code: ClassVar[str] = "invalid_operator_message"
+    user_message: ClassVar[str] = "The message is empty or too long."
+
+
+class InvalidDraft(AgentError):  # noqa: N818 - named after the situation
+    """A draft whose kind, payload and decision do not agree."""
+
+    code: ClassVar[str] = "invalid_draft"
+    user_message: ClassVar[str] = "The draft is not well formed."
+
+
+class UnknownDraft(CommandError):  # noqa: N818 - named after the situation
+    """No draft with that identifier exists in this conversation."""
+
+    code: ClassVar[str] = "unknown_draft"
+    user_message: ClassVar[str] = "There is no such draft in this conversation."
+
+
+class DraftNotPending(CommandError):  # noqa: N818 - named after the situation
+    """The draft was already approved, rejected or discarded."""
+
+    code: ClassVar[str] = "draft_not_pending"
+    user_message: ClassVar[str] = "That draft was already decided or discarded."
+
+
+class DraftNotApprovable(CommandError):  # noqa: N818 - named after the situation
+    """The draft can no longer be approved: the conversation left SUGGEST, or what it was
+    waiting for changed (the pending complaint, or who controls the conversation)."""
+
+    code: ClassVar[str] = "draft_not_approvable"
+    user_message: ClassVar[str] = "That draft can no longer be approved."
