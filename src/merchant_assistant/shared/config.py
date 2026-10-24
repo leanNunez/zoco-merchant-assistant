@@ -8,9 +8,11 @@ so only the code that really needs the provider complains when the key is missin
 
 from __future__ import annotations
 
+import math
 from datetime import time
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import SecretStr, field_validator, model_validator
@@ -45,13 +47,76 @@ class Settings(BaseSettings):
     human_hours_end: time = time(18, 0)
     human_hours_days: str = "mon,tue,wed,thu,fri"
 
-    @field_validator("openai_api_key", mode="before")
+    # The chat model. `llm_provider` only selects a capability profile (which request
+    # parameters the endpoint understands); it does not choose the endpoint. Any
+    # OpenAI-compatible endpoint works through `llm_base_url`, e.g. Groq for free development
+    # runs. Strict tool schemas are off by default: they were never checked against the live API.
+    llm_provider: Literal["openai", "groq", "generic"] = "openai"
+    llm_model: str = "gpt-4o-mini"
+    llm_base_url: str | None = None
+    llm_api_key: SecretStr | None = None
+    llm_temperature: float = 0.2
+    llm_timeout_seconds: float = 30.0
+    llm_max_output_tokens: int = 700
+    llm_strict_tools: bool = False
+
+    # The console's demo PINs. Without them the console generates random ones at start-up. They
+    # are a simulator's role switch, not authentication (ADR-0005).
+    operator_pin: SecretStr | None = None
+    supervisor_pin: SecretStr | None = None
+
+    @field_validator(
+        "openai_api_key",
+        "llm_api_key",
+        "llm_base_url",
+        "operator_pin",
+        "supervisor_pin",
+        mode="before",
+    )
     @classmethod
-    def _blank_key_means_no_key(cls, value: object) -> object:
-        # `.env.example` ships `OPENAI_API_KEY=`; copied as is, that is "no key", not a key
-        # made of an empty string that the provider would reject with a 401.
+    def _blank_means_not_set(cls, value: object) -> object:
+        # A template copied as is ships `OPENAI_API_KEY=`: that is "no key", not a key made of
+        # an empty string that the provider would reject with a 401.
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("llm_model")
+    @classmethod
+    def _llm_model_is_named(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("LLM_MODEL must name a model, e.g. gpt-4o-mini")
+        return value.strip()
+
+    @field_validator("llm_base_url")
+    @classmethod
+    def _base_url_is_http(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned.startswith(("http://", "https://")):
+            raise ValueError("LLM_BASE_URL must start with http:// or https://")
+        return cleaned
+
+    @field_validator("llm_temperature")
+    @classmethod
+    def _temperature_in_range(cls, value: float) -> float:
+        if not 0.0 <= value <= 2.0:  # written so that NaN is refused too
+            raise ValueError(f"LLM_TEMPERATURE must be between 0 and 2, got {value}")
+        return value
+
+    @field_validator("llm_timeout_seconds")
+    @classmethod
+    def _timeout_is_positive(cls, value: float) -> float:
+        if not (value > 0 and math.isfinite(value)):
+            raise ValueError(f"LLM_TIMEOUT_SECONDS must be a positive number, got {value}")
+        return value
+
+    @field_validator("llm_max_output_tokens")
+    @classmethod
+    def _output_tokens_are_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError(f"LLM_MAX_OUTPUT_TOKENS must be above 0, got {value}")
         return value
 
     @field_validator("embeddings_model")
@@ -127,6 +192,16 @@ class Settings(BaseSettings):
             seed=self.tool_failure_seed,
             modes=_parse_modes(self.tool_failure_modes),
         )
+
+    def effective_llm_api_key(self) -> SecretStr | None:
+        """The key the chat model uses: `LLM_API_KEY`, or `OPENAI_API_KEY` only when the model
+        runs against the default OpenAI endpoint. A custom endpoint never receives the OpenAI
+        key by accident. The value stays wrapped: unwrap it only to build the client."""
+        if self.llm_api_key is not None:
+            return self.llm_api_key
+        if self.llm_base_url is None:
+            return self.openai_api_key
+        return None
 
     @property
     def timezone(self) -> ZoneInfo:

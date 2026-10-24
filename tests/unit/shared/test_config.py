@@ -3,7 +3,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from merchant_assistant.shared.config import Settings
 from merchant_assistant.shared.faults import FaultConfig, FaultMode
@@ -22,6 +22,16 @@ VARIABLES = (
     "HUMAN_HOURS_START",
     "HUMAN_HOURS_END",
     "HUMAN_HOURS_DAYS",
+    "LLM_PROVIDER",
+    "LLM_MODEL",
+    "LLM_BASE_URL",
+    "LLM_API_KEY",
+    "LLM_TEMPERATURE",
+    "LLM_TIMEOUT_SECONDS",
+    "LLM_MAX_OUTPUT_TOKENS",
+    "LLM_STRICT_TOOLS",
+    "OPERATOR_PIN",
+    "SUPERVISOR_PIN",
 )
 
 
@@ -280,3 +290,179 @@ def test_a_time_that_is_not_a_time_is_refused(monkeypatch: pytest.MonkeyPatch) -
 
     with pytest.raises(ValidationError, match="human_hours_end"):
         Settings(_env_file=None)
+
+
+# --------------------------------------------------------------------------- the chat model
+
+FAKE_KEY = "sk-FAKE-openai-key"
+FAKE_LLM_KEY = "gsk-FAKE-llm-key"
+FAKE_PIN = "482913"
+
+
+def test_the_chat_model_defaults_to_openai_with_cautious_settings() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.llm_provider == "openai"
+    assert settings.llm_model == "gpt-4o-mini"
+    assert settings.llm_base_url is None
+    assert settings.llm_api_key is None
+    assert settings.llm_temperature == 0.2
+    assert settings.llm_timeout_seconds == 30
+    assert settings.llm_max_output_tokens == 700
+    assert settings.llm_strict_tools is False
+    assert settings.operator_pin is None
+    assert settings.supervisor_pin is None
+
+
+def test_the_chat_model_comes_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
+    monkeypatch.setenv("LLM_MODEL", " openai/gpt-oss-120b ")
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
+    monkeypatch.setenv("LLM_API_KEY", FAKE_LLM_KEY)
+    monkeypatch.setenv("LLM_TEMPERATURE", "0")
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "12.5")
+    monkeypatch.setenv("LLM_MAX_OUTPUT_TOKENS", "256")
+    monkeypatch.setenv("LLM_STRICT_TOOLS", "true")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.llm_provider == "groq"
+    assert settings.llm_model == "openai/gpt-oss-120b"
+    assert settings.llm_base_url == "https://api.groq.com/openai/v1"
+    assert settings.llm_temperature == 0
+    assert settings.llm_timeout_seconds == 12.5
+    assert settings.llm_max_output_tokens == 256
+    assert settings.llm_strict_tools is True
+
+
+def test_an_unknown_provider_stops_the_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+
+    with pytest.raises(ValidationError, match="llm_provider"):
+        Settings(_env_file=None)
+
+
+@pytest.mark.parametrize("temperature", ["-0.1", "2.1", "nan", "inf"])
+def test_a_temperature_outside_zero_to_two_stops_the_load(
+    monkeypatch: pytest.MonkeyPatch, temperature: str
+) -> None:
+    monkeypatch.setenv("LLM_TEMPERATURE", temperature)
+
+    with pytest.raises(ValidationError, match="LLM_TEMPERATURE must be between 0 and 2"):
+        Settings(_env_file=None)
+
+
+@pytest.mark.parametrize("temperature", ["0", "2", "1.3"])
+def test_the_ends_of_the_temperature_range_are_valid(
+    monkeypatch: pytest.MonkeyPatch, temperature: str
+) -> None:
+    monkeypatch.setenv("LLM_TEMPERATURE", temperature)
+
+    assert Settings(_env_file=None).llm_temperature == float(temperature)
+
+
+@pytest.mark.parametrize("timeout", ["0", "-1", "nan", "inf"])
+def test_a_timeout_that_is_not_a_positive_number_stops_the_load(
+    monkeypatch: pytest.MonkeyPatch, timeout: str
+) -> None:
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", timeout)
+
+    with pytest.raises(ValidationError, match="LLM_TIMEOUT_SECONDS must be a positive number"):
+        Settings(_env_file=None)
+
+
+@pytest.mark.parametrize("tokens", ["0", "-5"])
+def test_an_output_budget_of_zero_or_less_stops_the_load(
+    monkeypatch: pytest.MonkeyPatch, tokens: str
+) -> None:
+    monkeypatch.setenv("LLM_MAX_OUTPUT_TOKENS", tokens)
+
+    with pytest.raises(ValidationError, match="LLM_MAX_OUTPUT_TOKENS must be above 0"):
+        Settings(_env_file=None)
+
+
+def test_a_blank_model_or_a_url_without_a_scheme_stops_the_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_MODEL", "  ")
+    with pytest.raises(ValidationError, match="LLM_MODEL must name a model"):
+        Settings(_env_file=None)
+
+    monkeypatch.setenv("LLM_MODEL", "gpt-4o-mini")
+    monkeypatch.setenv("LLM_BASE_URL", "api.groq.com/openai/v1")
+    with pytest.raises(ValidationError, match="LLM_BASE_URL must start with http"):
+        Settings(_env_file=None)
+
+
+@pytest.mark.parametrize("name", ["LLM_API_KEY", "LLM_BASE_URL", "OPERATOR_PIN", "SUPERVISOR_PIN"])
+def test_a_blank_value_copied_from_a_template_counts_as_not_set(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    monkeypatch.setenv(name, "")
+
+    settings = Settings(_env_file=None)
+
+    assert getattr(settings, name.lower()) is None
+
+
+def test_the_llm_key_falls_back_to_the_openai_key_only_on_the_default_endpoint() -> None:
+    plain = Settings(_env_file=None, openai_api_key=SecretStr(FAKE_KEY))
+    custom = Settings(
+        _env_file=None, openai_api_key=SecretStr(FAKE_KEY), llm_base_url="https://x.test/v1"
+    )
+
+    assert _revealed(plain) == FAKE_KEY
+    assert _revealed(custom) is None  # never hand the OpenAI key to another endpoint
+
+
+def test_an_explicit_llm_key_wins_with_or_without_a_custom_endpoint() -> None:
+    for base_url in (None, "https://x.test/v1"):
+        settings = Settings(
+            _env_file=None,
+            openai_api_key=SecretStr(FAKE_KEY),
+            llm_api_key=SecretStr(FAKE_LLM_KEY),
+            llm_base_url=base_url,
+        )
+
+        assert _revealed(settings) == FAKE_LLM_KEY
+
+
+def test_with_no_key_at_all_there_is_no_effective_key() -> None:
+    assert Settings(_env_file=None).effective_llm_api_key() is None
+
+
+def test_no_secret_appears_in_the_representation_of_the_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", FAKE_KEY)
+    monkeypatch.setenv("LLM_API_KEY", FAKE_LLM_KEY)
+    monkeypatch.setenv("OPERATOR_PIN", FAKE_PIN)
+    monkeypatch.setenv("SUPERVISOR_PIN", "771204")
+
+    settings = Settings(_env_file=None)
+    shown = " ".join(
+        (
+            repr(settings),
+            str(settings),
+            str(settings.model_dump()),
+            repr(settings.model_dump_json()),
+        )
+    )
+    wrapped = repr(settings.effective_llm_api_key())
+
+    for secret in (FAKE_KEY, FAKE_LLM_KEY, FAKE_PIN, "771204"):
+        assert secret not in shown
+        assert secret not in wrapped
+
+
+def test_a_pin_is_kept_as_a_secret_and_compares_by_value() -> None:
+    settings = Settings(_env_file=None, operator_pin=SecretStr(FAKE_PIN))
+
+    assert settings.operator_pin is not None
+    assert settings.operator_pin.get_secret_value() == FAKE_PIN
+    assert FAKE_PIN not in repr(settings.operator_pin)
+
+
+def _revealed(settings: Settings) -> str | None:
+    key = settings.effective_llm_api_key()
+    return None if key is None else key.get_secret_value()
