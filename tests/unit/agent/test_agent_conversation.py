@@ -1,5 +1,6 @@
 """The turn's own rules, with in-memory fakes: signals, states, delivery and output checks."""
 
+import logging
 import random
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
@@ -13,6 +14,7 @@ from merchant_assistant.agent.adapters.memory_store import InMemoryConversationS
 from merchant_assistant.agent.adapters.scripted_model import (
     SCRIPTED_MODEL_NAME,
     ScriptedChatModel,
+    ScriptExhausted,
     ScriptStep,
     calls_reply,
     text_reply,
@@ -36,6 +38,7 @@ from merchant_assistant.agent.domain.templates import (
     hours_notice,
     human_unavailable,
     nothing_pending,
+    service_unavailable,
 )
 from merchant_assistant.agent.ports import (
     DayFigures,
@@ -473,3 +476,69 @@ def test_a_citation_from_an_earlier_turn_of_the_same_conversation_is_valid() -> 
     result = conversation.say("¿me repetís?")
 
     assert texts(result) == ["Como te dije [DOC-01]."]
+
+
+# ------------------------------------------------------------------ unexpected model failures
+
+SECRET = "sk-FAKE-SECRET"  # noqa: S105 - a fake, to prove it is never shown
+
+
+def boom(messages: object, tools: object) -> ModelReply:
+    raise RuntimeError(SECRET)
+
+
+def test_an_unexpected_model_failure_is_a_plain_notice_flagged_and_logged_not_shown(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    world = chat([boom])
+
+    with caplog.at_level(logging.ERROR):
+        result = world.say("hola")
+
+    assert texts(result) == [service_unavailable()]
+    assert result.flags == ("model_internal_error",)
+    assert result.model_error == "model_internal_error"
+    assert result.pending is None
+    assert result.drafts == ()
+    assert SECRET not in repr(result)
+    assert SECRET not in repr(world.stored())
+    # The traceback reaches the log, which is where the team looks.
+    (record,) = caplog.records
+    assert record.levelno == logging.ERROR
+    assert record.exc_info is not None
+    assert record.name == "merchant_assistant.agent.application.conversation"
+
+
+def test_after_an_unexpected_model_failure_the_conversation_goes_on() -> None:
+    world = chat([boom, text_reply("Ahora sí.")])
+
+    world.say("hola")
+    result = world.say("¿seguís ahí?")
+
+    assert texts(result) == ["Ahora sí."]
+    stored = world.stored()
+    assert (stored.turn, stored.control_state) == (2, State.AUTO)
+    assert [m.content for m in stored.messages if m.role is Role.USER] == ["hola", "¿seguís ahí?"]
+
+
+def test_an_unexpected_failure_after_a_tool_round_registers_nothing_and_shows_nothing() -> None:
+    world = chat(
+        [calls_reply(tool_call("buscar_documentacion", {"consulta": "reserva"})), boom],
+        search=FixedSearch("DOC-04"),
+    )
+
+    result = world.say("¿cuánto dura la reserva?")
+
+    assert texts(result) == [service_unavailable()]
+    assert result.flags == ("model_internal_error",)
+    assert result.model_calls == 1  # only the first call completed
+    assert world.registry.calls == 0
+    assert SECRET not in repr(world.stored())
+
+
+def test_a_failed_assertion_is_not_swallowed_as_a_provider_failure() -> None:
+    world = chat([text_reply("uno")])
+    world.say("hola")
+
+    with pytest.raises(ScriptExhausted):
+        world.say("otra vez")  # the script has no second step: the test, not the turn, fails

@@ -39,6 +39,7 @@ approval executes it (`OperatorService.approve_draft`).
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -146,6 +147,10 @@ ToolCallOutcome = Literal[
 ]
 
 MAX_ROUNDS = 4
+# A model port that fails with something that is not a DomainError (a bug in an adapter, a library
+# raising what it was not documented to raise). It is flagged for the team, never shown.
+MODEL_INTERNAL_ERROR = "model_internal_error"
+_LOGGER = logging.getLogger(__name__)
 ABUSE_STRIKES_TO_BLOCK = 2
 _SAVE_ATTEMPTS = 3
 
@@ -490,6 +495,15 @@ class ConversationService:
                 completion = self._model.complete((prompt, *state.messages), specs)
             except DomainError as failure:
                 turn.model_error = failure.code
+                return state, _Reply(service_unavailable())
+            except AssertionError:
+                raise  # a broken invariant or a test script that ran out must stay loud
+            except Exception:
+                # Whatever it was, it is handled like a provider failure: the customer gets the
+                # fixed notice, the traceback goes to the log only, and nothing else changes.
+                _LOGGER.exception("the chat model failed with an unexpected error")
+                turn.flags.append(MODEL_INTERNAL_ERROR)
+                turn.model_error = MODEL_INTERNAL_ERROR
                 return state, _Reply(service_unavailable())
             turn.usage.append(
                 ModelUsage(completion.model, completion.prompt_tokens, completion.completion_tokens)
