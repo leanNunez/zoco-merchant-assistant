@@ -151,3 +151,22 @@ cada lado. Ninguna pregunta fuera de tema pasa y todas las del kit pasan.
 - `tests/integration/agent/test_agent_retrieval_floor.py`: la calibración sobre el corpus real.
 - `tests/unit/agent/test_agent_operator.py`, `test_agent_drafts.py`, `test_agent_effects.py`,
   `test_agent_output_checks.py`, `test_agent_executor.py` y `test_agent_conversation.py`.
+
+## Actualización (2026-10-24): la compuerta de `low_confidence` y los controles de salida
+
+La descripción de `MIN_BM25_SCORE` de la decisión 5 y la sección "La calibración del umbral" quedan
+**reemplazadas por [ADR-0007](0007-recuperacion-del-agente-y-umbral.md)**. Lo que sigue en pie es
+la idea: `low_confidence` sale del retrieval y nunca de lo que el modelo diga de su confianza. Lo que
+cambió es el cómo:
+
+- El piso único de 5,25 sobre chunking `section` desaparece. La compuerta tiene dos señales (BM25 y el
+  mejor coseno: `no_data` solo si ambas son débiles) y, sin embeddings, una sola (BM25, con un umbral
+  casi vacío a propósito). Los umbrales salen de una regla declarada antes de medir, aplicada a 20
+  preguntas del kit, 30 consultas cortas legítimas y 45 fuera de tema
+  (`evaluation/results/retrieval/gate_calibration.md`).
+- Las consultas cortas que el piso dejaba sin respuesta ("¿Cómo transfiero una entrada?") ahora
+  responden: el escenario S20 dejó de ser una limitación conocida.
+- A los controles de salida de la decisión 6 se suma `prompt_leak`: se retiene toda respuesta que
+  contiene 40 caracteres seguidos del prompt de sistema vigente.
+- Si embeber la consulta falla, la búsqueda cae al camino degradado para esa consulta y el turno
+  registra `search_degraded:<código>`.
