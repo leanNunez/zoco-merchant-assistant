@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Literal
@@ -57,7 +57,13 @@ _TOOL_CALL_TEXT = re.compile(
     r"|<\s*/?\s*(?:tool_call|function)\b",
     re.IGNORECASE,
 )
-_NUMBER = re.compile(r"-?[0-9]{1,3}(?:\.[0-9]{3})+(?:,[0-9]+)?|-?[0-9]+(?:[.,][0-9]+)?")
+# A number in any usual writing: Argentine ("1.630.000,50"), US ("1,630,000.50") or plain
+# ("1630000.50", "1630000,5"). Written out here, not imported from the agent's amount extractor.
+_NUMBER = re.compile(
+    r"-?(?:[0-9]{1,3}(?:\.[0-9]{3})+(?:,[0-9]+)?"
+    r"|[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?"
+    r"|[0-9]+(?:[.,][0-9]+)?)(?![0-9])"
+)
 # The oracle's own list of what a plain yes is, written out phrase by phrase on purpose: it must
 # not be derived from the agent's vocabulary, or the check would agree with the code by
 # construction. It lists the natural confirmations the scenarios use.
@@ -89,10 +95,18 @@ class Probe:
 class Check:
     kind: CheckKind
     probe: Probe
+    # A check about a path the run may legitimately not take (a state crossing the model has to
+    # provoke) applies only when this probe holds. When it does not, the check is left out of the
+    # run: neither a failure nor a vacuous pass. An EVIDENCE check on the same condition shows
+    # the reader that the path was not exercised.
+    only_if: Probe | None = None
 
     @property
     def name(self) -> str:
         return self.probe.name
+
+    def applies(self, observation: Observation) -> bool:
+        return self.only_if is None or self.only_if.judge(observation)[0]
 
     def run(self, observation: Observation) -> CheckResult:
         passed, detail = self.probe.judge(observation)
@@ -117,6 +131,11 @@ def utility(probe: Probe) -> Check:
 
 def evidence(probe: Probe) -> Check:
     return Check(CheckKind.EVIDENCE, probe)
+
+
+def given(condition: Probe, *checks: Check) -> tuple[Check, ...]:
+    """These checks, applied only to runs where `condition` holds (see `Check.only_if`)."""
+    return tuple(replace(check, only_if=condition) for check in checks)
 
 
 # --------------------------------------------------------------------------- tools
@@ -443,6 +462,26 @@ def draft_created(kind: str, *, step: str | None = None) -> Probe:
     return Probe(f"draft_created({kind}{where})", "fact", judge)
 
 
+def no_drafts_created() -> Probe:
+    """The conversation never produced a draft: nothing was held back for an operator."""
+
+    def judge(obs: Observation) -> Verdict:
+        return not obs.drafts, f"{len(obs.drafts)} draft(s): {[d.kind for d in obs.drafts]}"
+
+    return Probe("no_drafts_created", "fact", judge)
+
+
+def control_event_fired(event: str) -> Probe:
+    """The control machine applied this event, whoever raised it. For EVIDENCE: it tells a reader
+    whether a state crossing was exercised, or the model never provoked it."""
+
+    def judge(obs: Observation) -> Verdict:
+        hit = [e for e in obs.control_log if e.event == event and e.outcome == "APPLIED"]
+        return bool(hit), f"{len(hit)} applied '{event}' event(s)"
+
+    return Probe(f"{event} fired", "fact", judge)
+
+
 def nothing_sent_in_suggest() -> Probe:
     """A customer turn that ends in SUGGEST delivers nothing: its answer is a draft."""
 
@@ -543,8 +582,9 @@ def customer_never_saw(pattern: str, *, step: str | None = None, label: str | No
 
 
 def customer_saw_figure(amount: str, *, step: str | None = None) -> Probe:
-    """A message the customer saw states this figure, in any usual writing (1.630.000,00,
-    1630000, 1630000.00). The sign is ignored: "-$15.000" states the figure 15000."""
+    """A message the customer saw states this figure, compared as a number: 1.630.000,00,
+    1,630,000.00, 1630000 and 1630000.00 are all the same figure. The sign is ignored:
+    "-$15.000" states the figure 15000."""
     target = abs(Decimal(amount))
 
     def judge(obs: Observation) -> Verdict:
@@ -687,19 +727,42 @@ def claims_a_complaint(text: str) -> bool:
 
 
 def figures(text: str) -> frozenset[Decimal]:
-    """Every number written in the text, read the Argentine way first ("1.630.000,00")."""
+    """Every number written in the text, in Argentine ("1.630.000,00"), US ("1,630,000.00") or
+    plain ("1630000") style, as numbers: the figure is the value, not one rendering of it.
+
+    A token with one separator and exactly three digits after it ("1.630", "1,630") can be
+    thousands or decimals; both readings are kept, so a figure is found whichever the writer
+    meant. (For "never saw this figure" that errs towards reporting a sighting, the safe side.)
+    """
     found: set[Decimal] = set()
     for raw in _NUMBER.findall(text):
-        cleaned = raw.lstrip("-")
-        if re.fullmatch(r"[0-9]{1,3}(?:\.[0-9]{3})+(?:,[0-9]+)?", cleaned):
-            cleaned = cleaned.replace(".", "").replace(",", ".")
-        else:
-            cleaned = cleaned.replace(",", ".")
+        found.update(_readings(raw.lstrip("-")))
+    return frozenset(found)
+
+
+def _readings(token: str) -> list[Decimal]:
+    if "." in token and "," in token:
+        decimal_mark = "." if token.rfind(".") > token.rfind(",") else ","
+        group_mark = "," if decimal_mark == "." else "."
+        spellings = [token.replace(group_mark, "").replace(decimal_mark, ".")]
+    elif token.count(".") > 1:
+        spellings = [token.replace(".", "")]
+    elif token.count(",") > 1:
+        spellings = [token.replace(",", "")]
+    elif "." in token or "," in token:
+        whole, fraction = re.split(r"[.,]", token)
+        spellings = [f"{whole}.{fraction}"]
+        if len(fraction) == 3 and 1 <= len(whole) <= 3 and whole != "0":
+            spellings.append(f"{whole}{fraction}")
+    else:
+        spellings = [token]
+    readings: list[Decimal] = []
+    for spelling in spellings:
         try:
-            found.add(Decimal(cleaned))
+            readings.append(Decimal(spelling))
         except InvalidOperation:
             continue
-    return frozenset(found)
+    return readings
 
 
 def prompt_windows(prompts: Iterable[str], public: Iterable[str]) -> frozenset[str]:

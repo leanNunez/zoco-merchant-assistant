@@ -22,6 +22,7 @@ from evaluation.conversations.checks import (
     complaint_rows_at_most,
     complaint_text,
     confirmed_rows_only,
+    control_event_fired,
     control_event_logged,
     customer_never_saw,
     customer_never_saw_figure,
@@ -35,12 +36,14 @@ from evaluation.conversations.checks import (
     final_state,
     first_passage_doc,
     flag_present,
+    given,
     inbox_contains,
     injection_marked,
     is_plain_yes,
     lock,
     model_calls,
     model_not_called_at,
+    no_drafts_created,
     no_duplicate_rows,
     no_false_registration_claim,
     no_flag,
@@ -381,6 +384,15 @@ def test_drafts_are_not_what_the_customer_saw() -> None:
         ("neto 1630000", "1630000"),
         ("neto 1630000.00 ARS", "1630000"),
         ("el neto fue -$15.000,00", "-15000"),
+        # Copied from the first run against the real model (live-v1): US separators.
+        ("el ingreso neto fue de 1,630,000.00 ARS.", "1630000.00"),
+        ("ingreso bruto de 1,650,000.00 ARS", "1650000"),
+        ("un ingreso neto de -15,000.00 ARS.", "-15000.00"),
+        ("ingreso neto de 3,940,200.00 ARS, ya que no hubo devoluciones.", "3940200"),
+        ("vendiste 4,550,000.00 ARS", "4550000"),
+        ("vendiste 1,880,000.00 ARS", "1880000"),
+        ("neto de $1,630,000.50", "1630000.5"),
+        ("neto de 1.630.000,50 ARS", "1630000.50"),
     ],
 )
 def test_figures_are_read_in_the_usual_writings(text: str, figure: str) -> None:
@@ -390,12 +402,38 @@ def test_figures_are_read_in_the_usual_writings(text: str, figure: str) -> None:
     assert verdict(customer_saw_figure("999"), obs) is False
 
 
+def test_a_different_figure_is_not_the_same_figure_in_another_style() -> None:
+    obs = Observation(steps=(user(0, "x", visible=said(0, "neto de 1,630,001.00 ARS")),))
+
+    assert not verdict(customer_saw_figure("1630000"), obs)
+    assert verdict(customer_never_saw_figure("1630000"), obs)
+
+
 def test_figures_parser_reads_argentine_thousands_first() -> None:
     assert figures("$1.650.000,00 y 4,5% y 12 minutos") == {
         Decimal("1650000.00"),
         Decimal("4.5"),
         Decimal("12"),
     }
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("1,630,000.00 ARS", {Decimal(1630000)}),
+        ("1.630.000,00", {Decimal(1630000)}),
+        ("1630000.5", {Decimal("1630000.5")}),
+        ("1630000,5", {Decimal("1630000.5")}),
+        ("$1.630", {Decimal(1630), Decimal("1.63")}),  # thousands or decimals: both readings
+        ("1,630 ARS", {Decimal(1630), Decimal("1.63")}),
+        ("-15,000.00", {Decimal(15000)}),
+        ("0,500", {Decimal("0.5")}),
+    ],
+)
+def test_figures_parser_reads_both_number_styles_as_numbers(
+    text: str, expected: set[Decimal]
+) -> None:
+    assert figures(text) == expected
 
 
 def test_no_traceback_covers_drafts_too() -> None:
@@ -571,3 +609,41 @@ def test_customer_never_saw_can_be_limited_to_one_step() -> None:
     probe = customer_never_saw(r"\$", step="gap")
     assert verdict(probe, Observation(steps=(gap, later)))
     assert not verdict(probe, Observation(steps=(replace(gap, visible=later.visible), later)))
+
+
+# --------------------------------------------------------------------------- conditional checks
+
+
+def test_a_conditional_check_is_left_out_of_a_run_where_its_condition_does_not_hold() -> None:
+    fired = Observation(
+        control_log=(LogEntry("AUTO", "SUGGEST", "low_confidence", "SYSTEM", "APPLIED", None, "t"),)
+    )
+    quiet = Observation()
+    wants_draft = lock(draft_created("reply"))
+    (chain,) = given(control_event_fired("low_confidence"), wants_draft)
+
+    assert chain.name == wants_draft.name  # the same check, only conditioned
+    assert chain.kind is CheckKind.LOCK
+    assert chain.applies(fired)
+    assert not chain.applies(quiet)
+    assert wants_draft.applies(quiet)  # an unconditional check always applies
+
+
+def test_control_event_fired_reads_only_applied_events() -> None:
+    def logged(outcome: str) -> Observation:
+        entry = LogEntry("AUTO", "SUGGEST", "low_confidence", "SYSTEM", outcome, None, "t")
+        return Observation(control_log=(entry,))
+
+    probe = control_event_fired("low_confidence")
+
+    assert probe.name == "low_confidence fired"
+    both(probe, logged("APPLIED"), logged("REJECTED"))
+    assert not verdict(probe, Observation())
+
+
+def test_no_drafts_created() -> None:
+    both(
+        no_drafts_created(),
+        Observation(),
+        Observation(drafts=(DraftFact(0, "D-0001", "reply", "borrador"),)),
+    )

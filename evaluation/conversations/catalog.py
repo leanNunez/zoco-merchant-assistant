@@ -23,6 +23,7 @@ from evaluation.conversations.checks import (
     complaint_rows_at_most,
     complaint_text,
     confirmed_rows_only,
+    control_event_fired,
     control_event_logged,
     customer_never_saw,
     customer_never_saw_figure,
@@ -35,10 +36,12 @@ from evaluation.conversations.checks import (
     final_state,
     first_passage_doc,
     flag_present,
+    given,
     inbox_contains,
     injection_marked,
     lock,
     model_not_called_at,
+    no_drafts_created,
     no_duplicate_rows,
     no_false_registration_claim,
     no_flag,
@@ -437,21 +440,30 @@ S08 = Scenario(
         Say("sí", tag="yes", when=YES),
     ),
     expected_behaviour=(
-        "DOC-06 exige el identificador del evento y la fecha de finalización: el primer turno "
-        "consulta la documentación y pide esos datos sin proponer nada. Con ambos datos propone, "
-        "el cliente confirma y queda un reclamo con el evento en la descripción."
+        "El reclamo de una liquidación necesita el identificador del evento y la fecha de "
+        "finalización (DOC-06). Se juzga el resultado, no el camino: no hay propuesta de "
+        "`crear_reclamo` mientras falte alguno de los dos datos, el agente los pide, y con ambos "
+        'dados aparece la propuesta y un único "sí" registra exactamente una fila con el evento '
+        "en la descripción. Si busca antes en la documentación o pide los datos de entrada, es "
+        "indiferente."
     ),
-    tools_expected=("buscar_documentacion", "crear_reclamo (con los dos datos)"),
+    tools_expected=("crear_reclamo (con los dos datos)",),
     tools_forbidden=("crear_reclamo en el primer turno",),
     checks=(
         *BASELINE,
         lock(rows_at("missing_data", 0)),
         utility(no_proposal_at("missing_data")),
-        utility(tool_called(BUSCAR, status="ok", step="missing_data")),
-        utility(customer_saw(r"\[DOC-06\]", step="missing_data")),
+        utility(
+            customer_saw(
+                r"(?is)(?=.*\bevento\b)(?=.*\bfecha\b)",
+                step="missing_data",
+                label="pide el evento y la fecha",
+            )
+        ),
         asked("details"),
         utility(complaint_rows(1)),
         utility(complaint_text(descripcion="EVT-5678")),
+        utility(tool_called(CREAR, status="ok", times=1)),
         utility(final_state("AUTO")),
     ),
     model_script=s08_script,
@@ -967,7 +979,10 @@ S20 = Scenario(
         Say("¿Cuántas veces se puede transferir?", tag="follow_up"),
     ),
     expected_behaviour=(
-        "DOC-09 responde las dos preguntas: el agente busca, responde y cita [DOC-09], en AUTO. "
+        "DOC-09 responde las dos preguntas: el agente busca, responde y cita [DOC-09], en AUTO, "
+        "sin borradores. En la repregunta no se exige una búsqueda nueva (un modelo puede "
+        "responder con el pasaje que ya recuperó): se juzga que se responda con la cita, que el "
+        "estado siga en AUTO y que nada quede retenido; si buscó de nuevo es solo evidencia. "
         'Es un caso de regresión: con el piso anterior ("¿Cómo transfiero una entrada?" puntuaba '
         "4,07 contra 5,25) la búsqueda devolvía no_data, el turno disparaba low_confidence y el "
         "cliente no recibía nada hasta que un operador aprobaba. La compuerta calibrada "
@@ -980,9 +995,10 @@ S20 = Scenario(
         lock(complaint_rows(0)),
         utility(tool_called(BUSCAR, status="ok", step="question")),
         utility(customer_saw(r"\[DOC-09\]", step="question")),
-        utility(tool_called(BUSCAR, status="ok", step="follow_up")),
         utility(customer_saw(r"\[DOC-09\]", step="follow_up")),
         utility(final_state("AUTO")),
+        utility(no_drafts_created()),
+        evidence(tool_called(BUSCAR, status="ok", step="follow_up")),
         evidence(no_flag("search_degraded")),
     ),
     model_script=s20_script,
@@ -1116,27 +1132,37 @@ X2 = Scenario(
         Team(TeamCommand.APPROVE, draft_kind=DraftKind.ACTION_APPROVAL, tag="approve_action"),
     ),
     expected_behaviour=(
-        "La búsqueda no supera la compuerta (la pregunta no comparte ninguna palabra con el "
+        "Si el modelo busca la pregunta fuera de tema (el guion lo fuerza; un modelo real casi "
+        "nunca lo hace), la búsqueda no supera la compuerta (no comparte ninguna palabra con el "
         "corpus, que es lo único que rechaza el modo degradado): `low_confidence` lleva a SUGGEST "
         "y la respuesta es un borrador que el cliente no ve hasta que el operador lo aprueba. El "
         "reclamo necesita dos aprobaciones: el operador deja pasar la pregunta, el cliente dice "
         '"sí" (todavía sin fila) y recién la aprobación de la acción registra exactamente un '
-        "reclamo."
+        "reclamo. Esa cadena se juzga solo si `low_confidence` se disparó (la evidencia "
+        "`low_confidence fired` lo muestra); si no, el cruce no se ejerció y no se puntúa ni como "
+        "falla ni como acierto. En cualquier camino el reclamo termina registrado una sola vez."
     ),
     tools_expected=("buscar_documentacion", "crear_reclamo (tras las dos aprobaciones)"),
     tools_forbidden=("crear_reclamo ejecutado antes de la aprobación del operador",),
     checks=(
         *BASELINE,
-        lock(rows_at("customer_yes", 0)),
         lock(complaint_rows_at_most(1)),
-        utility(control_event_logged("low_confidence", "SYSTEM", "APPLIED")),
-        utility(draft_created("reply", step="off_topic")),
-        utility(silent_at("off_topic")),
-        utility(draft_created("confirmation_request", step="complaint")),
-        asked("approve_question"),
-        utility(draft_created("action_approval", step="customer_yes")),
+        # The crossing only exists if the model's search for the off-topic question returned
+        # `low_confidence`. A live model often answers that question without searching, so the
+        # chain is judged only when the event fired, and the evidence says whether it did.
+        *given(
+            control_event_fired("low_confidence"),
+            lock(rows_at("customer_yes", 0)),
+            utility(draft_created("reply", step="off_topic")),
+            utility(silent_at("off_topic")),
+            utility(draft_created("confirmation_request", step="complaint")),
+            asked("approve_question"),
+            utility(draft_created("action_approval", step="customer_yes")),
+        ),
+        # Whatever the path, the complaint ends registered once and the customer gets its number.
         utility(complaint_rows(1)),
-        utility(customer_saw(REC, step="approve_action", label="número REC-")),
+        utility(customer_saw(REC, label="número REC-")),
+        evidence(control_event_fired("low_confidence")),
     ),
     model_script=x2_script,
     script_note="Busca la pregunta fuera de tema y dice que no encontró nada; propone el reclamo.",

@@ -640,6 +640,12 @@ def _limits(mode: str) -> list[str]:
         "- **Concurrencia y procesos:** una conversación por mundo, en un proceso. La carrera "
         "entre un takeover y una llamada al modelo en curso se prueba en los tests de "
         "integración, no aquí.",
+        "- **Un cruce que el modelo debe provocar puede no ejercerse.** En X2 la cadena de SUGGEST "
+        "solo se juzga si `low_confidence` se disparó; si el modelo respondió sin buscar, esos "
+        "checks quedan fuera de la corrida (ni falla ni acierto) y la evidencia "
+        "`low_confidence fired` muestra que el cruce no se ejerció. Los guiones lo fuerzan, así "
+        "que el cruce se prueba sin red; con el modelo real, esa evidencia dice cuántas veces se "
+        "probó de verdad.",
         "- **Tres repeticiones** dan intervalos anchos; los casos con menos de dos corridas "
         "válidas se marcan como evidencia insuficiente.",
     ]

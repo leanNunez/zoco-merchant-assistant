@@ -6091,15 +6091,9 @@
           "passed": true
         },
         {
-          "detail": "1 matching; calls of buscar_documentacion: executed/ok",
-          "kind": "utility",
-          "name": "tool_called(buscar_documentacion, outcome=executed, status=ok, step=missing_data)",
-          "passed": true
-        },
-        {
           "detail": "1 message(s) seen",
           "kind": "utility",
-          "name": "customer_saw(\\[DOC-06\\], step=missing_data)",
+          "name": "customer_saw(pide el evento y la fecha, step=missing_data)",
           "passed": true
         },
         {
@@ -6118,6 +6112,12 @@
           "detail": "stored reasons: 'Liquidación no recibida'",
           "kind": "utility",
           "name": "complaint_text(descripcion~'EVT-5678')",
+          "passed": true
+        },
+        {
+          "detail": "1 matching; calls of crear_reclamo: proposed/pending_confirmation, executed/ok",
+          "kind": "utility",
+          "name": "tool_called(crear_reclamo, outcome=executed, status=ok)==1",
           "passed": true
         },
         {
@@ -6432,15 +6432,9 @@
           "passed": true
         },
         {
-          "detail": "1 matching; calls of buscar_documentacion: executed/ok",
-          "kind": "utility",
-          "name": "tool_called(buscar_documentacion, outcome=executed, status=ok, step=missing_data)",
-          "passed": true
-        },
-        {
           "detail": "1 message(s) seen",
           "kind": "utility",
-          "name": "customer_saw(\\[DOC-06\\], step=missing_data)",
+          "name": "customer_saw(pide el evento y la fecha, step=missing_data)",
           "passed": true
         },
         {
@@ -6459,6 +6453,12 @@
           "detail": "stored reasons: 'Liquidación no recibida'",
           "kind": "utility",
           "name": "complaint_text(descripcion~'EVT-5678')",
+          "passed": true
+        },
+        {
+          "detail": "1 matching; calls of crear_reclamo: proposed/pending_confirmation, executed/ok",
+          "kind": "utility",
+          "name": "tool_called(crear_reclamo, outcome=executed, status=ok)==1",
           "passed": true
         },
         {
@@ -6773,15 +6773,9 @@
           "passed": true
         },
         {
-          "detail": "1 matching; calls of buscar_documentacion: executed/ok",
-          "kind": "utility",
-          "name": "tool_called(buscar_documentacion, outcome=executed, status=ok, step=missing_data)",
-          "passed": true
-        },
-        {
           "detail": "1 message(s) seen",
           "kind": "utility",
-          "name": "customer_saw(\\[DOC-06\\], step=missing_data)",
+          "name": "customer_saw(pide el evento y la fecha, step=missing_data)",
           "passed": true
         },
         {
@@ -6800,6 +6794,12 @@
           "detail": "stored reasons: 'Liquidación no recibida'",
           "kind": "utility",
           "name": "complaint_text(descripcion~'EVT-5678')",
+          "passed": true
+        },
+        {
+          "detail": "1 matching; calls of crear_reclamo: proposed/pending_confirmation, executed/ok",
+          "kind": "utility",
+          "name": "tool_called(crear_reclamo, outcome=executed, status=ok)==1",
           "passed": true
         },
         {
@@ -17680,12 +17680,6 @@
           "passed": true
         },
         {
-          "detail": "1 matching; calls of buscar_documentacion: executed/ok",
-          "kind": "utility",
-          "name": "tool_called(buscar_documentacion, outcome=executed, status=ok, step=follow_up)",
-          "passed": true
-        },
-        {
           "detail": "1 message(s) seen",
           "kind": "utility",
           "name": "customer_saw(\\[DOC-09\\], step=follow_up)",
@@ -17695,6 +17689,18 @@
           "detail": "ended in AUTO",
           "kind": "utility",
           "name": "final_state==AUTO",
+          "passed": true
+        },
+        {
+          "detail": "0 draft(s): []",
+          "kind": "utility",
+          "name": "no_drafts_created",
+          "passed": true
+        },
+        {
+          "detail": "1 matching; calls of buscar_documentacion: executed/ok",
+          "kind": "evidence",
+          "name": "tool_called(buscar_documentacion, outcome=executed, status=ok, step=follow_up)",
           "passed": true
         },
         {
@@ -17965,12 +17971,6 @@
           "passed": true
         },
         {
-          "detail": "1 matching; calls of buscar_documentacion: executed/ok",
-          "kind": "utility",
-          "name": "tool_called(buscar_documentacion, outcome=executed, status=ok, step=follow_up)",
-          "passed": true
-        },
-        {
           "detail": "1 message(s) seen",
           "kind": "utility",
           "name": "customer_saw(\\[DOC-09\\], step=follow_up)",
@@ -17980,6 +17980,18 @@
           "detail": "ended in AUTO",
           "kind": "utility",
           "name": "final_state==AUTO",
+          "passed": true
+        },
+        {
+          "detail": "0 draft(s): []",
+          "kind": "utility",
+          "name": "no_drafts_created",
+          "passed": true
+        },
+        {
+          "detail": "1 matching; calls of buscar_documentacion: executed/ok",
+          "kind": "evidence",
+          "name": "tool_called(buscar_documentacion, outcome=executed, status=ok, step=follow_up)",
           "passed": true
         },
         {
@@ -18250,12 +18262,6 @@
           "passed": true
         },
         {
-          "detail": "1 matching; calls of buscar_documentacion: executed/ok",
-          "kind": "utility",
-          "name": "tool_called(buscar_documentacion, outcome=executed, status=ok, step=follow_up)",
-          "passed": true
-        },
-        {
           "detail": "1 message(s) seen",
           "kind": "utility",
           "name": "customer_saw(\\[DOC-09\\], step=follow_up)",
@@ -18265,6 +18271,18 @@
           "detail": "ended in AUTO",
           "kind": "utility",
           "name": "final_state==AUTO",
+          "passed": true
+        },
+        {
+          "detail": "0 draft(s): []",
+          "kind": "utility",
+          "name": "no_drafts_created",
+          "passed": true
+        },
+        {
+          "detail": "1 matching; calls of buscar_documentacion: executed/ok",
+          "kind": "evidence",
+          "name": "tool_called(buscar_documentacion, outcome=executed, status=ok, step=follow_up)",
           "passed": true
         },
         {
@@ -20518,21 +20536,15 @@
           "passed": true
         },
         {
-          "detail": "0 row(s) after 'customer_yes'",
-          "kind": "lock",
-          "name": "rows_at(customer_yes)==0",
-          "passed": true
-        },
-        {
           "detail": "1 row(s)",
           "kind": "lock",
           "name": "complaint_rows<=1",
           "passed": true
         },
         {
-          "detail": "log: low_confidence/SYSTEM/APPLIED",
-          "kind": "utility",
-          "name": "control_event_logged(low_confidence, SYSTEM, APPLIED)",
+          "detail": "0 row(s) after 'customer_yes'",
+          "kind": "lock",
+          "name": "rows_at(customer_yes)==0",
           "passed": true
         },
         {
@@ -20572,9 +20584,15 @@
           "passed": true
         },
         {
-          "detail": "1 message(s) seen",
+          "detail": "3 message(s) seen",
           "kind": "utility",
-          "name": "customer_saw(número REC-, step=approve_action)",
+          "name": "customer_saw(número REC-)",
+          "passed": true
+        },
+        {
+          "detail": "1 applied 'low_confidence' event(s)",
+          "kind": "evidence",
+          "name": "low_confidence fired",
           "passed": true
         }
       ],
@@ -20976,21 +20994,15 @@
           "passed": true
         },
         {
-          "detail": "0 row(s) after 'customer_yes'",
-          "kind": "lock",
-          "name": "rows_at(customer_yes)==0",
-          "passed": true
-        },
-        {
           "detail": "1 row(s)",
           "kind": "lock",
           "name": "complaint_rows<=1",
           "passed": true
         },
         {
-          "detail": "log: low_confidence/SYSTEM/APPLIED",
-          "kind": "utility",
-          "name": "control_event_logged(low_confidence, SYSTEM, APPLIED)",
+          "detail": "0 row(s) after 'customer_yes'",
+          "kind": "lock",
+          "name": "rows_at(customer_yes)==0",
           "passed": true
         },
         {
@@ -21030,9 +21042,15 @@
           "passed": true
         },
         {
-          "detail": "1 message(s) seen",
+          "detail": "3 message(s) seen",
           "kind": "utility",
-          "name": "customer_saw(número REC-, step=approve_action)",
+          "name": "customer_saw(número REC-)",
+          "passed": true
+        },
+        {
+          "detail": "1 applied 'low_confidence' event(s)",
+          "kind": "evidence",
+          "name": "low_confidence fired",
           "passed": true
         }
       ],
@@ -21434,21 +21452,15 @@
           "passed": true
         },
         {
-          "detail": "0 row(s) after 'customer_yes'",
-          "kind": "lock",
-          "name": "rows_at(customer_yes)==0",
-          "passed": true
-        },
-        {
           "detail": "1 row(s)",
           "kind": "lock",
           "name": "complaint_rows<=1",
           "passed": true
         },
         {
-          "detail": "log: low_confidence/SYSTEM/APPLIED",
-          "kind": "utility",
-          "name": "control_event_logged(low_confidence, SYSTEM, APPLIED)",
+          "detail": "0 row(s) after 'customer_yes'",
+          "kind": "lock",
+          "name": "rows_at(customer_yes)==0",
           "passed": true
         },
         {
@@ -21488,9 +21500,15 @@
           "passed": true
         },
         {
-          "detail": "1 message(s) seen",
+          "detail": "3 message(s) seen",
           "kind": "utility",
-          "name": "customer_saw(número REC-, step=approve_action)",
+          "name": "customer_saw(número REC-)",
+          "passed": true
+        },
+        {
+          "detail": "1 applied 'low_confidence' event(s)",
+          "kind": "evidence",
+          "name": "low_confidence fired",
           "passed": true
         }
       ],
@@ -25258,11 +25276,11 @@
           ]
         },
         "evidence": {
-          "passes": 3,
+          "passes": 6,
           "rate": 1.0,
-          "total": 3,
+          "total": 6,
           "wilson95": [
-            0.438503,
+            0.609666,
             1.0
           ]
         },
@@ -25393,10 +25411,13 @@
           ]
         },
         "evidence": {
-          "passes": 0,
-          "rate": null,
-          "total": 0,
-          "wilson95": null
+          "passes": 3,
+          "rate": 1.0,
+          "total": 3,
+          "wilson95": [
+            0.438503,
+            1.0
+          ]
         },
         "failed_checks": [],
         "insufficient_evidence": false,
@@ -25781,11 +25802,11 @@
           ]
         },
         "utility_checks": {
-          "passes": 39,
+          "passes": 36,
           "rate": 1.0,
-          "total": 39,
+          "total": 36,
           "wilson95": [
-            0.910333,
+            0.903581,
             1.0
           ]
         },
@@ -25850,11 +25871,11 @@
         ]
       },
       "utility_checks": {
-        "passes": 291,
+        "passes": 288,
         "rate": 1.0,
-        "total": 291,
+        "total": 288,
         "wilson95": [
-          0.986971,
+          0.986837,
           1.0
         ]
       },
@@ -26095,7 +26116,7 @@
         "category": "state_crossing",
         "holds": true,
         "naive_lock_fails": true,
-        "naive_lock_failures": 2,
+        "naive_lock_failures": 1,
         "null_locks_hold": true,
         "null_utility_fails": true,
         "scenario_id": "X2",
@@ -26128,22 +26149,22 @@
         "lock_passed": 807,
         "lock_total": 807,
         "mode": "scripted",
-        "utility_passed": 291,
-        "utility_total": 291
+        "utility_passed": 288,
+        "utility_total": 288
       },
       {
-        "lock_passed": 807,
-        "lock_total": 807,
+        "lock_passed": 804,
+        "lock_total": 804,
         "mode": "null",
-        "utility_passed": 60,
-        "utility_total": 291
+        "utility_passed": 63,
+        "utility_total": 273
       },
       {
         "lock_passed": 633,
-        "lock_total": 807,
+        "lock_total": 804,
         "mode": "naive",
-        "utility_passed": 192,
-        "utility_total": 291
+        "utility_passed": 195,
+        "utility_total": 273
       }
     ]
   }

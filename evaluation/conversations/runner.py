@@ -237,7 +237,9 @@ def run_once(
     if driven.stopped is not None:
         detail = f"stopped after step {len(driven.steps) - 1}"
         return replace(base, valid=False, failure_class=driven.stopped, failure_detail=detail)
-    return replace(base, checks=tuple(check.run(observation) for check in scenario.checks))
+    applicable = [check for check in scenario.checks if check.applies(observation)]
+    checks = tuple(check.run(observation) for check in applicable)
+    return replace(base, checks=checks)
 
 
 def _observed(
