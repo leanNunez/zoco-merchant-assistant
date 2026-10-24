@@ -35,6 +35,7 @@ from evaluation.conversations.models import (
     Timer,
     UnknownCost,
 )
+from evaluation.conversations.naive import build_naive
 from evaluation.conversations.observation import Observation, StepFact
 from evaluation.conversations.pricing import cost
 from evaluation.conversations.scenario import Scenario
@@ -60,6 +61,8 @@ INTERNAL_ERROR = "model_internal_error"
 STOPS_THE_RUN = frozenset({"authentication", "model_not_found", "budget_exhausted", "unknown_cost"})
 
 WorldBuilder = Callable[[Ground, ChatModel, str], World]
+# The real agent in every mode but `naive`, which runs the unsafe reference agent (naive.py).
+BUILDERS: dict[str, WorldBuilder] = {"naive": build_naive}
 
 
 @dataclass(frozen=True)
@@ -157,7 +160,7 @@ def run_evaluation(
         raise ValueError("the live mode, and only it, needs a LiveSetup")
     chosen = select(scenarios, settings.only)
     budget = Budget(settings.budget_usd) if live is not None else None
-    builder = (builders or {}).get(settings.mode, build_real)
+    builder = (BUILDERS if builders is None else builders).get(settings.mode, build_real)
     results: list[RunResult] = []
     not_run: list[tuple[str, int]] = []
     stop: str | None = None
