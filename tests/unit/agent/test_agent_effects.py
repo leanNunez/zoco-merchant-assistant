@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from merchant_assistant.agent.adapters.scripted_model import tool_call
 from merchant_assistant.agent.domain.drafts import Draft, DraftKind, DraftStatus
-from merchant_assistant.agent.domain.effects import apply_effects
+from merchant_assistant.agent.domain.effects import apply_effects, dropped_detail
 from merchant_assistant.agent.domain.guards import authorize
 from merchant_assistant.agent.domain.pending import PendingAction, PendingState, propose
 from merchant_assistant.agent.domain.state import ConversationState, OperatorNotice
@@ -69,6 +69,65 @@ def test_abuse_in_human_writes_to_the_operator_inbox_and_keeps_everything_else()
     assert state.inbox == (OperatorNotice(AT, "abuse_detected", "state=HUMAN"),)
     assert (state.pending, state.drafts) == (before.pending, before.drafts)
     assert facts == ("notify_operator",)
+
+
+def test_dropping_a_pending_action_leaves_the_operator_what_the_customer_was_shown() -> None:
+    state, facts = apply_effects(
+        busy_state(),
+        outcome(State.AUTO, Event.OPERATOR_TAKEOVER, State.HUMAN, Effect.INVALIDATE_PENDING_ACTION),
+        at=AT,
+    )
+
+    assert state.inbox == (
+        OperatorNotice(
+            AT,
+            "pending_action_dropped",
+            'crear_reclamo motivo="Pago doble", descripcion="Me cobraron dos veces."',
+        ),
+    )
+    assert state.pending.pending is None
+    assert facts == ("pending_action_invalidated",)
+
+
+def test_the_note_comes_before_the_notice_of_the_same_outcome() -> None:
+    state, _ = apply_effects(
+        busy_state(),
+        outcome(
+            State.HUMAN,
+            Event.OUT_OF_HOURS_STARTED,
+            State.AUTO,
+            Effect.INVALIDATE_PENDING_ACTION,
+            Effect.NOTIFY_OPERATOR,
+        ),
+        at=AT,
+    )
+
+    assert [notice.code for notice in state.inbox] == [
+        "pending_action_dropped",
+        "out_of_hours_started",
+    ]
+
+
+def test_dropped_detail_removes_line_breaks_and_quotes_the_values() -> None:
+    detail = dropped_detail(
+        "crear_reclamo", {"motivo": "Pago\ndoble", "descripcion": 'Dijo "hola"\r\n\u2028chau'}
+    )
+
+    assert detail == 'crear_reclamo motivo="Pago doble", descripcion="Dijo \\"hola\\" chau"'
+
+
+def test_dropped_detail_cuts_at_exactly_three_hundred_characters() -> None:
+    detail = dropped_detail("crear_reclamo", {"descripcion": "x" * 1000})
+
+    assert len(detail) == 300
+    assert detail == 'crear_reclamo descripcion="' + "x" * 272 + "…"
+
+
+def test_dropped_detail_keeps_a_line_of_exactly_three_hundred_characters_untouched() -> None:
+    detail = dropped_detail("t", {"a": "x" * 294})  # 't a="' + 294 + '"'
+
+    assert detail == 't a="' + "x" * 294 + '"'
+    assert len(detail) == 300
 
 
 def test_an_outcome_without_effects_changes_nothing() -> None:

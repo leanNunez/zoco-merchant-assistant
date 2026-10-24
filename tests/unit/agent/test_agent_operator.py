@@ -284,7 +284,11 @@ def test_a_complaint_stored_while_control_changed_hands_is_recorded_but_not_anno
     assert stored.last_registered_id == "REC-000001"
     assert stored.pending.pending is None
     assert [(n.code, n.detail) for n in stored.inbox] == [
-        ("complaint_registered_unannounced", "REC-000001")
+        (
+            "pending_action_dropped",
+            'crear_reclamo motivo="Pago doble", descripcion="Me cobraron dos veces la entrada."',
+        ),
+        ("complaint_registered_unannounced", "REC-000001"),
     ]
     assert all(m.role is not Role.ASSISTANT for m in stored.messages)
 

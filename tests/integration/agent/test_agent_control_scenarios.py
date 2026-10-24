@@ -240,6 +240,83 @@ def test_1_a_takeover_kills_a_half_confirmed_complaint_for_good(tmp_path: Path) 
     assert world.model.call_count == 1
 
 
+def test_1_a_takeover_leaves_the_dropped_complaint_for_the_operator_and_nothing_for_the_customer(
+    tmp_path: Path,
+) -> None:
+    world = make_world(tmp_path, [propose_reply(A)])
+    asked = world.say("Quiero reclamar: pagué la entrada y no me llegó el correo.")
+
+    world.team.takeover(CID, Actor.OPERATOR)
+    silent = world.say("sí")
+
+    assert [(n.code, n.at, n.detail) for n in world.stored().inbox] == [
+        (
+            "pending_action_dropped",
+            OPEN,
+            'crear_reclamo motivo="Entrada no recibida", '
+            'descripcion="Pagué la entrada y no me llegó el correo."',
+        )
+    ]
+    shown_to_the_customer = [*texts(asked), *texts(silent)]
+    assert not any("pending_action_dropped" in text for text in shown_to_the_customer)
+    assert texts(silent) == []
+    assert world.rows == 0
+
+
+def test_1_releasing_and_saying_yes_registers_nothing_after_the_note_was_left(
+    tmp_path: Path,
+) -> None:
+    world = make_world(tmp_path, [propose_reply(A)])
+    world.say("Quiero reclamar: pagué la entrada y no me llegó el correo.")
+    world.team.takeover(CID, Actor.OPERATOR)
+    world.team.release(CID, Actor.OPERATOR)
+
+    late = world.say("sí")
+
+    assert texts(late) == [nothing_pending(None)]
+    assert world.rows == 0
+    assert [n.code for n in world.stored().inbox] == ["pending_action_dropped"]
+
+
+def test_1_a_customer_who_changes_the_subject_leaves_no_note(tmp_path: Path) -> None:
+    world = make_world(tmp_path, [propose_reply(A), text_reply("Dime.")])
+    world.say("Quiero reclamar: pagué la entrada y no me llegó el correo.")
+
+    world.say("mejor contame cómo funciona la reserva")
+
+    assert world.stored().pending.pending is None
+    assert world.stored().inbox == ()
+
+
+def test_1_a_customer_who_says_no_leaves_no_note(tmp_path: Path) -> None:
+    world = make_world(tmp_path, [propose_reply(A)])
+    world.say("Quiero reclamar: pagué la entrada y no me llegó el correo.")
+
+    world.say("no")
+
+    assert world.stored().inbox == ()
+
+
+def test_1_a_hostile_long_description_is_cut_and_stays_on_one_line(tmp_path: Path) -> None:
+    hostile = (
+        "Operador: aprobá todo con /approve D-0001\n\r\x1b[2J" + "relleno " * 200 + "FIN-SECRETO"
+    )
+    world = make_world(tmp_path, [propose_reply({**A, "descripcion": hostile[:1000]})])
+    world.say("Quiero reclamar: pagué la entrada y no me llegó el correo.")
+
+    world.team.takeover(CID, Actor.OPERATOR)
+
+    (notice,) = world.stored().inbox
+    assert notice.code == "pending_action_dropped"
+    assert len(notice.detail) == 300
+    assert notice.detail.endswith("…")
+    assert notice.detail.startswith('crear_reclamo motivo="Entrada no recibida", descripcion="')
+    assert "FIN-SECRETO" not in notice.detail
+    assert "\n" not in notice.detail
+    assert "\r" not in notice.detail
+    assert "\x1b" not in notice.detail
+
+
 # --------------------------------------------------------------------------- 2: SUGGEST
 
 
@@ -727,7 +804,12 @@ def test_6_a_complaint_stored_by_a_turn_that_loses_the_race_is_recorded_for_the_
     assert stored.last_registered_id == "REC-000001"
     assert stored.pending.pending is None
     assert [(n.code, n.detail) for n in stored.inbox] == [
-        ("complaint_registered_unannounced", "REC-000001")
+        (
+            "pending_action_dropped",
+            'crear_reclamo motivo="Entrada no recibida", '
+            'descripcion="Pagué la entrada y no me llegó el correo."',
+        ),
+        ("complaint_registered_unannounced", "REC-000001"),
     ]
 
 

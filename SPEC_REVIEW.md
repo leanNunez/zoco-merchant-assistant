@@ -310,7 +310,13 @@ que se propuso, y `decide` la descarta si la versión cambió, diga lo que diga 
 rechazada también cuenta: cualquier intento de cambiar de manos invalida, que es la lectura conservadora.
 El comando `takeover` del operador ejecuta el mismo efecto (`apply_effects`): después de liberar, un
 "sí" ya no encuentra nada pendiente.
+Al descartar la acción por este efecto, `apply_effects` deja además una entrada `pending_action_dropped` en
+el inbox del operador, con la herramienta y los parámetros exactos que el cliente había visto (una sola línea,
+hasta 300 caracteres). Es contexto para quien toma la conversación: se ve solo en la vista de equipo y no es
+una acción ejecutable. No se escribe cuando el propio mensaje del cliente descarta la acción.
 Tests: `tests/integration/agent/test_agent_control_scenarios.py::test_1_a_takeover_kills_a_half_confirmed_complaint_for_good`,
+`test_1_a_takeover_leaves_the_dropped_complaint_for_the_operator_and_nothing_for_the_customer`,
+`test_agent_effects.py::test_dropped_detail_cuts_at_exactly_three_hundred_characters`,
 `tests/unit/agent/test_agent_pending.py::test_a_change_of_control_since_the_proposal_invalidates_whatever_the_user_says`,
 `test_agent_pending_properties.py::test_a_reply_under_another_control_version_never_confirms`,
 `tests/integration/agent/test_agent_policies.py::test_10_a_change_of_control_since_the_proposal_voids_a_later_yes`,

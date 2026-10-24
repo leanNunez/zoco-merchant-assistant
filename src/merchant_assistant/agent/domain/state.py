@@ -32,7 +32,9 @@ class OperatorNotice:
     """An entry of the operator inbox: something a person of the team must look at.
 
     `code` is stable (for example `abuse_detected`, from the control effect NOTIFY_OPERATOR);
-    `detail` is short and code-written, never text the customer or the model typed.
+    `detail` is short and code-written. The one exception is `pending_action_dropped`, which
+    quotes the parameters the customer had been shown (single line, at most 300 characters):
+    it is data for the operator to read, never an instruction.
     """
 
     at: datetime

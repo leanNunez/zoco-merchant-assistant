@@ -666,6 +666,31 @@ def test_the_two_step_complaint_flow_from_the_customer_to_the_registered_number(
     assert world.model.call_count == 3
 
 
+def test_a_takeover_leaves_the_dropped_complaint_in_the_inbox_and_off_the_customer_screen(
+    tmp_path: Path,
+) -> None:
+    world = make_world(tmp_path, [propose_complaint()])
+    asked = world.type("Quiero reclamar: pagué la entrada y no me llegó el correo.")
+    assert "Voy a registrar este reclamo:" in asked
+    world.login("operator")
+
+    world.type("/takeover")
+    inbox = world.type("/inbox")
+    back = world.type("/logout")
+    after = world.type("sí")
+
+    assert "pending_action_dropped" in inbox
+    assert (
+        'crear_reclamo motivo="Entrada no recibida", '
+        'descripcion="Pagué la entrada y no me llegó el correo."'
+    ) in inbox
+    for shown in (back, after):
+        assert "pending_action_dropped" not in shown
+        assert "crear_reclamo" not in shown
+    assert after == ""
+    assert world.model.call_count == 1
+
+
 def test_rejecting_the_approval_tells_the_customer_it_was_not_registered(tmp_path: Path) -> None:
     world = make_world(tmp_path, [propose_complaint()], suggest=True)
     world.type("Quiero reclamar: pagué la entrada y no me llegó el correo.")
