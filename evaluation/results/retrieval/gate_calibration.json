@@ -1,0 +1,245 @@
+{
+  "previous_floor": {
+    "bm25": 5.25,
+    "legitimate_rejected": [
+      "L01",
+      "L02",
+      "L03",
+      "L04",
+      "L05",
+      "L07",
+      "L11",
+      "L13",
+      "L16",
+      "L17",
+      "L18",
+      "L20",
+      "L22",
+      "L23",
+      "L24",
+      "L27",
+      "L30"
+    ],
+    "off_topic_accepted": 2
+  },
+  "provenance": {
+    "api_calls": 0,
+    "chunking": "document",
+    "chunks": 12,
+    "corpus_sha256": "e8708c40938f1e49c80238663ca180a94dbac8fc002ec1f06b03b78c26ea00f2",
+    "embeddings_model": "text-embedding-3-small",
+    "queries": {
+      "kit": 20,
+      "off_topic": 45,
+      "short_legit": 30
+    }
+  },
+  "rules": [
+    "1. Los conjuntos de consultas se escribieron antes de medir y no se modifican después de ver los puntajes: `kit` (las 20 preguntas de `questions.jsonl`, referenciadas), `short_legit` (frases cortas y naturales que el corpus responde) y `off_topic` (fuera del dominio; las marcadas `hard` comparten palabras genéricas con el dominio).",
+    "2. Señales: el mejor puntaje BM25 de la consulta sobre los chunks `document` y el mejor coseno entre el vector de la consulta y los de los chunks.",
+    "3. Compuerta híbrida: `no_data` si BM25 < τ_b **y** coseno < τ_v. Compuerta degradada (sin embeddings, solo existe BM25): `no_data` si BM25 < τ_b_degradado.",
+    "4. Selección de los umbrales: (a) toda consulta de `kit` y de `short_legit` sigue respondiendo; (b) entre las compuertas que cumplen (a), la que rechaza más consultas `off_topic`; (c) entre empates, el centro del intervalo factible. Un umbral solo importa por entre qué dos puntajes observados cae, así que cada eje se parte en celdas y el umbral es el punto medio de la celda elegida. En dos ejes, el centro es el punto medio del rango que ocupan las celdas empatadas en cada eje; si esa celda no está empatada, se toma la empatada más cercana (distancia L1 con cada eje normalizado por su rango).",
+    "5. Relajación: si (a) solo se cumple con una compuerta que no rechaza ninguna consulta `off_topic`, se relaja lo justo para conservar las 20 del `kit`, se aplican de nuevo (b) y (c) y se informan por nombre las `short_legit` que quedan rechazadas.",
+    "6. Tokenizador con stopwords en la búsqueda del agente: solo si (i) recall@3 y MRR de `hybrid+meta(demote)` sobre las 20 preguntas del kit no bajan respecto del tokenizador por defecto **y** (ii) sube el margen factible de BM25, definido como (L - U) / L con L el menor mejor-BM25 de las consultas legítimas (kit y short_legit) y U el mayor de las `off_topic`. Se normaliza por L porque quitar palabras funcionales cambia la escala de BM25; el margen absoluto se informa al lado. Si falla (i) o (ii), se mantiene el tokenizador por defecto."
+  ],
+  "selected_tokenizer": "default",
+  "stopwords": {
+    "adopted": false,
+    "margin_improves": false,
+    "mrr_not_lower": true,
+    "recall_not_lower": true
+  },
+  "thresholds": {
+    "bm25_degraded": 0.039,
+    "bm25_hybrid": 11.824,
+    "cosine_hybrid": 0.366
+  },
+  "tokenizers": {
+    "default": {
+      "degraded": {
+        "bm25": 0.039,
+        "bm25_interval": [
+          0.0,
+          0.077395
+        ],
+        "cosine": null,
+        "cosine_interval": null,
+        "legitimate_rejected": [],
+        "off_topic_rejected": 2,
+        "relaxed": false,
+        "tied_cells": 1
+      },
+      "degraded_confusion": {
+        "hard_rejected": 0,
+        "hard_total": 13,
+        "kit_answered": 20,
+        "kit_total": 20,
+        "off_topic_rejected": 2,
+        "off_topic_total": 45,
+        "short_legit_answered": 30,
+        "short_legit_total": 30
+      },
+      "hybrid": {
+        "bm25": 11.824,
+        "bm25_interval": [
+          10.553406,
+          13.094998
+        ],
+        "cosine": 0.366,
+        "cosine_interval": [
+          0.353896,
+          0.378713
+        ],
+        "legitimate_rejected": [],
+        "off_topic_rejected": 33,
+        "relaxed": false,
+        "tied_cells": 35
+      },
+      "hybrid_confusion": {
+        "hard_rejected": 3,
+        "hard_total": 13,
+        "kit_answered": 20,
+        "kit_total": 20,
+        "off_topic_rejected": 33,
+        "off_topic_total": 45,
+        "short_legit_answered": 30,
+        "short_legit_total": 30
+      },
+      "kit_only_degraded": {
+        "bm25": 3.9,
+        "bm25_interval": [
+          3.87372,
+          3.926162
+        ],
+        "cosine": null,
+        "cosine_interval": null,
+        "legitimate_rejected": [
+          "L01",
+          "L02",
+          "L03",
+          "L04",
+          "L05",
+          "L07",
+          "L08",
+          "L11",
+          "L12",
+          "L13",
+          "L16",
+          "L17",
+          "L18",
+          "L19",
+          "L20",
+          "L21",
+          "L22",
+          "L23",
+          "L24",
+          "L26",
+          "L30"
+        ],
+        "off_topic_rejected": 44,
+        "relaxed": true,
+        "tied_cells": 3
+      },
+      "legit_weakest_bm25": 0.077395,
+      "margin": -3.993303,
+      "off_strongest_bm25": 4.070698,
+      "relative_margin": -51.596376
+    },
+    "stopwords": {
+      "degraded": {
+        "bm25": 2.183,
+        "bm25_interval": [
+          2.173415,
+          2.193391
+        ],
+        "cosine": null,
+        "cosine_interval": null,
+        "legitimate_rejected": [
+          "L01",
+          "L02",
+          "L04",
+          "L05",
+          "L07",
+          "L11",
+          "L13",
+          "L18",
+          "L20",
+          "L23",
+          "L24",
+          "L26",
+          "L30"
+        ],
+        "off_topic_rejected": 38,
+        "relaxed": true,
+        "tied_cells": 1
+      },
+      "degraded_confusion": {
+        "hard_rejected": 8,
+        "hard_total": 13,
+        "kit_answered": 20,
+        "kit_total": 20,
+        "off_topic_rejected": 38,
+        "off_topic_total": 45,
+        "short_legit_answered": 17,
+        "short_legit_total": 30
+      },
+      "hybrid": {
+        "bm25": 11.238,
+        "bm25_interval": [
+          9.805537,
+          12.669949
+        ],
+        "cosine": 0.366,
+        "cosine_interval": [
+          0.353896,
+          0.378713
+        ],
+        "legitimate_rejected": [],
+        "off_topic_rejected": 33,
+        "relaxed": false,
+        "tied_cells": 30
+      },
+      "hybrid_confusion": {
+        "hard_rejected": 3,
+        "hard_total": 13,
+        "kit_answered": 20,
+        "kit_total": 20,
+        "off_topic_rejected": 33,
+        "off_topic_total": 45,
+        "short_legit_answered": 30,
+        "short_legit_total": 30
+      },
+      "kit_only_degraded": {
+        "bm25": 2.183,
+        "bm25_interval": [
+          2.173415,
+          2.193391
+        ],
+        "cosine": null,
+        "cosine_interval": null,
+        "legitimate_rejected": [
+          "L01",
+          "L02",
+          "L04",
+          "L05",
+          "L07",
+          "L11",
+          "L13",
+          "L18",
+          "L20",
+          "L23",
+          "L24",
+          "L26",
+          "L30"
+        ],
+        "off_topic_rejected": 38,
+        "relaxed": true,
+        "tied_cells": 1
+      },
+      "legit_weakest_bm25": 0.0,
+      "margin": -3.479372,
+      "off_strongest_bm25": 3.479372,
+      "relative_margin": null
+    }
+  }
+}

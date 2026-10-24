@@ -1,0 +1,76 @@
+{"group": "kit", "source": "questions.jsonl"}
+{"id": "L01", "group": "short_legit", "text": "¿Cómo transfiero una entrada?", "expected": ["DOC-09"]}
+{"id": "L02", "group": "short_legit", "text": "Quiero hacer un reclamo.", "expected": ["DOC-11"]}
+{"id": "L03", "group": "short_legit", "text": "No me liquidaron un evento, quiero hacer un reclamo.", "expected": ["DOC-06"]}
+{"id": "L04", "group": "short_legit", "text": "no me llegó la entrada", "expected": ["DOC-04"]}
+{"id": "L05", "group": "short_legit", "text": "cuánto cobran de comisión", "expected": ["DOC-05"]}
+{"id": "L06", "group": "short_legit", "text": "qué es ZT-PRO-2", "expected": ["DOC-07"]}
+{"id": "L07", "group": "short_legit", "text": "hasta cuándo puedo devolver", "expected": ["DOC-08"]}
+{"id": "L08", "group": "short_legit", "text": "puedo transferir mi entrada", "expected": ["DOC-09"]}
+{"id": "L09", "group": "short_legit", "text": "cómo valido un QR", "expected": ["DOC-10"]}
+{"id": "L10", "group": "short_legit", "text": "quiero registrar un reclamo por un pago duplicado", "expected": ["DOC-11"]}
+{"id": "L11", "group": "short_legit", "text": "me cobraron dos veces", "expected": ["DOC-11"]}
+{"id": "L12", "group": "short_legit", "text": "cuántos días tarda la liquidación", "expected": ["DOC-06"]}
+{"id": "L13", "group": "short_legit", "text": "qué pasa si cancelan el evento", "expected": ["DOC-08"]}
+{"id": "L14", "group": "short_legit", "text": "cuánto dura la reserva del carrito", "expected": ["DOC-04"]}
+{"id": "L15", "group": "short_legit", "text": "cuántas entradas necesito vender con el plan pro", "expected": ["DOC-07"]}
+{"id": "L16", "group": "short_legit", "text": "cómo me doy de alta como organizador", "expected": ["DOC-02"]}
+{"id": "L17", "group": "short_legit", "text": "puedo cambiar la fecha de mi evento", "expected": ["DOC-03"]}
+{"id": "L18", "group": "short_legit", "text": "qué pasa si el lector escanea sin internet", "expected": ["DOC-10"]}
+{"id": "L19", "group": "short_legit", "text": "quién puede publicar un evento", "expected": ["DOC-02", "DOC-03"]}
+{"id": "L20", "group": "short_legit", "text": "cuánto cobraban de comisión en agosto", "expected": ["DOC-12"]}
+{"id": "L21", "group": "short_legit", "text": "se puede ampliar la capacidad del lugar", "expected": ["DOC-03"]}
+{"id": "L22", "group": "short_legit", "text": "cuánto tarda una devolución", "expected": ["DOC-08"]}
+{"id": "L23", "group": "short_legit", "text": "qué tipos de reclamo hay", "expected": ["DOC-11"]}
+{"id": "L24", "group": "short_legit", "text": "qué es un lote", "expected": ["DOC-04"]}
+{"id": "L25", "group": "short_legit", "text": "las entradas gratis cuentan para el mínimo", "expected": ["DOC-07"]}
+{"id": "L26", "group": "short_legit", "text": "cuándo me pagan lo que vendí", "expected": ["DOC-06"]}
+{"id": "L27", "group": "short_legit", "text": "qué significa que el evento esté pausado", "expected": ["DOC-03"]}
+{"id": "L28", "group": "short_legit", "text": "puedo volver a transferir una entrada que ya transferí", "expected": ["DOC-09"]}
+{"id": "L29", "group": "short_legit", "text": "el escáner dice ya utilizada", "expected": ["DOC-10"]}
+{"id": "L30", "group": "short_legit", "text": "quiero devolver una entrada", "expected": ["DOC-08"]}
+{"id": "N01", "group": "off_topic", "text": "¿Cuál es la capital de Australia?"}
+{"id": "N02", "group": "off_topic", "text": "¿Quién ganó el último mundial de fútbol?"}
+{"id": "N03", "group": "off_topic", "text": "Pasame una receta de milanesas"}
+{"id": "N04", "group": "off_topic", "text": "¿Va a llover mañana?"}
+{"id": "N05", "group": "off_topic", "text": "Contame un chiste"}
+{"id": "N06", "group": "off_topic", "text": "¿Cuántos habitantes tiene Brasil?"}
+{"id": "N07", "group": "off_topic", "text": "¿Cómo se arma un currículum?"}
+{"id": "N08", "group": "off_topic", "text": "¿Quién pintó la Mona Lisa?"}
+{"id": "N09", "group": "off_topic", "text": "Recomendame una serie para ver esta noche"}
+{"id": "N10", "group": "off_topic", "text": "¿Cuánto es 15 por 12?"}
+{"id": "N11", "group": "off_topic", "text": "hola"}
+{"id": "N12", "group": "off_topic", "text": "¿Cómo estás?"}
+{"id": "N13", "group": "off_topic", "text": "buenos días"}
+{"id": "N14", "group": "off_topic", "text": "¿Qué hora es en Tokio?"}
+{"id": "N15", "group": "off_topic", "text": "Explicame qué es la inflación"}
+{"id": "N16", "group": "off_topic", "text": "¿Cómo se instala Python en Windows?"}
+{"id": "N17", "group": "off_topic", "text": "¿Cuál es la mejor marca de zapatillas?"}
+{"id": "N18", "group": "off_topic", "text": "¿Qué es la fotosíntesis?"}
+{"id": "N19", "group": "off_topic", "text": "¿Cómo hago para bajar de peso?"}
+{"id": "N20", "group": "off_topic", "text": "Escribime un poema sobre el mar"}
+{"id": "N21", "group": "off_topic", "text": "¿Cuánto está el dólar hoy?"}
+{"id": "N22", "group": "off_topic", "text": "¿Cómo funciona Netflix?"}
+{"id": "N23", "group": "off_topic", "text": "¿Qué plan de Spotify me conviene?"}
+{"id": "N24", "group": "off_topic", "text": "¿Cómo se cambia una rueda pinchada?"}
+{"id": "N25", "group": "off_topic", "text": "¿Quién es el presidente de Estados Unidos?"}
+{"id": "N26", "group": "off_topic", "text": "Traducime good morning al francés"}
+{"id": "N27", "group": "off_topic", "text": "¿Cómo cargo la SUBE?"}
+{"id": "N28", "group": "off_topic", "text": "¿Qué significa la palabra efímero?"}
+{"id": "N29", "group": "off_topic", "text": "¿Cuándo es el cumpleaños de Messi?"}
+{"id": "N30", "group": "off_topic", "text": "¿Cómo puedo aprender a tocar la guitarra?"}
+{"id": "N31", "group": "off_topic", "text": "gracias"}
+{"id": "N32", "group": "off_topic", "text": "¿Cuál es la distancia de la Tierra a la Luna?"}
+{"id": "N33", "group": "off_topic", "text": "¿Cuánto sale una entrada del cine?", "hard": true}
+{"id": "N34", "group": "off_topic", "text": "¿Cómo hago una transferencia bancaria?", "hard": true}
+{"id": "N35", "group": "off_topic", "text": "reclamo de mi seguro del auto", "hard": true}
+{"id": "N36", "group": "off_topic", "text": "¿Cómo valido mi tarjeta de crédito?", "hard": true}
+{"id": "N37", "group": "off_topic", "text": "¿Cuánto cobra Mercado Libre de comisión?", "hard": true}
+{"id": "N38", "group": "off_topic", "text": "No me llegó el paquete que compré por internet", "hard": true}
+{"id": "N39", "group": "off_topic", "text": "¿Cuántos días tarda en salir un pasaporte?", "hard": true}
+{"id": "N40", "group": "off_topic", "text": "¿Hasta cuándo puedo pagar el monotributo?", "hard": true}
+{"id": "N41", "group": "off_topic", "text": "Quiero cancelar la suscripción del gimnasio", "hard": true}
+{"id": "N42", "group": "off_topic", "text": "¿Qué pasa si cancelan mi vuelo?", "hard": true}
+{"id": "N43", "group": "off_topic", "text": "¿Cuándo me liquidan el sueldo?", "hard": true}
+{"id": "N44", "group": "off_topic", "text": "¿Cómo me doy de alta en el monotributo?", "hard": true}
+{"id": "N45", "group": "off_topic", "text": "¿Puedo transferir mi línea de celular a otra persona?", "hard": true}

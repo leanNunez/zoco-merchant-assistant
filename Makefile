@@ -33,11 +33,12 @@ test: ## Unit and integration tests, in the local timezone and in UTC
 diagram: ## Regenerate the state diagram
 	uv run python -m merchant_assistant.control.diagram > design/state-diagram.md
 
-index: ## Embed the corpus with every chunking (uses the cache)
+index: ## Embed the corpus, the kit and the calibration queries (uses the cache)
 	uv run python -m evaluation.retrieval index
 
-eval-retrieval: ## Retrieval evaluation: recall@3 and MRR tables
+eval-retrieval: ## Retrieval evaluation (recall@3, MRR) and the calibration of the no-data gate
 	uv run python -m evaluation.retrieval run
+	uv run python -m evaluation.retrieval calibrate
 
 # The scripted report validates the evaluator with the null model and the naive agent, so the three
 # modes always come from the same code; each writes evaluation/results/conversations/<mode>/.
