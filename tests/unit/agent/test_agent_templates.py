@@ -14,6 +14,7 @@ from merchant_assistant.agent.domain.templates import (
     cancelled,
     confirmation_request,
     execution_failed,
+    handover_notice,
     hours_notice,
     human_unavailable,
     nothing_pending,
@@ -159,6 +160,7 @@ def every_template() -> list[str]:
         service_unavailable(),
         answer_withheld(),
         blocked_notice(),
+        handover_notice(),
     ]
 
 

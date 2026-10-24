@@ -7,8 +7,13 @@ lista cada hallazgo, la decisión tomada y dónde queda implementada y probada. 
 Estados de implementación:
 
 - ✅ implementado en el paquete `control` y probado.
-- ⏳ el paquete `control` emite la señal (un efecto, un error o una capacidad), pero la integración con el
-  agente, todavía pendiente, debe actuar sobre ella.
+- ⏳ el paquete `control` emite la señal (un efecto, un error o una capacidad), pero falta la parte del
+  agente que actúa sobre ella (los comandos del operador y del supervisor, los borradores y las
+  aprobaciones son el bloque siguiente).
+
+El turno del agente (`src/merchant_assistant/agent/application/conversation.py`, decisión en
+[ADR-0003](design/adr/0003-turno-del-agente.md)) ya hace cumplir lo que la columna de estado marca con ✅
+del lado del agente; sus escenarios están en `tests/integration/agent/test_agent_policies.py`.
 
 ## Resumen
 
@@ -17,19 +22,19 @@ Estados de implementación:
 | F1 | Contradicción | HUMAN + `abuse_detected` aparece dos veces con destinos distintos | Queda en HUMAN y avisa al operador; nuevo evento `operator_block` | ✅ |
 | F2 | Contradicción | BLOCKED + `operator_release` contradice la regla 4 | Se conserva la fila, restringida al supervisor | ✅ |
 | F3 | Contradicción | "Cualquiera + `out_of_hours_started`" desbloquearía por reloj | Cuatro filas explícitas; BLOCKED sigue BLOCKED | ✅ |
-| F4 | Contradicción | La regla 3 solo se modela al entrar en AUTO | Guarda de horario abierto en tres eventos | ✅ guarda / ⏳ informar |
+| F4 | Contradicción | La regla 3 solo se modela al entrar en AUTO | Guarda de horario abierto en tres eventos | ✅ |
 | F5 | Caso faltante | No hay evento ni regla de retorno al abrir la franja | El horario es una guarda, no un estado | ✅ |
 | F6 | Ambigüedad | Los actores no están definidos | Tabla de actores por evento; SUPERVISOR incluye a OPERATOR | ✅ |
 | F7 | Caso faltante | SUGGEST + `customer_requests_human` no está definido | Pasa a HUMAN, con guarda de horario | ✅ |
 | F8 | Caso faltante | Qué pasa con los eventos redundantes o sin sentido | Fallan de forma explícita con `InvalidTransition` | ✅ |
 | F9 | Ambigüedad | `low_confidence` no está definida y la confianza del LLM no está calibrada | Debe salir de una señal determinista de retrieval | ⏳ |
-| F10 | Interacción con la Parte 2 | Un reclamo a medio confirmar sobrevive a un cambio de control | `INVALIDATE_PENDING_ACTION` en todo cambio de estado | ✅ efecto / ⏳ agente |
-| F11 | Interacción con la Parte 2 | Orden de la regla 6 en SUGGEST | Confirmación del usuario, aprobación del operador, ejecución | ✅ capacidad / ⏳ agente |
+| F10 | Interacción con la Parte 2 | Un reclamo a medio confirmar sobrevive a un cambio de control | `INVALIDATE_PENDING_ACTION` en todo cambio de estado, y la compuerta compara la versión de control | ✅ |
+| F11 | Interacción con la Parte 2 | Orden de la regla 6 en SUGGEST | Confirmación del usuario, aprobación del operador, ejecución | ✅ capacidad y bloqueo / ⏳ aprobación |
 | F12 | Caso faltante | Los borradores no deben filtrarse al salir de SUGGEST | `DISCARD_UNAPPROVED_DRAFTS` al salir de SUGGEST | ✅ efecto / ⏳ bandeja de salida |
 | F13 | Ambigüedad | "Ejecuta acciones" en HUMAN: ¿cuentan las herramientas de lectura? | Lectura estricta: ninguna herramienta en HUMAN ni BLOCKED | ✅ |
 | F14 | Ambigüedad | La regla 5 no dice si los intentos rechazados se registran | Se registran ambos, distinguidos por resultado y motivo | ✅ |
-| F15 | Ambigüedad | "Nadie responde" en BLOCKED no dice qué pasa con los mensajes entrantes | Se registran; no se genera ni se envía nada | ✅ capacidad / ⏳ registro |
-| F16 | Caso faltante | Carrera: un operador toma el control mientras el LLM está respondiendo | Se decide la entrega contra el estado leído después de generar | ⏳ |
+| F15 | Ambigüedad | "Nadie responde" en BLOCKED no dice qué pasa con los mensajes entrantes | Se registran; no se genera ni se envía nada | ✅ |
+| F16 | Caso faltante | Carrera: un operador toma el control mientras el LLM está respondiendo | Se decide la entrega contra el estado leído después de generar | ✅ |
 
 Los tests citados están en `tests/unit/control/`. Cuando un test está parametrizado, el nombre del caso
 va entre corchetes.
@@ -126,7 +131,11 @@ y `capabilities.py` (`inform_hours_window`).
 `test_conversation_properties.py::test_while_the_hours_are_closed_a_conversation_never_becomes_human_or_suggest`,
 `test_capabilities.py::test_what_the_agent_may_do_in_each_state_and_hour`.
 
-**Estado.** ✅ guarda implementada en `control`. ⏳ la aplicación debe decirle al cliente la franja de atención.
+**Estado.** ✅ guarda implementada en `control`. ✅ fuera de horario el turno agrega a cada respuesta la
+plantilla con la franja (`hours_notice`), y si el cliente pide un humano fuera de horario el intento queda
+registrado como rechazado y la respuesta dice cuándo atiende el equipo (`human_unavailable`). Tests:
+`tests/integration/agent/test_agent_policies.py::test_17_out_of_hours_the_answer_carries_the_human_window`,
+`tests/unit/agent/test_agent_conversation.py::test_a_request_for_a_person_out_of_hours_is_answered_with_the_window`.
 
 ## F5. No existe `in_hours_started` ni regla de retorno
 
@@ -229,8 +238,8 @@ paquete.
 **Tests.** `test_transition_table.py::test_only_the_system_reports_abuse_or_low_confidence`. El umbral y su
 calibración se prueban cuando exista el retrieval.
 
-**Estado.** ⏳ `control` define quién puede emitir el evento; el cálculo de la señal y su umbral pertenecen
-a la integración con el agente y el retrieval.
+**Estado.** ⏳ `control` define quién puede emitir el evento; el cálculo de la señal y su umbral siguen
+pendientes (bloque siguiente). El turno todavía no emite `low_confidence`.
 
 ## F10. Un reclamo a medio confirmar sobrevive a un cambio de control
 
@@ -250,7 +259,15 @@ cambia el estado (por ejemplo, HUMAN + `abuse_detected`) no lo emite.
 **Tests.** `test_effects.py::test_every_rule_carries_exactly_the_effects_of_record` (las 17 filas),
 `test_a_change_of_who_controls_the_chat_invalidates_the_pending_action`.
 
-**Estado.** ✅ efecto emitido por `control`. ⏳ el agente debe borrar su acción pendiente cuando recibe el efecto.
+**Estado.** ✅ efecto emitido por `control`, y ✅ el turno borra la acción pendiente cuando lo recibe (al
+sincronizar el horario y en las transiciones que disparan las señales). Además la compuerta ya no depende de
+que alguien aplique el efecto: cada acción pendiente guarda la versión de control (`len(control_log)`) con la
+que se propuso, y `decide` la descarta si la versión cambió, diga lo que diga el usuario. Una transición
+rechazada también cuenta: cualquier intento de cambiar de manos invalida, que es la lectura conservadora.
+Tests: `tests/unit/agent/test_agent_pending.py::test_a_change_of_control_since_the_proposal_invalidates_whatever_the_user_says`,
+`test_agent_pending_properties.py::test_a_reply_under_another_control_version_never_confirms`,
+`tests/integration/agent/test_agent_policies.py::test_10_a_change_of_control_since_the_proposal_voids_a_later_yes`,
+`tests/unit/agent/test_agent_conversation.py::test_closing_time_hands_a_human_conversation_back_and_drops_the_pending_action`.
 
 ## F11. Orden de la regla 6 en SUGGEST
 
@@ -270,8 +287,10 @@ La pregunta de confirmación es en sí un borrador: no llega al cliente hasta qu
 **Tests.** `test_capabilities.py::test_a_complaint_needs_the_operator_only_while_the_operator_reviews`,
 `test_a_suggested_reply_is_never_sent_without_approval`.
 
-**Estado.** ✅ indicador de capacidad en `control`. ⏳ el agente debe hacer cumplir el orden y volver a pedir
-confirmación cuando cambia el fingerprint.
+**Estado.** ✅ indicador de capacidad en `control`. ✅ el turno nunca ejecuta un reclamo en SUGGEST: un "sí"
+del cliente no registra nada, se responde (como borrador) que no está disponible y no queda nada pendiente
+(`tests/unit/agent/test_agent_conversation.py::test_in_suggest_a_confirmed_complaint_waits_for_the_operator_and_nothing_stays_pending`).
+⏳ la aprobación del operador, y con ella la ejecución en SUGGEST, son del bloque siguiente.
 
 ## F12. Los borradores no deben filtrarse al salir de SUGGEST
 
@@ -292,7 +311,9 @@ emite.
 `test_every_rule_carries_exactly_the_effects_of_record[SUGGEST+...]` (las cinco filas de SUGGEST),
 `test_conversation.py::test_leaving_suggest_at_closing_time_discards_the_drafts`.
 
-**Estado.** ✅ efecto emitido por `control`. ⏳ la bandeja de salida debe descartar los borradores al recibirlo.
+**Estado.** ✅ efecto emitido por `control`. En SUGGEST el turno ya entrega la respuesta como borrador
+(`Outbound(kind="draft")`) y no la agrega al historial. ⏳ todavía no hay una bandeja de borradores que
+descartar: el turno registra el efecto en `TurnResult.events` y la bandeja llega con el bloque del operador.
 
 ## F13. "Ejecuta acciones" en HUMAN es ambiguo
 
@@ -350,8 +371,12 @@ BLOCKED `delivery` es `NONE` y `generate_reply` es falso.
 
 **Tests.** `test_capabilities.py::test_what_the_agent_may_do_in_each_state_and_hour[BLOCKED-open]` y `[BLOCKED-closed]`.
 
-**Estado.** ✅ capacidad implementada en `control`. ⏳ la aplicación debe registrar los mensajes entrantes
-mientras la conversación está bloqueada.
+**Estado.** ✅ capacidad implementada en `control`. ✅ el turno guarda el mensaje entrante y no llama al modelo
+ni envía nada en HUMAN ni en BLOCKED
+(`tests/integration/agent/test_agent_policies.py::test_17_a_state_that_generates_no_reply_never_calls_the_model`).
+Decisión adicional de este diseño: en el turno en que una señal determinista lleva la conversación a HUMAN o a
+BLOCKED, el sistema manda una única plantilla de aviso (traspaso o suspensión); después, silencio
+([ADR-0003](design/adr/0003-turno-del-agente.md)).
 
 ## F16. Carrera entre un takeover y una llamada al LLM en curso
 
@@ -365,12 +390,16 @@ cambio de control, y se enviaría desde un estado que ya no la permite.
 respuesta se descarta. `ConversationControl.state` siempre refleja el último registro, así que esa lectura es
 barata y consistente.
 
-**Dónde.** No está en `control`: pertenece al caso de uso del turno en la capa de aplicación del agente.
+**Dónde.** No está en `control`: pertenece al caso de uso del turno, `agent/application/conversation.py`
+(`_deliver`). Justo antes de entregar se relee la versión guardada; si cambió desde el comienzo del turno, la
+respuesta se descarta (`dropped: control_changed`) y solo se agrega el mensaje del usuario al estado que está
+guardado ahora. El guardado usa concurrencia optimista (`ConversationStore.save(expected_version=...)`), así
+que una escritura entre la relectura y el guardado también termina en descarte.
 
-**Tests.** Pendientes hasta que exista el turno del agente; se cubrirán con un modelo guionado que cambie el
-estado durante la generación.
+**Tests.** `tests/integration/agent/test_agent_policies.py::test_16_an_answer_generated_while_control_changed_hands_is_dropped`
+(un paso del modelo guionado hace el takeover mientras "responde"), `tests/unit/agent/test_agent_memory_store.py`.
 
-**Estado.** ⏳ pendiente en la integración con el agente.
+**Estado.** ✅ implementado en el turno del agente.
 
 ---
 
@@ -381,21 +410,24 @@ determinista. La parte de dominio vive en `src/merchant_assistant/agent/domain/`
 `tests/unit/agent/`. En esta sección los estados significan:
 
 - ✅ implementado y probado (en el dominio del agente o en la capacidad que se indica).
-- ⏳ falta conectarlo en el turno del agente (la capa de aplicación, todavía pendiente), que debe usar las
-  piezas del dominio en el orden descrito.
+- ⏳ falta conectarlo en el agente.
+
+Desde [ADR-0003](design/adr/0003-turno-del-agente.md) el turno conecta todas las piezas en el orden descrito,
+y cada resolución tiene un escenario con un modelo guionado atacante en
+`tests/integration/agent/test_agent_policies.py`.
 
 | # | Ambigüedad | Resolución | Estado |
 |---|---|---|---|
-| P1 | Qué es "un mismo reclamo" | Misma conversación y mismo texto, sin importar mayúsculas ni espacios | ✅ capacidad / ⏳ turno |
-| P2 | Qué es una "confirmación explícita" | Vocabulario afirmativo estricto; ante la duda, se vuelve a preguntar | ✅ dominio / ⏳ turno |
-| P3 | "Si el usuario cambia el motivo o la descripción" | Antes de ejecutar: se reemplaza y se vuelve a confirmar. Después: es otro reclamo | ✅ dominio / ⏳ turno |
-| P4 | "Sí" repetido sin nada pendiente | Respuesta determinista desde una plantilla, nunca del LLM | ✅ dominio / ⏳ turno |
-| P5 | Falla después de confirmar | La acción pendiente sobrevive; un "sí" posterior reintenta con la misma clave | ✅ dominio / ⏳ turno |
-| P6 | Qué significa "herramienta disponible" | Depende del estado de la conversación, no solo del registro de herramientas | ✅ guarda / ⏳ turno |
+| P1 | Qué es "un mismo reclamo" | Misma conversación y mismo texto, sin importar mayúsculas ni espacios | ✅ |
+| P2 | Qué es una "confirmación explícita" | Vocabulario afirmativo estricto; ante la duda, se vuelve a preguntar | ✅ |
+| P3 | "Si el usuario cambia el motivo o la descripción" | Antes de ejecutar: se reemplaza y se vuelve a confirmar. Después: es otro reclamo | ✅ |
+| P4 | "Sí" repetido sin nada pendiente | Respuesta determinista desde una plantilla, nunca del LLM | ✅ |
+| P5 | Falla después de confirmar | La acción pendiente sobrevive; un "sí" posterior reintenta con la misma clave | ✅ |
+| P6 | Qué significa "herramienta disponible" | Depende del estado de la conversación, no solo del registro de herramientas | ✅ |
 | P7 | El dataset tiene una venta en el futuro | El contrato de fecha rechaza fechas futuras: el dato nunca llega como hecho | ✅ |
-| P8 | Fechas relativas o ambiguas | El contrato las rechaza; el agente tiene que preguntar | ✅ contrato / ⏳ turno |
+| P8 | Fechas relativas o ambiguas | El contrato exige ISO y el turno solo consulta fechas que el usuario escribió o aceptó | ✅ |
 | P9 | DOC-11 define categorías que `crear_reclamo` no tiene | Se mantiene el contrato de la consigna: solo `motivo` y `descripcion` | ✅ |
-| P10 | Frases imperativas dentro del corpus | Son datos: ninguna puede ejecutar un efecto sin la confirmación del usuario | ✅ dominio / ⏳ turno |
+| P10 | Frases imperativas dentro del corpus | Son datos: ninguna puede ejecutar un efecto sin la confirmación del usuario | ✅ |
 
 ## P1. "Un mismo reclamo"
 
@@ -419,8 +451,9 @@ usuario confirma el texto que vio, ver P3), y la deduplicación no lo es (un rei
 `tests/integration/complaints/test_sqlite_repository.py::test_a_duplicate_key_returns_the_original_and_the_table_keeps_one_row`,
 `test_the_same_text_in_another_conversation_is_another_complaint`, `test_threads_racing_the_same_complaint_leave_exactly_one_row`.
 
-**Estado.** ✅ clave e idempotencia implementadas en la capacidad `complaints`. ⏳ el turno debe registrar
-cada reclamo con el identificador de su conversación.
+**Estado.** ✅ clave e idempotencia implementadas en la capacidad `complaints`, y ✅ el turno registra cada
+reclamo con el identificador de su conversación, a través del único punto de entrada
+`ToolExecutor.execute_confirmed` (`tests/integration/agent/test_agent_policies.py::test_3_repeating_yes_never_registers_again_and_carries_the_existing_id`).
 
 ## P2. "Confirmación explícita"
 
@@ -442,7 +475,10 @@ preguntar. Esa es la falla segura; la insegura sería registrar algo que el usua
 formas de ancho completo, mezclas, saltos de línea y emojis),
 `test_agent_pending_properties.py::test_a_confirmation_needs_a_pending_action_a_strict_yes_and_the_same_fingerprint`.
 
-**Estado.** ✅ en el dominio. ⏳ el turno debe pasarle a `decide` el texto del usuario, y solo ese texto.
+**Estado.** ✅ en el dominio y en el turno: la compuerta corre antes que el modelo y recibe solo el texto del
+usuario (`tests/integration/agent/test_agent_policies.py::test_2_a_later_yes_registers_exactly_once_without_calling_the_model`,
+`test_4_a_yes_with_a_change_drops_the_proposal_and_only_the_new_one_registers`). Además, decidir en el mismo
+turno que propuso lanza `StaleConfirmation` (`test_9_a_loop_that_proposes_and_confirms_in_the_same_turn_fails_loudly`).
 
 ## P3. "Si el usuario cambia el motivo o la descripción"
 
@@ -465,8 +501,10 @@ solo registrar otro, con su propia confirmación.
 `test_c_a_changed_proposal_supersedes_and_only_the_new_one_is_confirmed`,
 `test_a_confirmed_cannot_be_built_outside_the_gate`.
 
-**Estado.** ✅ en el dominio. ⏳ el turno debe convertir cada llamada a `crear_reclamo` en `propose` y ejecutar
-el efecto solo con un `Confirmed`.
+**Estado.** ✅ en el dominio y en el turno: una llamada a `crear_reclamo` solo crea la acción pendiente y la
+pregunta de plantilla; una segunda llamada en la misma respuesta se ignora; el efecto solo se ejecuta con un
+`Confirmed` (`tests/integration/agent/test_agent_policies.py::test_1_a_model_call_to_crear_reclamo_only_asks_for_confirmation`,
+`test_8_two_proposals_in_one_reply_keep_only_the_first`, `tests/unit/agent/test_agent_architecture.py`).
 
 ## P4. "Sí" repetido sin nada pendiente
 
@@ -485,7 +523,10 @@ reclamo tiene tal número y no se registró otro.
 `test_e_repeated_yes_after_registering_carries_the_reference`,
 `test_agent_templates.py::test_nothing_pending_mentions_the_last_registration_only_when_there_is_one`.
 
-**Estado.** ✅ en el dominio. ⏳ el turno debe responder con la plantilla sin llamar al LLM.
+**Estado.** ✅ en el dominio y en el turno, sin llamar al LLM
+(`tests/integration/agent/test_agent_policies.py::test_3_repeating_yes_never_registers_again_and_carries_the_existing_id`,
+`test_5_a_yes_after_changing_topic_finds_nothing_pending`). Excepción deliberada: si el mensaje anterior del
+asistente propuso una fecha, el "sí" responde a esa pregunta y sigue hacia el modelo (ver P8).
 
 ## P5. Falla después de confirmar
 
@@ -509,8 +550,12 @@ había ocurrido, la base devuelve el reclamo existente y la respuesta dice que y
 `test_agent_templates.py::test_a_failed_execution_is_honest_and_promises_no_duplicate_on_retry`,
 `tests/integration/complaints/test_sqlite_repository.py::test_a_lost_acknowledgement_writes_the_row_and_the_retry_finds_it`.
 
-**Estado.** ✅ en el dominio y en la capacidad. ⏳ el turno debe no llamar a `mark_registered` cuando la
-ejecución falla y usar la plantilla de falla.
+**Estado.** ✅ en el dominio, en la capacidad y en el turno. El ejecutor reintenta las fallas reintentables
+con la misma clave; si todas fallan, la acción sigue pendiente y la respuesta es la plantilla de falla
+(`tests/integration/agent/test_agent_policies.py::test_11_a_lost_acknowledgement_is_retried_with_the_same_key_and_registers_once`,
+`test_11_a_timeout_forever_keeps_the_action_and_a_later_yes_registers_once`). Si un intento anterior de la
+misma ejecución falló y el siguiente encuentra el reclamo, se informa como registrado ahora: lo más probable
+es que lo haya escrito ese intento.
 
 ## P6. Qué significa "herramienta disponible"
 
@@ -531,8 +576,11 @@ mirar los argumentos.
 `test_a_tool_the_current_state_does_not_offer_is_not_available`,
 `test_availability_is_checked_before_the_arguments_are_looked_at`.
 
-**Estado.** ✅ guarda en el dominio. ⏳ el turno debe construir el conjunto ofrecido a partir de las capacidades
-del estado y pasarlo tanto al LLM como a la guarda.
+**Estado.** ✅ guarda en el dominio y en el turno: `offered_tools` construye un solo conjunto a partir de las
+capacidades y ese mismo conjunto se le ofrece al modelo y se le pasa a la guarda
+(`tests/integration/agent/test_agent_policies.py::test_7_a_tool_that_is_not_an_exact_offered_name_is_rejected`,
+`test_7_an_effect_call_is_rejected_where_only_read_tools_are_offered`,
+`test_17_a_state_that_generates_no_reply_never_calls_the_model`).
 
 ## P7. El dataset tiene una venta en el futuro
 
@@ -571,8 +619,17 @@ usuario las fechas relativas o ambiguas antes de llamarla.
 `relative date`, `ambiguous date`, `unpadded date`, `datetime`), `test_agent_tools.py::test_the_sales_tool_asks_for_an_iso_date_and_to_clarify_relative_ones`,
 `tests/unit/sales/test_contract.py::test_anything_but_a_real_yyyy_mm_dd_date_is_refused`.
 
-**Estado.** ✅ contrato. ⏳ que el agente efectivamente pregunte es comportamiento del turno y se mide en las
-conversaciones de la Parte 4.
+**Estado.** ✅ contrato y ✅ guardia en el turno. El contrato solo mira la forma, así que un modelo podía
+convertir "ayer" en una fecha ISO por su cuenta. Ahora `consultar_ventas` solo corre si la fecha está escrita
+sin ambigüedad en un mensaje del usuario, o si el asistente la propuso en el mensaje inmediatamente anterior y
+el usuario la aceptó con un "sí" estricto (`agent/domain/dates.py`, `is_grounded`). Si no, la herramienta no
+corre y el modelo recibe `date_not_confirmed`. El costo: si el modelo entendió bien "ayer", igual tiene que
+preguntar una vez. Tests: `tests/unit/agent/test_agent_dates.py` (tabla con `03/04`, `3/4/2026`,
+`13/04/2026`, `31/02/2026`, `ayer`, `el viernes pasado` y formas largas),
+`tests/integration/agent/test_agent_policies.py::test_12_a_model_that_resolves_ayer_by_itself_is_stopped_before_the_tool`,
+`test_12_a_date_the_assistant_proposed_and_the_user_accepted_passes`,
+`test_12_an_ambiguous_day_and_month_is_stopped_whichever_way_it_is_read`. Que el modelo real pregunte bien se
+mide en las conversaciones de la Parte 4.
 
 ## P9. DOC-11 define categorías que `crear_reclamo` no tiene
 
@@ -613,9 +670,12 @@ que no la llame porque un documento lo pida, pero la garantía no depende de eso
 `test_agent_pending_properties.py::test_a_confirmation_needs_a_pending_action_a_strict_yes_and_the_same_fingerprint`,
 `test_agent_templates.py::test_hostile_text_is_embedded_as_data_without_changing_the_wording_around_it`.
 
-**Estado.** ✅ en el dominio: ningún texto que no sea del usuario puede confirmar. ⏳ el turno debe entregar los
-fragmentos y las respuestas de herramientas al modelo como datos estructurados y pasarle a `decide` solo el
-mensaje del usuario.
+**Estado.** ✅ en el dominio y en el turno. Cada resultado de herramienta viaja como un único objeto JSON
+marcado `untrusted_data`, con el texto de los documentos solo dentro de valores de tipo string, y `decide` solo
+lee el mensaje del usuario. Con un modelo guionado que obedece a un fragmento envenenado, lo máximo que se
+logra es una propuesta que el usuario ve y rechaza
+(`tests/integration/agent/test_agent_policies.py::test_13_a_poisoned_passage_can_at_most_cause_a_proposal_the_user_refuses`). Un detector de marcadores
+de inyección (`agent/domain/signals.py`) solo cuenta y nunca bloquea.
 
 ---
 

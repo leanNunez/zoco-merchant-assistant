@@ -93,5 +93,9 @@ def answer_withheld() -> str:
     return "No pude preparar una respuesta adecuada. ¿Podés reformular tu consulta?"
 
 
+def handover_notice() -> str:
+    return "Te paso con una persona del equipo. Te va a responder por este mismo chat."
+
+
 def blocked_notice() -> str:
     return "Esta conversación está suspendida hasta que la revise un supervisor."
