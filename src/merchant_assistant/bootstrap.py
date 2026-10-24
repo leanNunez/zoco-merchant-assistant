@@ -17,6 +17,8 @@ from typing import Literal
 
 import openai
 
+from merchant_assistant.agent.adapters.errors import LLMNotConfigured
+from merchant_assistant.agent.adapters.openai_chat_model import PROFILES, OpenAIChatModel
 from merchant_assistant.agent.application.conversation import ConversationService
 from merchant_assistant.agent.application.executor import Sleeper, ToolExecutor
 from merchant_assistant.agent.application.operator import OperatorService
@@ -101,6 +103,33 @@ def build_embedder(settings: Settings) -> CachedEmbedder:
         )
         inner = OpenAIEmbedder(client, settings.embeddings_model)
     return CachedEmbedder(inner, SqliteEmbeddingCache(settings.embeddings_cache_path))
+
+
+SDK_RETRIES = 2  # the only retry layer: the agent adds none of its own (ADR-0005)
+
+
+def build_chat_model(settings: Settings) -> OpenAIChatModel:
+    """The chat model of the settings, against OpenAI or any OpenAI-compatible endpoint.
+
+    Without a key it refuses to build, naming the variables to set and no value.
+    """
+    key = settings.effective_llm_api_key()
+    if key is None:
+        raise LLMNotConfigured("no key for the chat model")
+    client = openai.OpenAI(
+        api_key=key.get_secret_value(),
+        base_url=settings.llm_base_url,
+        timeout=settings.llm_timeout_seconds,
+        max_retries=SDK_RETRIES,
+    )
+    return OpenAIChatModel(
+        client,
+        settings.llm_model,
+        profile=PROFILES[settings.llm_provider],
+        temperature=settings.llm_temperature,
+        max_output_tokens=settings.llm_max_output_tokens,
+        strict_tools=settings.llm_strict_tools,
+    )
 
 
 # ---------------------------------------------------------------------- capability adapters
