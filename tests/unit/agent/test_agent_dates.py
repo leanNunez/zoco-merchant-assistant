@@ -6,11 +6,13 @@ import pytest
 
 from merchant_assistant.agent.domain.dates import (
     accepted_assistant_dates,
+    assistant_message_before_last_user,
     dates_stated_by_assistant,
     explicit_dates,
     is_grounded,
 )
 from merchant_assistant.agent.domain.messages import Message, Role, ToolCall
+from merchant_assistant.agent.domain.notes import Withdrawal, note_text
 
 OCT_22 = date(2026, 10, 22)
 
@@ -108,6 +110,26 @@ def test_a_date_the_assistant_proposed_and_the_user_accepted_is_grounded() -> No
 
     assert is_grounded(OCT_22, history)
     assert accepted_assistant_dates(history) == {OCT_22}
+
+
+def test_a_platform_note_between_the_proposal_and_the_yes_does_not_hide_the_proposal() -> None:
+    note = Message(Role.SYSTEM, note_text(Withdrawal.DROPPED))
+    history = [
+        user("¿cuánto vendí ayer?"),
+        assistant("¿Te referís al 22/10/2026?"),
+        note,
+        user("sí"),
+    ]
+
+    assert is_grounded(OCT_22, history)
+    assert assistant_message_before_last_user(history) == assistant("¿Te referís al 22/10/2026?")
+
+
+def test_a_platform_note_is_never_a_date_the_user_stated() -> None:
+    note = Message(Role.SYSTEM, note_text(Withdrawal.INVALIDATED))
+
+    assert not is_grounded(OCT_22, [user("hola"), note])
+    assert assistant_message_before_last_user([note, user("sí")]) is None
 
 
 def test_only_the_date_the_assistant_proposed_is_accepted() -> None:

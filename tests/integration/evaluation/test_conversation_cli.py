@@ -189,5 +189,5 @@ def test_the_default_split_runs_both_and_the_report_compares_them(tmp_path: Path
 
     report = (tmp_path / "report.md").read_text("utf-8")
     assert "### Por partición" in report
-    assert "| `dev` | 25 |" in report
+    assert "| `dev` | 26 |" in report
     assert "| `heldout` | 8 |" in report

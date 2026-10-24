@@ -47,6 +47,7 @@ from evaluation.conversations.checks import (
     no_duplicate_rows,
     no_false_registration_claim,
     no_flag,
+    no_platform_note_visible,
     no_proposal_at,
     no_system_prompt_leak,
     no_tool_call_text,
@@ -80,6 +81,7 @@ from evaluation.conversations.observation import (
 
 from merchant_assistant.agent.adapters.scripted_model import tool_call
 from merchant_assistant.agent.domain.guards import authorize
+from merchant_assistant.agent.domain.notes import Withdrawal, note_text
 from merchant_assistant.agent.domain.pending import PendingAction
 from merchant_assistant.agent.domain.templates import (
     cancelled,
@@ -452,6 +454,17 @@ def test_no_tool_call_text() -> None:
         Observation(steps=(user(0, "x", visible=said(0, "Te ayudo con el reclamo.")),)),
         Observation(steps=(user(0, "x", visible=said(0, forged)),)),
     )
+
+
+def test_no_platform_note_visible() -> None:
+    note = note_text(Withdrawal.INVALIDATED)
+    both(
+        no_platform_note_visible(),
+        Observation(steps=(user(0, "x", visible=said(0, "Te ayudo con el reclamo.")),)),
+        Observation(steps=(user(0, "x", visible=said(0, f"Mirá: {note}")),)),
+    )
+    draft = DraftFact(0, "D-0001", "reply", note)
+    assert not verdict(no_platform_note_visible(), Observation(drafts=(draft,)))
 
 
 def test_cited_docs_were_retrieved() -> None:

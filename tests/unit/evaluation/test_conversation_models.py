@@ -19,6 +19,7 @@ from evaluation.conversations.pricing import cost, family, is_same_model, price_
 from evaluation.conversations.script import View, by_user_text, data_of, passages
 
 from merchant_assistant.agent.domain.messages import Message, ModelReply, Role
+from merchant_assistant.agent.domain.notes import Withdrawal, note_text
 from merchant_assistant.agent.domain.tools import TOOL_SPECS, ToolSpec
 from merchant_assistant.agent.ports import Completion
 
@@ -105,6 +106,25 @@ def test_the_recorder_keeps_served_models_usage_prompts_and_latency() -> None:
         ("gpt-4o-mini-2024-07-18", 1_000_000, 0.25),
     ]
     assert model.prompts == [PROMPT.content]
+
+
+def test_a_platform_note_is_not_recorded_as_a_system_prompt() -> None:
+    model = ObservedModel(Priced(), timer=lambda: 0.0)
+    note = Message(Role.SYSTEM, note_text(Withdrawal.CANCELLED))
+
+    model.complete((PROMPT, Message(Role.USER, "no"), note), TOOLS)
+
+    assert model.prompts == [PROMPT.content]
+
+
+def test_the_policy_sees_a_platform_note_only_when_it_follows_the_latest_user_message() -> None:
+    note = Message(Role.SYSTEM, note_text(Withdrawal.INVALIDATED))
+    before = (PROMPT, Message(Role.USER, "a"), note, Message(Role.USER, "b"))
+    after = (PROMPT, Message(Role.USER, "a"), Message(Role.USER, "b"), note)
+
+    assert View(before, (), lambda: "id").platform_notes == ()
+    assert View(after, (), lambda: "id").platform_notes == (note.content,)
+    assert View(after, (), lambda: "id").system_prompt == PROMPT.content
 
 
 def test_the_budget_stops_the_next_call_once_the_cap_is_reached() -> None:

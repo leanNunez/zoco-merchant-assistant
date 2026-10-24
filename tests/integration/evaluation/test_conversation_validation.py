@@ -102,7 +102,7 @@ def test_the_catalog_has_a_dev_split_and_a_held_out_one_that_copies_nothing() ->
     dev, held = in_split(SCENARIOS, "dev"), in_split(SCENARIOS, "heldout")
 
     assert [s.id for s in held] == [f"H0{n}" for n in range(1, 9)]
-    assert len(dev) == 25
+    assert len(dev) == 26
     assert len(dev) + len(held) == len(SCENARIOS) == len(in_split(SCENARIOS, "all"))
     assert not {s.id for s in dev} & {s.id for s in held}
     said = {step.text for s in dev for step in s.steps if isinstance(step, Say)}

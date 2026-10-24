@@ -26,6 +26,7 @@ from evaluation.conversations.observation import ModelCall
 from evaluation.conversations.pricing import cost
 from evaluation.conversations.script import Policy, View
 from merchant_assistant.agent.domain.messages import Message, ModelReply, Role
+from merchant_assistant.agent.domain.notes import is_platform_note
 from merchant_assistant.agent.domain.tools import ToolSpec
 from merchant_assistant.agent.ports import ChatModel, Completion
 
@@ -127,7 +128,11 @@ class ObservedModel:
         if self._limits is not None:
             self._limits.before_call()
         for message in messages:
-            if message.role is Role.SYSTEM and message.content not in self.prompts:
+            if (
+                message.role is Role.SYSTEM
+                and not is_platform_note(message)
+                and message.content not in self.prompts
+            ):
                 self.prompts.append(message.content or "")
         start = None if self._timer is None else self._timer()
         completion = self._inner.complete(messages, tools)

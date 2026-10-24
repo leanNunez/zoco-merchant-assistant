@@ -26,6 +26,7 @@ from merchant_assistant.agent.adapters.openai_chat_model import (
     ProviderProfile,
 )
 from merchant_assistant.agent.domain.messages import Author, Message, Role, ToolCall
+from merchant_assistant.agent.domain.notes import Withdrawal, note_text
 from merchant_assistant.agent.domain.tools import TOOL_SPECS, ToolSpec
 from merchant_assistant.shared.errors import DomainError
 
@@ -274,6 +275,32 @@ def test_every_role_maps_to_its_wire_shape() -> None:
         {"role": "tool", "tool_call_id": "call-1", "content": '{"status": "ok"}'},
         {"role": "assistant", "content": "Vendiste 7 entradas."},
     ]
+
+
+@pytest.mark.parametrize("profile", ["openai", "groq", "generic"])
+def test_a_platform_note_goes_out_as_a_system_message_in_its_place(profile: str) -> None:
+    call = ToolCall("call-1", "crear_reclamo", '{"motivo": "M", "descripcion": "D"}')
+    note = note_text(Withdrawal.INVALIDATED)
+    history = (
+        Message(Role.SYSTEM, "sys"),
+        Message(Role.USER, "quiero reclamar"),
+        Message(Role.ASSISTANT, None, (call,)),
+        Message(Role.TOOL, '{"status": "pending_confirmation"}', tool_call_id="call-1"),
+        Message(Role.ASSISTANT, "Voy a registrar esto. Respondé sí."),
+        Message(Role.USER, "perdón, el evento es otro"),
+        Message(Role.SYSTEM, note),
+    )
+
+    wire = wire_messages(history, profile)
+
+    assert [(item["role"], item.get("content")) for item in wire][-2:] == [
+        ("user", "perdón, el evento es otro"),
+        ("system", note),
+    ]
+    assert [item["role"] for item in wire] == [
+        "system", "user", "assistant", "tool", "assistant", "user", "system"
+    ]  # fmt: skip
+    assert all(set(item) == {"role", "content"} for item in (wire[0], wire[-1]))
 
 
 def test_an_assistant_message_with_text_and_calls_keeps_both() -> None:

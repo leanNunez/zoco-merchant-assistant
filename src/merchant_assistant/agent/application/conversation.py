@@ -12,7 +12,9 @@
    message is stored and nothing else happens.
 4. The confirmation gate, BEFORE the model: a strict yes to the pending complaint executes it
    through the executor's only effect entry point and the turn ends without calling the
-   model; a no cancels; a bare yes or no with nothing pending gets a template.
+   model; a no cancels; a bare yes or no with nothing pending gets a template. A proposal the
+   gate withdraws (a no, or anything that is not a plain yes) is written into the history as a
+   platform note (`domain/notes.py`), so the model knows nothing is pending any more.
 5. The model loop, at most `max_rounds` calls, offering only the tools the state allows.
    Every call crosses `authorize`; a sales date must be grounded in what the user said; the
    first accepted `crear_reclamo` only creates a pending action and ends the turn with the
@@ -71,6 +73,7 @@ from merchant_assistant.agent.domain.errors import (
 )
 from merchant_assistant.agent.domain.guards import ValidatedCall, authorize
 from merchant_assistant.agent.domain.messages import Message, Role, ToolCall
+from merchant_assistant.agent.domain.notes import NOTE_TEXTS, Withdrawal, add_note
 from merchant_assistant.agent.domain.output_checks import (
     canonical_doc_id,
     claims_registration,
@@ -388,9 +391,15 @@ class ConversationService:
                 return self._execute(state, decision, capabilities, turn)
             case Cancelled(action=dropped):
                 turn.gate = "cancelled"
+                state = add_note(state, Withdrawal.CANCELLED)
                 return self._forget_approvals(state, dropped, turn), _Reply(cancelled())
             case Invalidated(action=dropped):
                 turn.gate = "invalidated"
+                # Same hands unless the control version moved (a refused attempt still counts).
+                changed_hands = dropped.control_version != state.control_version
+                state = add_note(
+                    state, Withdrawal.DROPPED if changed_hands else Withdrawal.INVALIDATED
+                )
                 return self._forget_approvals(state, dropped, turn), None
             case NothingPending(last_registered=last):
                 if classify_reply(text) is ReplyKind.OTHER or _answers_a_date_question(state):
@@ -512,7 +521,7 @@ class ConversationService:
             )
             reply = completion.reply
             if not reply.tool_calls:
-                checked = self._checked(reply.text or "", state, turn, prompt.content or "")
+                checked = self._checked(reply.text or "", state, turn, _private_text(prompt))
                 return state, _Reply(checked, from_model=True)
             # The model's own text next to tool calls is never shown: only results speak.
             state = state.with_messages(Message(Role.ASSISTANT, None, reply.tool_calls))
@@ -813,6 +822,11 @@ def offered_tools(capabilities: Capabilities) -> dict[str, ToolSpec]:
     if capabilities.effect_tools:
         names.append(CREAR_RECLAMO)
     return {name: TOOL_SPECS[name] for name in names}
+
+
+def _private_text(prompt: Message) -> str:
+    """What the customer must never read: the instructions and the platform notes."""
+    return "\n".join([prompt.content or "", *sorted(NOTE_TEXTS)])
 
 
 def _tool_message(call: ToolCall, content: str) -> Message:

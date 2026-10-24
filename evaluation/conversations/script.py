@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import TypeAlias
 
 from merchant_assistant.agent.domain.messages import Message, ModelReply, Role, ToolCall
+from merchant_assistant.agent.domain.notes import is_platform_note
 
 CallSpec: TypeAlias = tuple[str, Mapping[str, object] | str]
 
@@ -39,6 +40,16 @@ class View:
     @property
     def user_texts(self) -> tuple[str, ...]:
         return tuple(m.content or "" for m in self.messages if m.role is Role.USER)
+
+    @property
+    def platform_notes(self) -> tuple[str, ...]:
+        """The platform notes the code wrote after the latest user message: the only way the
+        model learns that its pending proposal was withdrawn."""
+        start = 0
+        for index, message in enumerate(self.messages):
+            if message.role is Role.USER:
+                start = index
+        return tuple(m.content or "" for m in self.messages[start:] if is_platform_note(m))
 
     @property
     def last_user(self) -> str:

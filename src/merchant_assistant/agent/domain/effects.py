@@ -6,7 +6,9 @@ executes them, so the customer's turn and the operator's commands cannot drift a
 - `INVALIDATE_PENDING_ACTION`: the half-confirmed complaint is dropped (the gate would also
   refuse it, because the control version changed: this makes it visible in the state). What
   the customer had been shown is left in the operator inbox as `pending_action_dropped`, so the
-  person who takes over has the context. It is information, never an executable action.
+  person who takes over has the context. It is information, never an executable action. The
+  model is told too, with a platform note in the history (`notes.py`): it made that proposal
+  and would otherwise keep waiting for a "yes" that can no longer register anything.
 - `DISCARD_UNAPPROVED_DRAFTS`: every pending draft is discarded. It stays in the record,
   marked DISCARDED, and can never be approved or sent.
 - `NOTIFY_OPERATOR`: an entry in the operator inbox of the conversation.
@@ -22,6 +24,7 @@ from dataclasses import replace
 from datetime import datetime
 
 from merchant_assistant.agent.domain.drafts import discard_pending
+from merchant_assistant.agent.domain.notes import Withdrawal, add_note
 from merchant_assistant.agent.domain.pending import Invalidated, invalidate
 from merchant_assistant.agent.domain.state import ConversationState, OperatorNotice
 from merchant_assistant.control import Effect, Outcome
@@ -62,6 +65,7 @@ def apply_effects(
             detail = dropped_detail(action.tool, action.arguments.model_dump())
             notice = OperatorNotice(at=at, code="pending_action_dropped", detail=detail)
             state = replace(state, inbox=(*state.inbox, notice))
+            state = add_note(state, Withdrawal.DROPPED)
     if Effect.DISCARD_UNAPPROVED_DRAFTS in outcome.effects:
         drafts, discarded = discard_pending(state.drafts, at=at)
         state = replace(state, drafts=drafts)

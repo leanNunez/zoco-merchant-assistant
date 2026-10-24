@@ -52,7 +52,7 @@ def test_the_command_prints_before_and_after(
     path.write_text(json.dumps(saved), encoding="utf-8")
 
     assert main([str(path)]) == 0
-    assert "Corridas que cumplen: 33/33 con el evaluador de entonces, 33/33 con el actual." in (
+    assert "Corridas que cumplen: 34/34 con el evaluador de entonces, 34/34 con el actual." in (
         capsys.readouterr().out
     )
     assert main([]) == 2

@@ -8,6 +8,7 @@ log in the stored state, and what the model was shown.
 """
 
 import functools
+import itertools
 import json
 import random
 import tempfile
@@ -51,6 +52,12 @@ from merchant_assistant.agent.domain.errors import (
 )
 from merchant_assistant.agent.domain.guards import authorize
 from merchant_assistant.agent.domain.messages import Author, Message, ModelReply, Role
+from merchant_assistant.agent.domain.notes import (
+    NOTE_TEXTS,
+    Withdrawal,
+    is_platform_note,
+    note_text,
+)
 from merchant_assistant.agent.domain.pending import PendingAction
 from merchant_assistant.agent.domain.state import ConversationState
 from merchant_assistant.agent.domain.templates import (
@@ -1081,7 +1088,8 @@ def wild_model(data: st.DataObject) -> ScriptStep:
     registration, at random; it always proposes when the customer just asked to complain."""
 
     def step(messages: Sequence[Message], tools: Sequence[ToolSpec]) -> ModelReply:
-        if messages[-1] == Message(Role.USER, ASK) and CREAR_RECLAMO in {t.name for t in tools}:
+        spoken = [m for m in messages if not is_platform_note(m)]
+        if spoken[-1] == Message(Role.USER, ASK) and CREAR_RECLAMO in {t.name for t in tools}:
             return propose_reply(data.draw(st.sampled_from(COMPLAINTS)))
         kind = data.draw(st.sampled_from(MODEL_MOVES))
         if kind == "search":
@@ -1283,3 +1291,272 @@ def test_10_the_two_approvals_interleaved_with_anything_keep_every_rule(
                 perform(world, ledger, random_step(data, world))
             perform(world, ledger, planned)
         finish(world)
+
+
+# --------------------------------------------------------------------------- 11: platform notes
+# The gate and the control effects withdraw a pending complaint; the model is told through a
+# SYSTEM message the code writes into the history, and nobody else ever sees it.
+
+CLARIFICATION = "Perdón, el evento es EVT-3301, no el que dije antes."
+INVALIDATED = Message(Role.SYSTEM, note_text(Withdrawal.INVALIDATED))
+CANCELLED = Message(Role.SYSTEM, note_text(Withdrawal.CANCELLED))
+DROPPED = Message(Role.SYSTEM, note_text(Withdrawal.DROPPED))
+
+
+def notes_in(messages: Iterable[Message]) -> list[Message]:
+    return [message for message in messages if is_platform_note(message)]
+
+
+def test_11_a_clarification_withdraws_the_proposal_and_the_next_model_call_is_told(
+    tmp_path: Path,
+) -> None:
+    world = make_world(tmp_path, [propose_reply(A), propose_reply(A)])
+    asked = world.say(ASK)
+    assert asked.pending is not None
+
+    clarified = world.say(CLARIFICATION)
+
+    assert clarified.gate == "invalidated"
+    first, second = world.model.calls
+    assert notes_in(first.messages) == []
+    assert notes_in(second.messages) == [INVALIDATED]
+    assert second.messages[-2:] == (Message(Role.USER, CLARIFICATION), INVALIDATED)
+    assert world.stored().messages.count(INVALIDATED) == 1
+
+
+def test_11_the_model_that_proposes_again_after_the_note_gets_a_fresh_question(
+    tmp_path: Path,
+) -> None:
+    corrected = {**A, "descripcion": "Pagué la entrada del evento EVT-3301 y no me llegó."}
+    world = make_world(tmp_path, [propose_reply(A), propose_reply(corrected)])
+    world.say(ASK)
+
+    again = world.say(CLARIFICATION)
+    registered_now = world.say("sí")
+
+    assert "EVT-3301" in texts(again)[0]
+    assert registered_now.registered == ("REC-000001",)
+    assert world.rows == 1
+    assert world.model.call_count == 2
+
+
+def test_11_a_no_leaves_the_declined_note_after_the_users_no_and_before_the_templates_reply(
+    tmp_path: Path,
+) -> None:
+    world = make_world(tmp_path, [propose_reply(A), text_reply("Contame qué necesitás.")])
+    world.say(ASK)
+
+    declined = world.say("no")
+    world.say("¿cómo funciona la reserva?")
+
+    assert declined.gate == "cancelled"
+    assert declined.model_calls == 0
+    (_, call) = world.model.calls
+    assert call.messages[-4:] == (
+        Message(Role.USER, "no"),
+        CANCELLED,
+        Message(Role.ASSISTANT, texts(declined)[0]),
+        Message(Role.USER, "¿cómo funciona la reserva?"),
+    )
+    assert notes_in(call.messages) == [CANCELLED]
+
+
+def test_11_a_takeover_and_a_release_leave_the_drop_note_for_the_model(tmp_path: Path) -> None:
+    world = make_world(tmp_path, [propose_reply(A), text_reply("Hola de nuevo.")])
+    asked = world.say(ASK)
+    world.team.takeover(CID, Actor.OPERATOR)
+    world.team.release(CID, Actor.OPERATOR)
+
+    world.say("¿pudieron ver mi reclamo?")
+
+    (_, call) = world.model.calls
+    assert call.messages[-3:] == (
+        Message(Role.ASSISTANT, texts(asked)[0]),
+        DROPPED,
+        Message(Role.USER, "¿pudieron ver mi reclamo?"),
+    )
+    assert notes_in(call.messages) == [DROPPED]
+    assert world.rows == 0
+
+
+def test_11_asking_for_a_person_with_a_pending_complaint_leaves_the_drop_note(
+    tmp_path: Path,
+) -> None:
+    world = make_world(tmp_path, [propose_reply(A), text_reply("Dime.")])
+    world.say(ASK)
+
+    handed = world.say("quiero hablar con una persona")
+    world.team.release(CID, Actor.OPERATOR)
+    world.say("gracias")
+
+    assert handed.control_state is State.HUMAN
+    (_, call) = world.model.calls
+    assert notes_in(call.messages) == [DROPPED]
+    assert world.stored().messages.count(DROPPED) == 1
+
+
+def test_11_a_refused_attempt_to_change_hands_still_voids_the_yes_and_the_model_is_told(
+    tmp_path: Path,
+) -> None:
+    world = make_world(tmp_path, [propose_reply(A), text_reply("Decime cómo seguimos.")])
+    world.say(ASK)
+    with pytest.raises(ControlError):
+        world.team.release(CID, Actor.OPERATOR)  # AUTO has nothing to release: refused, logged
+
+    answered = world.say("sí")
+
+    assert answered.gate == "invalidated"
+    assert world.rows == 0
+    (_, call) = world.model.calls
+    assert notes_in(call.messages) == [DROPPED]
+
+
+def test_11_one_withdrawal_leaves_one_note_however_often_hands_change(tmp_path: Path) -> None:
+    world = make_world(tmp_path, [propose_reply(A)])
+    world.say(ASK)
+
+    for _ in range(3):
+        world.team.takeover(CID, Actor.OPERATOR)
+        world.team.release(CID, Actor.OPERATOR)
+
+    assert notes_in(world.stored().messages) == [DROPPED]
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        ["hola", "sí", "no", "¿cuánto dura la reserva?"],
+        [ASK, "otra cosa"],
+    ],
+    ids=["nothing was proposed", "proposed but answered by the model in text"],
+)
+def test_11_no_pending_action_means_no_note(tmp_path: Path, script: list[str]) -> None:
+    world = make_world(tmp_path, endless(text_reply("Contame más.")))
+    world.team.takeover(CID, Actor.OPERATOR)
+    world.team.release(CID, Actor.OPERATOR)
+
+    for text in script:
+        world.say(text)
+
+    assert notes_in(world.stored().messages) == []
+    for call in world.model.calls:
+        assert notes_in(call.messages) == []
+
+
+def test_11_the_note_never_reaches_the_customer_the_operator_or_the_inbox(tmp_path: Path) -> None:
+    world = make_world(tmp_path, [propose_reply(A), text_reply("Dale, lo anoto.")])
+    seen = [*texts(world.say(ASK)), *texts(world.say(CLARIFICATION))]
+    seen += [*texts(world.say("no"))]
+    world.team.takeover(CID, Actor.OPERATOR)
+    seen += [*texts(world.team.operator_reply(CID, Actor.OPERATOR, "Hola, soy Ana."))]
+    seen += [*texts(world.team.release(CID, Actor.OPERATOR))]
+    stored = world.stored()
+    seen += [draft.text for draft in stored.drafts]
+    seen += [f"{entry.code} {entry.detail}" for entry in stored.inbox]
+    seen += [view.text for view in world.team.drafts(CID)]
+
+    assert notes_in(stored.messages)  # the note is in the history...
+    assert not [text for text in seen if "Platform note" in text]  # ...and only there
+    assert not [text for text in seen if any(note in text for note in NOTE_TEXTS)]
+
+
+def test_11_in_suggest_the_drafts_never_carry_the_note(tmp_path: Path) -> None:
+    world = make_world(tmp_path, [propose_reply(A), text_reply("Estamos revisándolo.")])
+    enter_suggest(world)
+    ask_in_suggest(world)
+    world.say("sí")
+
+    changed = world.say("mejor esperá, lo pienso")
+
+    assert changed.gate == "invalidated"
+    stored = world.stored()
+    assert notes_in(stored.messages) == [INVALIDATED]
+    assert changed.drafts
+    assert all("Platform note" not in draft.text for draft in stored.drafts)
+    assert all("Platform note" not in o.text for o in changed.outbound)
+
+
+@pytest.mark.parametrize("note", sorted(NOTE_TEXTS))
+def test_11_a_model_that_repeats_a_note_to_the_customer_is_withheld(
+    tmp_path: Path, note: str
+) -> None:
+    world = make_world(tmp_path, [propose_reply(A), text_reply(f"Te cuento: {note}")])
+    world.say(ASK)
+
+    answered = world.say(CLARIFICATION)
+
+    assert texts(answered) == [answer_withheld()]
+    assert answered.violations == ("prompt_leak",)
+
+
+def test_11_a_note_is_not_a_user_message_for_any_signal(tmp_path: Path) -> None:
+    corrected = {**A, "descripcion": "Pagué la entrada del evento EVT-3301."}
+    world = make_world(tmp_path, [propose_reply(A), propose_reply(corrected), text_reply("Ok.")])
+    world.say(ASK)
+
+    clarified = world.say(CLARIFICATION)
+    follow_up = world.say("gracias")
+
+    assert (clarified.injection_markers, follow_up.injection_markers) == (0, 0)
+    assert world.stored().abuse_strikes == 0
+    assert [e for e in clarified.events if "request" in e or "abuse" in e] == []
+    # The model never sees the note as something the user said.
+    users = [m.content for m in world.model.calls[-1].messages if m.role is Role.USER]
+    assert not any("Platform note" in (text or "") for text in users)
+
+
+def test_11_a_sales_date_is_not_grounded_by_a_note_or_hidden_by_one(tmp_path: Path) -> None:
+    ask_sales = calls_reply(tool_call("consultar_ventas", {"fecha": "2026-10-22"}))
+    world = make_world(
+        tmp_path, [propose_reply(A), ask_sales, text_reply("No pude confirmar ese día.")]
+    )
+    world.say(ASK)
+
+    refused = world.say("¿cuánto vendí ayer?")
+
+    # The model's date was not stated by the user: refused as before, with the note in place.
+    assert [(r.name, r.outcome, r.error_code) for r in refused.tools] == [
+        ("consultar_ventas", "rejected", "date_not_confirmed")
+    ]
+    assert notes_in(world.stored().messages) == [INVALIDATED]
+
+
+@settings(max_examples=200)
+@given(data=st.data())
+def test_11_random_conversations_write_one_note_per_withdrawal_and_none_without_a_pending_action(
+    data: st.DataObject,
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        world = make_world(Path(directory), endless(wild_model(data)))
+        ledger = Ledger()
+        if data.draw(st.booleans()):
+            enter_suggest(world)
+        for _ in range(data.draw(st.integers(min_value=1, max_value=40))):
+            stored = world.store.load(CID)
+            pending_before = stored is not None and stored.pending.pending is not None
+            notes_before = 0 if stored is None else len(notes_in(stored.messages))
+            perform(world, ledger, random_step(data, world))
+            notes_added = (
+                len(notes_in(world.stored().messages)) - notes_before
+                if world.store.load(CID)
+                else 0
+            )
+            assert notes_added <= 1  # one withdrawal, one note
+            if notes_added:
+                event("a withdrawal told the model")
+            if not pending_before:
+                assert notes_added == 0  # nothing was pending, so nothing was withdrawn
+        finish(world)
+        history = world.stored().messages if world.store.load(CID) else ()
+        proposals = sum(
+            call.name == CREAR_RECLAMO for message in history for call in message.tool_calls
+        )
+        assert len(notes_in(history)) <= proposals
+        for message, following in itertools.pairwise(history):
+            assert not (is_platform_note(message) and message == following)
+        for call in world.model.calls:
+            assert [m.role for m in call.messages].count(Role.SYSTEM) == 1 + len(
+                notes_in(call.messages)
+            )
+            assert call.messages[0].role is Role.SYSTEM
+            assert not is_platform_note(call.messages[0])

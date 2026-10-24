@@ -30,6 +30,7 @@ from collections.abc import Sequence
 from datetime import date
 
 from merchant_assistant.agent.domain.messages import Message, Role
+from merchant_assistant.agent.domain.notes import is_platform_note
 from merchant_assistant.agent.domain.replies import ReplyKind, classify_reply
 
 MONTHS = {
@@ -118,11 +119,13 @@ def assistant_message_before_last_user(history: Sequence[Message]) -> Message | 
     """The assistant text the latest user message answers, if that is what precedes it."""
     for index in range(len(history) - 1, -1, -1):
         if history[index].role is Role.USER:
-            if index == 0:
+            # A platform note the code wrote between the two is not part of what was said.
+            for previous in reversed(history[:index]):
+                if is_platform_note(previous):
+                    continue
+                if previous.role is Role.ASSISTANT and previous.content:
+                    return previous
                 return None
-            previous = history[index - 1]
-            if previous.role is Role.ASSISTANT and previous.content:
-                return previous
             return None
     return None
 

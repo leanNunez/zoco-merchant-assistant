@@ -8,6 +8,7 @@ from merchant_assistant.agent.adapters.scripted_model import tool_call
 from merchant_assistant.agent.domain.drafts import Draft, DraftKind, DraftStatus
 from merchant_assistant.agent.domain.effects import apply_effects, dropped_detail
 from merchant_assistant.agent.domain.guards import authorize
+from merchant_assistant.agent.domain.messages import Message, Role
 from merchant_assistant.agent.domain.pending import PendingAction, PendingState, propose
 from merchant_assistant.agent.domain.state import ConversationState, OperatorNotice
 from merchant_assistant.agent.domain.tools import CREAR_RECLAMO, TOOL_SPECS
@@ -149,3 +150,52 @@ def test_invalidating_with_nothing_pending_reports_nothing() -> None:
 
     assert facts == ()
     assert state == ConversationState("conv-1")
+
+
+def test_dropping_a_pending_action_tells_the_model_once_in_the_history() -> None:
+    dropped = outcome(
+        State.AUTO, Event.OPERATOR_TAKEOVER, State.HUMAN, Effect.INVALIDATE_PENDING_ACTION
+    )
+
+    state, _ = apply_effects(busy_state(), dropped, at=AT)
+    again, facts = apply_effects(state, dropped, at=AT)
+
+    assert state.messages == (
+        Message(
+            Role.SYSTEM,
+            "Platform note: the complaint proposal that was waiting for confirmation was dropped "
+            "because the conversation changed hands. Nothing was registered. If the customer "
+            "still wants it, call crear_reclamo again.",
+        ),
+    )
+    assert again.messages == state.messages
+    assert facts == ()
+
+
+def test_the_model_is_told_nothing_when_no_action_was_pending() -> None:
+    empty = ConversationState("conv-1")
+
+    state, facts = apply_effects(
+        empty,
+        outcome(State.AUTO, Event.OPERATOR_TAKEOVER, State.HUMAN, Effect.INVALIDATE_PENDING_ACTION),
+        at=AT,
+    )
+
+    assert state.messages == ()
+    assert facts == ()
+
+
+def test_the_other_effects_never_write_a_note() -> None:
+    state, _ = apply_effects(
+        busy_state(),
+        outcome(
+            State.HUMAN,
+            Event.ABUSE_DETECTED,
+            State.HUMAN,
+            Effect.NOTIFY_OPERATOR,
+            Effect.DISCARD_UNAPPROVED_DRAFTS,
+        ),
+        at=AT,
+    )
+
+    assert state.messages == ()
