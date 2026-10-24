@@ -67,6 +67,9 @@ class ToolOutcome:
     attempts: int
     # The safe, fixed message of the error class, for the model. Never exception text.
     error_message: str | None = None
+    # Facts about HOW the tool answered that the turn records but the model does not see, for
+    # example "search_degraded:embeddings_unavailable".
+    flags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,7 +147,7 @@ class ToolExecutor:
         arguments = call.arguments
         if isinstance(arguments, BuscarDocumentacionArgs):
             query = arguments.consulta
-            return self._read(lambda: self._knowledge.search(query), _search_payload)
+            return self._read(lambda: self._knowledge.search(query), _search_payload, _search_flags)
         if isinstance(arguments, ConsultarVentasArgs):
             raw_date = arguments.fecha
             return self._read(lambda: self._sales.lookup(raw_date), _sales_payload)
@@ -178,6 +181,7 @@ class ToolExecutor:
         self,
         operation: Callable[[], _T],
         to_payload: Callable[[_T], tuple[ToolStatus, dict[str, object]]],
+        flags_of: Callable[[_T], tuple[str, ...]] = lambda _: (),
     ) -> ToolOutcome:
         try:
             result, attempts = self._with_retries(operation)
@@ -193,7 +197,9 @@ class ToolExecutor:
                 error_message=message,
             )
         status, payload = to_payload(result)
-        return ToolOutcome(status, payload, None, retryable=False, attempts=attempts)
+        return ToolOutcome(
+            status, payload, None, retryable=False, attempts=attempts, flags=flags_of(result)
+        )
 
     def _with_retries(self, operation: Callable[[], _T]) -> tuple[_T, int]:
         attempt = 0
@@ -237,6 +243,10 @@ def _search_payload(outcome: SearchOutcome) -> tuple[ToolStatus, dict[str, objec
         for passage in outcome.passages
     ]
     return outcome.status, {"passages": passages}
+
+
+def _search_flags(outcome: SearchOutcome) -> tuple[str, ...]:
+    return () if outcome.degraded is None else (f"search_degraded:{outcome.degraded}",)
 
 
 def _sales_payload(outcome: SalesOutcome) -> tuple[ToolStatus, dict[str, object]]:

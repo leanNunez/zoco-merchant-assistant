@@ -17,10 +17,13 @@ from merchant_assistant.agent.adapters.scripted_model import (
 )
 from merchant_assistant.bootstrap import (
     AGENT_CHUNKING,
+    AGENT_TOKENIZER,
     DOCS_DIR,
     ComplaintsAdapter,
+    Gate,
     SalesAdapter,
     SearchAdapter,
+    SearchPath,
     build_agent_service,
     build_business_hours,
     build_search,
@@ -36,7 +39,6 @@ from merchant_assistant.knowledge.documents import Document
 from merchant_assistant.knowledge.embedding import embedding_key
 from merchant_assistant.knowledge.errors import DocumentFormatError
 from merchant_assistant.knowledge.ranking import ScoredChunk
-from merchant_assistant.knowledge.text import Tokenizer
 from merchant_assistant.sales.adapters.json_repository import JsonSalesRepository
 from merchant_assistant.sales.errors import FutureSalesDate
 from merchant_assistant.sales.service import SalesService
@@ -247,26 +249,70 @@ class EverythingIsNear:
 def corpus() -> tuple[tuple[Document, ...], tuple[Chunk, ...], BM25Index]:
     documents = load_documents(DOCS_DIR)
     chunks = chunk_corpus(documents, AGENT_CHUNKING)
-    return documents, chunks, BM25Index(chunks, Tokenizer(stem=False))
+    return documents, chunks, BM25Index(chunks, AGENT_TOKENIZER)
 
 
-def test_the_lexical_floor_wins_over_a_retriever_that_always_finds_neighbours() -> None:
+def test_the_gate_wins_over_a_retriever_that_always_finds_neighbours() -> None:
     documents, chunks, lexical = corpus()
     near = EverythingIsNear(chunks[0])
 
-    floored = SearchAdapter(near, chunks, documents, lexical=lexical)
-    unfloored = SearchAdapter(near, chunks, documents, lexical=lexical, min_score=0.0)
+    gated = SearchAdapter(SearchPath(near, Gate(2.5)), chunks, documents, lexical=lexical)
+    ungated = SearchAdapter(SearchPath(near, Gate(0.0)), chunks, documents, lexical=lexical)
 
-    assert floored.search("¿Cuál es la capital de Francia?").status == "no_data"
-    assert floored.search("¿cuánto dura la reserva del carrito?").status == "ok"
-    assert unfloored.search("¿Cuál es la capital de Francia?").status == "ok"
+    assert gated.search("hola").status == "no_data"
+    assert gated.search("¿cuánto dura la reserva del carrito?").status == "ok"
+    assert ungated.search("hola").status == "ok"
 
 
-@pytest.mark.parametrize("floor", [-1.0, float("nan")])
-def test_a_negative_or_missing_floor_is_refused(floor: float) -> None:
-    documents, chunks, lexical = corpus()
+@pytest.mark.parametrize(
+    ("bm25", "cosine", "says"),
+    [
+        pytest.param(5.0, None, False, id="BM25 alone, at the threshold: not weak"),
+        pytest.param(4.99, None, True, id="BM25 alone, below it"),
+        pytest.param(4.99, 0.3, True, id="both weak"),
+        pytest.param(4.99, 0.6, False, id="a strong cosine rescues a weak BM25"),
+        pytest.param(9.0, 0.3, False, id="a strong BM25 rescues a weak cosine"),
+        pytest.param(5.0, 0.5, False, id="both at their thresholds: not weak"),
+    ],
+)
+def test_the_hybrid_gate_needs_both_signals_to_be_weak(
+    bm25: float, cosine: float | None, says: bool
+) -> None:
+    gate = Gate(5.0) if cosine is None else Gate(5.0, 0.5)
 
-    with pytest.raises(ValueError, match="min_score"):
-        SearchAdapter(
-            EverythingIsNear(chunks[0]), chunks, documents, lexical=lexical, min_score=floor
-        )
+    assert gate.says_no_data(bm25, cosine) is says
+
+
+def test_a_hybrid_gate_refuses_to_decide_without_the_cosine() -> None:
+    with pytest.raises(ValueError, match="cosine"):
+        Gate(5.0, 0.5).says_no_data(1.0, None)
+
+
+@pytest.mark.parametrize(
+    ("bm25", "cosine"),
+    [(-1.0, None), (float("nan"), None), (1.0, 1.5), (1.0, -1.5), (1.0, float("nan"))],
+)
+def test_a_negative_missing_or_out_of_range_threshold_is_refused(
+    bm25: float, cosine: float | None
+) -> None:
+    with pytest.raises(ValueError, match="threshold"):
+        Gate(bm25, cosine)
+
+
+def test_a_cosine_threshold_and_its_probe_come_together() -> None:
+    documents, chunks, _ = corpus()
+    near = EverythingIsNear(chunks[0])
+
+    with pytest.raises(ValueError, match="probe"):
+        SearchPath(near, Gate(1.0, 0.5))
+    with pytest.raises(ValueError, match="probe"):
+        SearchPath(near, Gate(1.0), probe=FixedProbe(0.9))
+    assert documents  # the corpus loaded: the refusals above are about the shape alone
+
+
+class FixedProbe:
+    def __init__(self, cosine: float) -> None:
+        self._cosine = cosine
+
+    def best_cosine(self, query: str) -> float:
+        return self._cosine

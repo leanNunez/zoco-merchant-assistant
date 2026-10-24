@@ -162,6 +162,26 @@ def test_a_search_returns_passages_with_their_validity() -> None:
     }
 
 
+def test_a_search_that_fell_back_to_its_lexical_path_is_flagged_and_the_model_is_not_told() -> None:
+    degraded = SearchOutcome("ok", SEARCH_OK.passages, degraded="embeddings_unavailable")
+
+    outcome = executor(search=Script([], degraded)).run_read(
+        read("buscar_documentacion", '{"consulta": "comisión"}')
+    )
+
+    assert outcome.flags == ("search_degraded:embeddings_unavailable",)
+    assert outcome.status == "ok"
+    assert "degraded" not in outcome_envelope("buscar_documentacion", outcome)
+    assert "embeddings_unavailable" not in outcome_envelope("buscar_documentacion", outcome)
+
+
+def test_a_normal_search_and_a_sales_lookup_carry_no_flags() -> None:
+    search = executor().run_read(read("buscar_documentacion", '{"consulta": "comisión"}'))
+    sales = executor().run_read(read("consultar_ventas", '{"fecha": "2026-10-22"}'))
+
+    assert (search.flags, sales.flags) == ((), ())
+
+
 def test_a_sales_day_comes_back_with_decimal_amounts_as_strings() -> None:
     outcome = executor().run_read(read("consultar_ventas", '{"fecha": "2026-10-22"}'))
 

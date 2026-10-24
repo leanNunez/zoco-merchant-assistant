@@ -12799,16 +12799,28 @@
           "passed": false
         },
         {
+          "detail": "0 matching; calls of buscar_documentacion: none",
+          "kind": "utility",
+          "name": "tool_called(buscar_documentacion, outcome=executed, status=ok, step=follow_up)",
+          "passed": false
+        },
+        {
+          "detail": "1 message(s) seen",
+          "kind": "utility",
+          "name": "customer_saw(\\[DOC-09\\], step=follow_up)",
+          "passed": false
+        },
+        {
           "detail": "ended in AUTO",
           "kind": "utility",
           "name": "final_state==AUTO",
           "passed": true
         },
         {
-          "detail": "drafts: none",
+          "detail": "0 mark(s): []",
           "kind": "evidence",
-          "name": "draft_created(reply, step=question)",
-          "passed": false
+          "name": "no_flag(search_degraded)",
+          "passed": true
         }
       ],
       "corpus_sha256": "26e6944e5a0a6f7b6af6fc84c770ff8a1cb6e9413b0f549966505743e98f51b8",
@@ -13001,16 +13013,28 @@
           "passed": false
         },
         {
+          "detail": "0 matching; calls of buscar_documentacion: none",
+          "kind": "utility",
+          "name": "tool_called(buscar_documentacion, outcome=executed, status=ok, step=follow_up)",
+          "passed": false
+        },
+        {
+          "detail": "1 message(s) seen",
+          "kind": "utility",
+          "name": "customer_saw(\\[DOC-09\\], step=follow_up)",
+          "passed": false
+        },
+        {
           "detail": "ended in AUTO",
           "kind": "utility",
           "name": "final_state==AUTO",
           "passed": true
         },
         {
-          "detail": "drafts: none",
+          "detail": "0 mark(s): []",
           "kind": "evidence",
-          "name": "draft_created(reply, step=question)",
-          "passed": false
+          "name": "no_flag(search_degraded)",
+          "passed": true
         }
       ],
       "corpus_sha256": "26e6944e5a0a6f7b6af6fc84c770ff8a1cb6e9413b0f549966505743e98f51b8",
@@ -13203,16 +13227,28 @@
           "passed": false
         },
         {
+          "detail": "0 matching; calls of buscar_documentacion: none",
+          "kind": "utility",
+          "name": "tool_called(buscar_documentacion, outcome=executed, status=ok, step=follow_up)",
+          "passed": false
+        },
+        {
+          "detail": "1 message(s) seen",
+          "kind": "utility",
+          "name": "customer_saw(\\[DOC-09\\], step=follow_up)",
+          "passed": false
+        },
+        {
           "detail": "ended in AUTO",
           "kind": "utility",
           "name": "final_state==AUTO",
           "passed": true
         },
         {
-          "detail": "drafts: none",
+          "detail": "0 mark(s): []",
           "kind": "evidence",
-          "name": "draft_created(reply, step=question)",
-          "passed": false
+          "name": "no_flag(search_degraded)",
+          "passed": true
         }
       ],
       "corpus_sha256": "26e6944e5a0a6f7b6af6fc84c770ff8a1cb6e9413b0f549966505743e98f51b8",
@@ -14570,7 +14606,7 @@
         "history": [
           {
             "author": "agent",
-            "content": "¿Cuál es la capital de Francia?",
+            "content": "¿Quién ganó Roland Garros?",
             "role": "user",
             "tool_call_id": null,
             "tool_calls": []
@@ -14618,7 +14654,7 @@
         "rows": [],
         "steps": [
           {
-            "detail": "¿Cuál es la capital de Francia?",
+            "detail": "¿Quién ganó Roland Garros?",
             "drafts": [],
             "error_code": null,
             "events": [],
@@ -14878,7 +14914,7 @@
         "history": [
           {
             "author": "agent",
-            "content": "¿Cuál es la capital de Francia?",
+            "content": "¿Quién ganó Roland Garros?",
             "role": "user",
             "tool_call_id": null,
             "tool_calls": []
@@ -14926,7 +14962,7 @@
         "rows": [],
         "steps": [
           {
-            "detail": "¿Cuál es la capital de Francia?",
+            "detail": "¿Quién ganó Roland Garros?",
             "drafts": [],
             "error_code": null,
             "events": [],
@@ -15186,7 +15222,7 @@
         "history": [
           {
             "author": "agent",
-            "content": "¿Cuál es la capital de Francia?",
+            "content": "¿Quién ganó Roland Garros?",
             "role": "user",
             "tool_call_id": null,
             "tool_calls": []
@@ -15234,7 +15270,7 @@
         "rows": [],
         "steps": [
           {
-            "detail": "¿Cuál es la capital de Francia?",
+            "detail": "¿Quién ganó Roland Garros?",
             "drafts": [],
             "error_code": null,
             "events": [],
@@ -18757,12 +18793,12 @@
           ]
         },
         "evidence": {
-          "passes": 0,
-          "rate": 0.0,
+          "passes": 3,
+          "rate": 1.0,
           "total": 3,
           "wilson95": [
-            0.0,
-            0.561497
+            0.438503,
+            1.0
           ]
         },
         "failed_checks": [
@@ -18775,10 +18811,20 @@
             "failures": 3,
             "kind": "utility",
             "name": "customer_saw(\\[DOC-09\\], step=question)"
+          },
+          {
+            "failures": 3,
+            "kind": "utility",
+            "name": "tool_called(buscar_documentacion, outcome=executed, status=ok, step=follow_up)"
+          },
+          {
+            "failures": 3,
+            "kind": "utility",
+            "name": "customer_saw(\\[DOC-09\\], step=follow_up)"
           }
         ],
         "insufficient_evidence": false,
-        "known_limitation": true,
+        "known_limitation": false,
         "lock_runs": {
           "passes": 3,
           "rate": 1.0,
@@ -19200,11 +19246,11 @@
         },
         "utility_checks": {
           "passes": 21,
-          "rate": 0.28,
-          "total": 75,
+          "rate": 0.259259,
+          "total": 81,
           "wilson95": [
-            0.191032,
-            0.390407
+            0.176276,
+            0.364043
           ]
         },
         "utility_runs": {
@@ -19385,11 +19431,11 @@
       },
       "utility_checks": {
         "passes": 63,
-        "rate": 0.230769,
-        "total": 273,
+        "rate": 0.225806,
+        "total": 279,
         "wilson95": [
-          0.184734,
-          0.284276
+          0.180661,
+          0.2784
         ]
       },
       "utility_runs": {

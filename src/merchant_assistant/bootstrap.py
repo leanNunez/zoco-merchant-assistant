@@ -11,10 +11,10 @@ import random
 import secrets
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 import openai
 from pydantic import SecretStr
@@ -62,21 +62,41 @@ from merchant_assistant.sales.adapters.json_repository import JsonSalesRepositor
 from merchant_assistant.sales.service import SalesService
 from merchant_assistant.shared.clock import Clock, SystemClock, business_today
 from merchant_assistant.shared.config import Settings
+from merchant_assistant.shared.errors import DomainError
 from merchant_assistant.shared.faults import FaultInjector
 
 DOCS_DIR = Path("docs")  # the default of Settings.docs_dir; tests read the real corpus here
-# Provisional until the measured selection of `make eval-retrieval` replaces it: sections are
-# the corpus' own units, and validity is applied by demotion, which never hides a document
-# (the tie preference the evaluation declares before measuring).
-AGENT_CHUNKING = ChunkingStrategy("section")
+
+# The retrieval configuration of the agent is the one the PRE-DECLARED selection of
+# `make eval-retrieval` picked (evaluation/results/retrieval/report.md): `document` chunking, then
+# `hybrid+meta(demote)` (validity applied by demotion, which never hides a document). The honest
+# caveat travels with it: 20 questions, one of them moves an average 5 points, and the paired
+# intervals touch zero. tests/integration/agent/test_agent_retrieval_config.py pins both choices
+# to the committed report.
+AGENT_CHUNKING = ChunkingStrategy("document")
+# BM25 without stemming, stopwords or other options: the stopword tokenizer was measured and
+# NOT adopted (gate_calibration.md, "Tokenizador con stopwords: decisión").
+AGENT_TOKENIZER = Tokenizer()
 PASSAGES_PER_SEARCH = 4
-# The lexical floor of `buscar_documentacion` (SPEC_REVIEW F9, ADR-0004). BM25 scores any shared
+
+# The no-data gate of `buscar_documentacion` (SPEC_REVIEW F9, ADR-0007). BM25 scores any shared
 # token (there are no stopwords) and a vector search always returns neighbours, so "no results"
-# almost never happens by itself. Calibrated offline on this corpus and AGENT_CHUNKING, with
-# no API: the lowest best score of the 20 kit questions is 5.871 (Q13) and the highest of 16
-# off-topic questions is 4.626 ("¿Cómo se hace un asado?"); the floor sits at the midpoint,
-# 0.62 from each side. tests/integration/agent/test_agent_retrieval_floor.py pins it.
-MIN_BM25_SCORE = 5.25
+# almost never happens by itself. The thresholds are NOT tuned by hand: they come from a rule
+# declared before measuring, applied to the 20 kit questions, 30 short legitimate queries and 45
+# off-topic ones of evaluation/retrieval/calibration_queries.jsonl, and are copied from
+# evaluation/results/retrieval/gate_calibration.md (tests/integration/agent pins the equality
+# with gate_calibration.json). Recalibrate with `make index && make eval-retrieval` whenever
+# the corpus, the queries or the embeddings model change.
+#
+# Hybrid: `no_data` only when BOTH signals are weak, because a legitimate short phrasing is
+# usually weak in one of them ("cuánto cobran de comisión" has almost no lexical match and a
+# strong cosine).
+GATE_BM25_HYBRID = 11.824
+GATE_COSINE_HYBRID = 0.366
+# Degraded (no key or incomplete cache): only BM25 exists. By the declared rule, that keeps every
+# legitimate query answerable and therefore rejects only queries that share no token at all with
+# the corpus: the gate is nearly empty on purpose (a false `no_data` is the expensive error).
+GATE_BM25_DEGRADED = 0.039
 
 SearchMode = Literal["hybrid", "degraded"]
 
@@ -138,42 +158,107 @@ def build_chat_model(settings: Settings) -> OpenAIChatModel:
 # ---------------------------------------------------------------------- capability adapters
 
 
+@dataclass(frozen=True, slots=True)
+class Gate:
+    """When a query is `no_data`: its best BM25 is below `bm25` and, if `cosine` is given, its
+    best cosine against the corpus vectors is below `cosine` too (both signals weak).
+
+    A gate without `cosine` is the degraded one: BM25 alone.
+    """
+
+    bm25: float
+    cosine: float | None = None
+
+    def __post_init__(self) -> None:
+        if not self.bm25 >= 0:  # written so that NaN is refused too
+            raise ValueError("the BM25 threshold must be >= 0")
+        if self.cosine is not None and not -1.0 <= self.cosine <= 1.0:
+            raise ValueError("the cosine threshold must be between -1 and 1")
+
+    def says_no_data(self, bm25: float, cosine: float | None) -> bool:
+        if self.cosine is None:
+            return bm25 < self.bm25
+        if cosine is None:
+            raise ValueError("a hybrid gate needs the best cosine of the query")
+        return bm25 < self.bm25 and cosine < self.cosine
+
+
+class SemanticProbe(Protocol):
+    def best_cosine(self, query: str) -> float:
+        """The highest cosine between the query and any chunk. Embeds the query, so it can
+        raise the embeddings errors (a `DomainError`)."""
+        ...
+
+
+class VectorProbe:
+    def __init__(self, index: VectorIndex, embedder: Embedder) -> None:
+        self._index = index
+        self._embedder = embedder
+
+    def best_cosine(self, query: str) -> float:
+        return self._index.search(self._embedder.embed([query])[0], 1)[0].score
+
+
+@dataclass(frozen=True, slots=True)
+class SearchPath:
+    """One way of answering: a retriever and the gate that goes with it."""
+
+    retriever: Retriever
+    gate: Gate
+    probe: SemanticProbe | None = None  # present exactly when the gate has a cosine threshold
+
+    def __post_init__(self) -> None:
+        if (self.gate.cosine is None) != (self.probe is None):
+            raise ValueError("a gate with a cosine threshold needs a probe, and only then")
+
+
 class SearchAdapter:
     """A knowledge `Retriever` as the agent's `KnowledgeSearch`: passages with their validity.
 
-    A query whose best BM25 score over the corpus is below `min_score` is `no_data`, whatever
-    the retriever would return: that is the deterministic signal the turn turns into
-    `low_confidence`, and it holds in hybrid mode too, where the vector side alone would always
-    find neighbours.
+    A query the `Gate` calls weak is `no_data`, whatever the retriever would return: that is the
+    deterministic signal the turn turns into `low_confidence`, and it holds in hybrid mode too,
+    where the vector side alone would always find neighbours.
+
+    The primary path may need the embeddings provider for every new query. If that fails (a
+    `DomainError`: provider down, invalid vector), the search does NOT fail the turn: it answers
+    that query with the `fallback` path (BM25 and its own gate) and says why in
+    `SearchOutcome.degraded`, which the turn records as `search_degraded:<code>`.
     """
 
     def __init__(
         self,
-        retriever: Retriever,
+        primary: SearchPath,
         chunks: tuple[Chunk, ...],
         documents: tuple[Document, ...],
         *,
         lexical: BM25Index,
-        min_score: float = MIN_BM25_SCORE,
+        fallback: SearchPath | None = None,
         k: int = PASSAGES_PER_SEARCH,
     ) -> None:
-        if not min_score >= 0:  # written so that NaN is refused too
-            raise ValueError("min_score must be >= 0")
-        self._retriever = retriever
+        self._primary = primary
+        self._fallback = fallback
         self._chunks = {chunk.id: chunk for chunk in chunks}
         self._documents = {document.id: document for document in documents}
         self._lexical = lexical
-        self._min_score = min_score
         self._k = k
 
     def best_lexical_score(self, query: str) -> float:
         return max(self._lexical.scores(query), default=0.0)
 
     def search(self, query: str) -> SearchOutcome:
-        if self.best_lexical_score(query) < self._min_score:
+        try:
+            return self._run(self._primary, query)
+        except DomainError as failure:
+            if self._fallback is None:
+                raise
+            return replace(self._run(self._fallback, query), degraded=failure.code)
+
+    def _run(self, path: SearchPath, query: str) -> SearchOutcome:
+        cosine = None if path.probe is None else path.probe.best_cosine(query)
+        if path.gate.says_no_data(self.best_lexical_score(query), cosine):
             return SearchOutcome("no_data", ())
         passages = []
-        for scored in self._retriever.search(query, self._k):
+        for scored in path.retriever.search(query, self._k):
             document = self._documents[scored.doc_id]
             passages.append(
                 Passage(
@@ -223,36 +308,52 @@ class SearchBuild:
 
 
 def build_search(
-    settings: Settings, *, today: Callable[[], date], docs_dir: Path | None = None
+    settings: Settings,
+    *,
+    today: Callable[[], date],
+    docs_dir: Path | None = None,
+    embedder: Embedder | None = None,
 ) -> SearchBuild:
-    """Hybrid retrieval when it can work; BM25 with the validity policy otherwise.
+    """The selected retrieval when it can work; BM25 with the validity policy otherwise.
 
-    Hybrid needs an embedding for every chunk (from the cache) AND a key, because each query
-    must be embedded. Without either, the agent runs in DEGRADED mode: BM25 with the same
-    validity demotion. Building never calls the embeddings API: only cached vectors are read.
+    Selected: `document` chunking and `hybrid+meta(demote)` with the hybrid gate. It needs an
+    embedding for every chunk (from the cache) AND a key, because each new query must be
+    embedded. Without either, the agent runs in DEGRADED mode: BM25 with the same validity
+    demotion and the degraded gate. Building never calls the embeddings API: only cached
+    vectors are read.
+
+    `embedder` replaces the one built from the settings (tests, with a fake that has the
+    corpus vectors); the caller then vouches that it can embed the corpus.
     """
     documents = load_documents(settings.docs_dir if docs_dir is None else docs_dir)
     chunks = chunk_corpus(documents, AGENT_CHUNKING)
-    lexical = BM25Index(chunks, Tokenizer(stem=False))
+    lexical = BM25Index(chunks, AGENT_TOKENIZER)
     bm25 = BM25Retriever(lexical)
-
-    def adapter(retriever: Retriever) -> SearchAdapter:
-        return SearchAdapter(retriever, chunks, documents, lexical=lexical)
 
     def with_validity(base: Retriever) -> Retriever:
         return MetadataRetriever(base, documents, mode="demote", today=today)
 
-    if settings.openai_api_key is None:
-        return SearchBuild(adapter(with_validity(bm25)), "degraded", "no_key")
-    embedder = build_embedder(settings)
-    keys = [embedding_key(embedder.model, chunk.index_text) for chunk in chunks]
-    cache = SqliteEmbeddingCache(settings.embeddings_cache_path)
-    if len(cache.get_many(keys)) != len(set(keys)):
-        return SearchBuild(adapter(with_validity(bm25)), "degraded", "incomplete_cache")
+    def adapter(primary: SearchPath, fallback: SearchPath | None = None) -> SearchAdapter:
+        return SearchAdapter(primary, chunks, documents, lexical=lexical, fallback=fallback)
+
+    degraded = SearchPath(with_validity(bm25), Gate(GATE_BM25_DEGRADED))
+    if embedder is None:
+        if settings.openai_api_key is None:
+            return SearchBuild(adapter(degraded), "degraded", "no_key")
+        embedder = build_embedder(settings)
+        keys = [embedding_key(embedder.model, chunk.index_text) for chunk in chunks]
+        cache = SqliteEmbeddingCache(settings.embeddings_cache_path)
+        if len(cache.get_many(keys)) != len(set(keys)):
+            return SearchBuild(adapter(degraded), "degraded", "incomplete_cache")
     vectors = embedder.embed([chunk.index_text for chunk in chunks])  # all hits: no API call
-    vector = VectorRetriever(VectorIndex(chunks, vectors), embedder)
-    hybrid = HybridRetriever([vector, bm25], depth=len(chunks))
-    return SearchBuild(adapter(with_validity(hybrid)), "hybrid", "complete")
+    index = VectorIndex(chunks, vectors)
+    hybrid = HybridRetriever([VectorRetriever(index, embedder), bm25], depth=len(chunks))
+    selected = SearchPath(
+        with_validity(hybrid),
+        Gate(GATE_BM25_HYBRID, GATE_COSINE_HYBRID),
+        VectorProbe(index, embedder),
+    )
+    return SearchBuild(adapter(selected, fallback=degraded), "hybrid", "complete")
 
 
 # ---------------------------------------------------------------------- the agent

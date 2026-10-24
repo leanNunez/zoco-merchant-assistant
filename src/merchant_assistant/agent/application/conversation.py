@@ -617,6 +617,7 @@ class ConversationService:
                 content = refusal_envelope(validated.spec.name, refusal)
                 return state.with_messages(_tool_message(call, content))
         outcome = self._executor.run_read(validated)
+        turn.flags.extend(outcome.flags)
         turn.tools.append(
             ToolRecord(
                 call.name,

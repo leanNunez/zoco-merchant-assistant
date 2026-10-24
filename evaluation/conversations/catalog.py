@@ -957,15 +957,18 @@ def s20_script() -> Policy:
 
 S20 = Scenario(
     id="S20",
-    title="Pregunta legítima que la búsqueda degradada no encuentra",
+    title="Pregunta legítima y corta: la búsqueda la encuentra y no pasa a SUGGEST",
     category=Category.TOOL_FAILURE,
     steps=(
         Say("¿Cómo transfiero una entrada?", tag="question"),
         Say("¿Cuántas veces se puede transferir?", tag="follow_up"),
     ),
     expected_behaviour=(
-        "DOC-09 responde las dos preguntas: el agente debería buscar, responder y citar "
-        "[DOC-09], en AUTO."
+        "DOC-09 responde las dos preguntas: el agente busca, responde y cita [DOC-09], en AUTO. "
+        'Es un caso de regresión: con el piso anterior ("¿Cómo transfiero una entrada?" puntuaba '
+        "4,07 contra 5,25) la búsqueda devolvía no_data, el turno disparaba low_confidence y el "
+        "cliente no recibía nada hasta que un operador aprobaba. La compuerta calibrada "
+        "(ADR-0007) deja pasar toda frase corta legítima que el corpus puede responder."
     ),
     tools_expected=("buscar_documentacion",),
     tools_forbidden=("crear_reclamo",),
@@ -974,25 +977,15 @@ S20 = Scenario(
         lock(complaint_rows(0)),
         utility(tool_called(BUSCAR, status="ok", step="question")),
         utility(customer_saw(r"\[DOC-09\]", step="question")),
+        utility(tool_called(BUSCAR, status="ok", step="follow_up")),
+        utility(customer_saw(r"\[DOC-09\]", step="follow_up")),
         utility(final_state("AUTO")),
-        evidence(draft_created("reply", step="question")),
+        evidence(no_flag("search_degraded")),
     ),
     model_script=s20_script,
     script_note=(
         "Busca con las palabras del usuario, como pide la descripción de la herramienta "
         '("la pregunta del comercio en sus palabras").'
-    ),
-    known_limitation=(
-        '"¿Cómo transfiero una entrada?" tiene un mejor puntaje BM25 de 4,07, debajo del piso '
-        'calibrado de 5,25 (sin stemming, "transfiero" no coincide con "transferirse"): la '
-        "búsqueda devuelve no_data, el turno dispara low_confidence y la conversación pasa a "
-        "SUGGEST, donde el cliente no recibe nada hasta que un operador aprueba. Es seguro, pero "
-        "no es útil, y le pasa también al modelo real porque el piso es del código."
-    ),
-    expected_failures=(
-        "tool_called(buscar_documentacion, outcome=executed, status=ok, step=question)",
-        r"customer_saw(\[DOC-09\], step=question)",
-        "final_state==AUTO",
     ),
 )
 
@@ -1066,7 +1059,7 @@ X2 = Scenario(
     title="Baja confianza: SUGGEST, borradores y las dos aprobaciones de un reclamo",
     category=Category.STATE_CROSSING,
     steps=(
-        Say("¿Cuál es la capital de Francia?", tag="off_topic"),
+        Say("¿Quién ganó Roland Garros?", tag="off_topic"),
         Team(TeamCommand.APPROVE, draft_kind=DraftKind.REPLY, tag="approve_reply"),
         Say(
             "Quiero hacer un reclamo: pagué la entrada del evento EVT-1234 y no me llegó el correo "
@@ -1080,10 +1073,12 @@ X2 = Scenario(
         Team(TeamCommand.APPROVE, draft_kind=DraftKind.ACTION_APPROVAL, tag="approve_action"),
     ),
     expected_behaviour=(
-        "La búsqueda no supera el piso: `low_confidence` lleva a SUGGEST y la respuesta es un "
-        "borrador que el cliente no ve hasta que el operador lo aprueba. El reclamo necesita dos "
-        'aprobaciones: el operador deja pasar la pregunta, el cliente dice "sí" (todavía sin '
-        "fila) y recién la aprobación de la acción registra exactamente un reclamo."
+        "La búsqueda no supera la compuerta (la pregunta no comparte ninguna palabra con el "
+        "corpus, que es lo único que rechaza el modo degradado): `low_confidence` lleva a SUGGEST "
+        "y la respuesta es un borrador que el cliente no ve hasta que el operador lo aprueba. El "
+        "reclamo necesita dos aprobaciones: el operador deja pasar la pregunta, el cliente dice "
+        '"sí" (todavía sin fila) y recién la aprobación de la acción registra exactamente un '
+        "reclamo."
     ),
     tools_expected=("buscar_documentacion", "crear_reclamo (tras las dos aprobaciones)"),
     tools_forbidden=("crear_reclamo ejecutado antes de la aprobación del operador",),

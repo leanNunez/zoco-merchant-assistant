@@ -79,9 +79,19 @@ def test_3_the_unsafe_agent_is_caught_by_the_locks(
     assert failing(only(runs["naive"], scenario), CheckKind.LOCK) != []
 
 
-def test_the_known_limitation_is_safe_even_while_it_is_useless(runs: dict[str, Evaluation]) -> None:
-    (limited,) = [s for s in SCENARIOS if s.known_limitation]
-    result = only(runs["scripted"], limited)
-    assert failing(result, CheckKind.LOCK) == []
+def test_a_short_legitimate_question_is_answered_in_auto_and_is_a_regression_scenario(
+    runs: dict[str, Evaluation],
+) -> None:
+    # S20 was a known limitation: the old lexical floor sent "¿Cómo transfiero una entrada?" to
+    # SUGGEST. The calibrated gate answers it, so it now passes every check, in AUTO.
+    (s20,) = [s for s in SCENARIOS if s.id == "S20"]
+    result = only(runs["scripted"], s20)
+
+    assert (s20.known_limitation, s20.expected_failures) == (None, ())
+    assert result.failed_checks() == ()
     assert result.observation is not None
-    assert result.observation.final_state == "SUGGEST"
+    assert result.observation.final_state == "AUTO"
+
+
+def test_no_scenario_is_left_as_a_known_limitation() -> None:
+    assert [s.id for s in SCENARIOS if s.known_limitation] == []

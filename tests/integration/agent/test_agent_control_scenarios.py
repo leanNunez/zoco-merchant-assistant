@@ -98,6 +98,9 @@ HOURS = BusinessHours(
 WINDOW = describe_hours(HOURS)
 OPEN = datetime(2026, 10, 23, 12, 0, tzinfo=BUENOS_AIRES)  # a Friday, inside the window
 CLOSED = datetime(2026, 10, 23, 21, 0, tzinfo=BUENOS_AIRES)  # the same Friday, after closing
+# Off-topic AND without a single word in common with the corpus, which is what the degraded
+# (BM25-only) gate rejects; see tests/integration/agent/test_agent_no_data_gate.py.
+OFF_TOPIC = "¿Quién ganó Roland Garros?"
 CID = "conv-1"
 A = {"motivo": "Entrada no recibida", "descripcion": "Pagué la entrada y no me llegó el correo."}
 SALES = {
@@ -360,14 +363,14 @@ def test_2_an_off_topic_question_hands_the_answer_and_then_a_complaint_to_the_op
     world = make_world(
         tmp_path,
         [
-            search_call("¿Cuál es la capital de Francia?"),
+            search_call(OFF_TOPIC),
             text_reply("No tengo información sobre eso."),
             propose_reply(A),
         ],
     )
 
-    # An off-topic question: the real search finds nothing above its floor.
-    drafted = world.say("¿Cuál es la capital de Francia?")
+    # An off-topic question: the real search finds nothing above its gate.
+    drafted = world.say(OFF_TOPIC)
     reply = only_draft(world, DraftKind.REPLY)
     assert drafted.events == ("low_confidence:applied",)
     assert drafted.control_state is State.SUGGEST
@@ -1040,13 +1043,15 @@ def test_9_every_command_leaves_a_record_with_the_five_fields(tmp_path: Path) ->
 
 ASK = "Quiero reclamar: pagué la entrada y no me llegó el correo."
 CUSTOMER_TEXTS = [ASK, ASK, "sí", "sí", "Sí.", "no", "otra cosa", "idiota",
-                  "quiero hablar con una persona", "¿Cuál es la capital de Francia?",
+                  "quiero hablar con una persona", OFF_TOPIC,
                   "¿cuánto dura la reserva del carrito?"]  # fmt: skip
 # Off-topic queries are the way into SUGGEST, so they are drawn more often.
+# They share no word at all with the corpus: without embeddings the gate is nearly empty on
+# purpose (ADR-0007) and only a query like these is `no_data` in degraded mode.
 QUERIES = [
-    "¿Cuál es la capital de Francia?",
-    "receta de empanadas",
-    "¿Quién ganó el mundial 2022?",
+    OFF_TOPIC,
+    "¿Quién descubrió Australia?",
+    "Roland Garros",
     "¿cuánto dura la reserva del carrito?",
 ]
 COMPLAINTS = [A, {"motivo": "Pago doble", "descripcion": "Me cobraron dos veces la entrada."}]

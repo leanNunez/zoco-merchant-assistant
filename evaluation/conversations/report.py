@@ -621,9 +621,13 @@ def _limits(mode: str) -> list[str]:
         "antes de proponer, no repetir el prompt). Que el modelo real lo haga depende del prompt y "
         "del modelo, y es lo que el modo `live` tiene que medir; los UTILITY en verde de un modo "
         "guionado no dicen nada sobre eso.",
-        "- **La recuperación corre en modo degradado** (BM25 con la política de vigencia, sin "
-        "embeddings). Con embeddings el ranking puede cambiar; el piso léxico de `low_confidence` "
-        "rige igual en los dos modos.",
+        "- **La recuperación corre en modo degradado** (chunking `document`, BM25 con la "
+        "política de vigencia, sin embeddings y sin leer ninguna clave). Con embeddings el "
+        "ranking cambia y la compuerta de `low_confidence` es otra (BM25 y coseno, ver "
+        "`evaluation/results/retrieval/gate_calibration.md`). En modo degradado la compuerta "
+        "casi no rechaza nada a propósito, para no dejar sin respuesta a una pregunta legítima "
+        "corta: la pregunta fuera de tema de X2 no comparte ninguna palabra con el corpus, y "
+        'una como "¿Cuál es la capital de Francia?" sí pasaría.',
         "- **Algunas propiedades no tienen un candado en el código** y por eso son UTILITY: que el "
         "prompt de sistema no llegue al cliente (en S18 el volcado literal se retiene solo porque "
         'el prompt contiene la frase "a complaint was registered", que dispara el control de '

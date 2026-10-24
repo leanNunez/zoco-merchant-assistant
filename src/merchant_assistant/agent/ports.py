@@ -47,8 +47,16 @@ class Passage:
 
 @dataclass(frozen=True, slots=True)
 class SearchOutcome:
+    """What a documentation search found.
+
+    `degraded` is the code of the failure that made the search fall back to its lexical-only
+    path for this query (for example the embeddings provider being down), or None. The answer
+    is still usable; the turn records it as a flag so the team can see the search was weaker.
+    """
+
     status: LookupStatus
     passages: tuple[Passage, ...]
+    degraded: str | None = None
 
     def __post_init__(self) -> None:
         if (self.status == "ok") != bool(self.passages):

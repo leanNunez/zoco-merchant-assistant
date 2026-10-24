@@ -84,14 +84,17 @@ class FixedSales:
 
 
 class FixedSearch:
-    def __init__(self, *doc_ids: str) -> None:
+    def __init__(self, *doc_ids: str, degraded: str | None = None) -> None:
+        self.degraded = degraded
         self.passages = tuple(
             Passage(doc_id, f"Texto de {doc_id}.", date(2026, 1, 1), date(2027, 1, 1))
             for doc_id in doc_ids
         )
 
     def search(self, query: str) -> SearchOutcome:
-        return SearchOutcome("ok" if self.passages else "no_data", self.passages)
+        if not self.passages:
+            return SearchOutcome("no_data", (), self.degraded)
+        return SearchOutcome("ok", self.passages, self.degraded)
 
 
 @dataclass
@@ -476,6 +479,38 @@ def test_a_citation_from_an_earlier_turn_of_the_same_conversation_is_valid() -> 
     result = conversation.say("¿me repetís?")
 
     assert texts(result) == ["Como te dije [DOC-01]."]
+
+
+# ------------------------------------------------------------------ a search that fell back
+
+
+def test_a_search_that_fell_back_to_its_lexical_path_flags_the_turn_and_still_answers() -> None:
+    world = chat(
+        [
+            calls_reply(tool_call("buscar_documentacion", {"consulta": "reserva"})),
+            text_reply("12 min [DOC-04]"),
+        ],
+        search=FixedSearch("DOC-04", degraded="embeddings_unavailable"),
+    )
+
+    result = world.say("¿cuánto dura la reserva?")
+
+    assert texts(result) == ["12 min [DOC-04]"]
+    assert result.flags == ("search_degraded:embeddings_unavailable",)
+    assert result.violations == ()
+    assert [(t.name, t.status) for t in result.tools] == [("buscar_documentacion", "ok")]
+
+
+def test_a_search_that_did_not_fall_back_leaves_the_flags_empty() -> None:
+    world = chat(
+        [
+            calls_reply(tool_call("buscar_documentacion", {"consulta": "reserva"})),
+            text_reply("12 min [DOC-04]"),
+        ],
+        search=FixedSearch("DOC-04"),
+    )
+
+    assert world.say("¿cuánto dura la reserva?").flags == ()
 
 
 # ------------------------------------------------------------------ unexpected model failures

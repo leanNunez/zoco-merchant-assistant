@@ -131,6 +131,11 @@ def role_of(world: World) -> Role:
     return world.console.role
 
 
+# Off-topic AND without a word in common with the corpus: without embeddings the gate rejects
+# only such queries (ADR-0007).
+OFF_TOPIC = "¿Quién ganó Roland Garros?"
+
+
 def offline(tmp_path: Path, **overrides: object) -> Settings:
     sales = tmp_path / "ventas.json"
     sales.write_text(json.dumps(SALES), encoding="utf-8")
@@ -319,10 +324,10 @@ def test_the_customer_never_sees_a_draft_the_inbox_the_state_or_the_log(tmp_path
     withheld = "BORRADOR-PARA-EL-EQUIPO"
     world = make_world(
         tmp_path,
-        [search_call("¿Cuál es la capital de Francia?"), text_reply(withheld)],
+        [search_call(OFF_TOPIC), text_reply(withheld)],
     )
 
-    shown = world.type("¿Cuál es la capital de Francia?")
+    shown = world.type(OFF_TOPIC)
 
     # The turn really did put a draft and a control change in place...
     state = world.stored()
@@ -341,11 +346,11 @@ def test_the_hidden_draft_is_there_for_the_operator_and_reaches_the_customer_onl
     world = make_world(
         tmp_path,
         [
-            search_call("¿Cuál es la capital de Francia?"),
+            search_call(OFF_TOPIC),
             text_reply("No tengo información sobre eso."),
         ],
     )
-    world.type("¿Cuál es la capital de Francia?")
+    world.type(OFF_TOPIC)
 
     assert "Vista de operator" in world.login("operator")
     drafts = world.type("/drafts")
@@ -626,13 +631,13 @@ def test_the_two_step_complaint_flow_from_the_customer_to_the_registered_number(
     world = make_world(
         tmp_path,
         [
-            search_call("¿Cuál es la capital de Francia?"),
+            search_call(OFF_TOPIC),
             text_reply("No tengo información sobre eso."),
             propose_complaint(),
         ],
     )
     # An off-topic question hands the conversation to the team: SUGGEST.
-    assert world.type("¿Cuál es la capital de Francia?") == ""
+    assert world.type(OFF_TOPIC) == ""
     (first,) = world.runtime.operators.drafts(CID)
     world.login("operator")
     world.type(f"/approve {first.id}")
