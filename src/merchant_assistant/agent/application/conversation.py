@@ -19,6 +19,11 @@
    code-owned confirmation question.
 6. Output checks on the model's answer: no tool call written as text, no citation of a
    document no tool returned in this conversation, no complaint number nobody mentioned.
+   Then, in AUTO, if the model searched the documentation and EVERY search came back
+   `no_data` (the search's calibrated relevance floor, never the model's own confidence),
+   the turn fires `low_confidence` (SYSTEM). In hours the conversation moves to SUGGEST and
+   this very answer becomes a draft; out of hours the guard refuses it, the refusal is
+   logged, and the answer goes out with the hours notice.
 7. Delivery against the state as stored NOW: if anyone saved the conversation while the turn
    ran (an operator took over while the model was answering), the answer is dropped.
 
@@ -226,6 +231,7 @@ class _Reply:
     kind: Literal["reply", "notice"] = "reply"
     action: PendingAction | None = None
     confirmed: Confirmed | None = None
+    from_model: bool = False  # the model's own answer (checked), not a code template
 
 
 class ConversationService:
@@ -285,6 +291,14 @@ class ConversationService:
 
         # 5 and 6. The model proposes; every proposal is checked.
         state, reply = self._model_loop(state, capabilities, now, turn)
+        if _found_nothing(state, reply, turn):
+            # The transition lives in this turn's state only: the stored version is untouched
+            # until delivery saves, so the turn's own change never reads as a concurrent one.
+            state, outcome = self._fire(state, Event.LOW_CONFIDENCE, Actor.SYSTEM, now, turn)
+            if outcome is not None:
+                capabilities = capabilities_for(
+                    state.control_state, hours_open=self._hours.is_open(now)
+                )
         return self._deliver(state, base_version, reply, capabilities, user_message, turn)
 
     # ------------------------------------------------------------------ control and signals
@@ -466,7 +480,8 @@ class ConversationService:
             )
             reply = completion.reply
             if not reply.tool_calls:
-                return state, _Reply(self._checked(reply.text or "", state, turn))
+                checked = self._checked(reply.text or "", state, turn)
+                return state, _Reply(checked, from_model=True)
             # The model's own text next to tool calls is never shown: only results speak.
             state = state.with_messages(Message(Role.ASSISTANT, None, reply.tool_calls))
             state, proposal = self._run_calls(
@@ -699,6 +714,22 @@ class ConversationService:
 
 
 # ---------------------------------------------------------------------- helpers
+
+
+def _found_nothing(state: ConversationState, reply: _Reply, turn: _Turn) -> bool:
+    """AUTO, the model answered in its own words, and every documentation search of this
+    turn came back `no_data`: the deterministic low-confidence signal (SPEC_REVIEW F9)."""
+    searches = [
+        record.status
+        for record in turn.tools
+        if record.name == BUSCAR_DOCUMENTACION and record.outcome == "executed"
+    ]
+    return (
+        state.control_state is State.AUTO
+        and reply.from_model
+        and bool(searches)
+        and all(status == "no_data" for status in searches)
+    )
 
 
 def _answers_a_date_question(state: ConversationState) -> bool:

@@ -26,7 +26,7 @@ from merchant_assistant.agent.application.conversation import (
 from merchant_assistant.agent.application.executor import ToolExecutor
 from merchant_assistant.agent.application.prompts import describe_hours
 from merchant_assistant.agent.domain.drafts import DraftKind
-from merchant_assistant.agent.domain.messages import Message, Role
+from merchant_assistant.agent.domain.messages import Message, ModelReply, Role
 from merchant_assistant.agent.domain.state import ConversationState
 from merchant_assistant.agent.domain.templates import (
     answer_withheld,
@@ -224,6 +224,83 @@ def test_in_suggest_a_yes_to_nothing_pending_is_a_draft_too() -> None:
 
     assert result.outbound == (Outbound("draft", nothing_pending(None), "D-0001"),)
     assert conversation.registry.calls == 0
+
+
+# --------------------------------------------------------------------------- low confidence
+
+
+def search(query: str = "x") -> ModelReply:
+    return calls_reply(tool_call("buscar_documentacion", {"consulta": query}))
+
+
+def test_when_every_search_finds_nothing_in_hours_the_answer_waits_for_an_operator() -> None:
+    conversation = chat([search(), search("y"), text_reply("No encontré nada sobre eso.")])
+
+    result = conversation.say("¿cuál es la capital de Francia?")
+
+    assert result.events == ("low_confidence:applied",)
+    assert result.control_state is State.SUGGEST
+    assert result.dropped is None  # the turn's own transition is not a concurrent change
+    assert result.outbound == (Outbound("draft", "No encontré nada sobre eso.", "D-0001"),)
+    assert [m.role for m in conversation.stored().messages][-1] is Role.TOOL
+    assert conversation.stored().control_log[-1].actor is Actor.SYSTEM
+
+
+def test_out_of_hours_low_confidence_is_refused_and_the_answer_goes_out_with_the_window() -> None:
+    conversation = chat([search(), text_reply("No encontré nada sobre eso.")], now=CLOSED)
+
+    result = conversation.say("¿cuál es la capital de Francia?")
+
+    assert result.events == ("low_confidence:rejected:out_of_hours",)
+    assert result.control_state is State.AUTO
+    assert texts(result) == [f"No encontré nada sobre eso.\n\n{hours_notice(WINDOW)}"]
+
+
+@pytest.mark.parametrize(
+    ("steps", "found"),
+    [
+        pytest.param([text_reply("Hola.")], (), id="no search at all"),
+        pytest.param(
+            [search(), search("y"), text_reply("Esto dice [DOC-01].")],
+            ("DOC-01",),
+            id="one search found something",
+        ),
+    ],
+)
+def test_low_confidence_needs_searches_and_every_one_of_them_empty(
+    steps: list[ModelReply], found: tuple[str, ...]
+) -> None:
+    class FirstQueryOnly(FixedSearch):
+        def search(self, query: str) -> SearchOutcome:
+            return super().search(query) if query == "x" else SearchOutcome("no_data", ())
+
+    conversation = chat(steps, search=FirstQueryOnly(*found))
+
+    result = conversation.say("¿cómo es?")
+
+    assert result.events == ()
+    assert result.control_state is State.AUTO
+    assert [o.kind for o in result.outbound] == ["reply"]
+
+
+def test_a_template_answer_after_empty_searches_does_not_lower_confidence() -> None:
+    conversation = chat([search(f"vuelta {n}") for n in range(4)])
+
+    result = conversation.say("contame todo")
+
+    assert "round_limit" in result.violations
+    assert result.events == ()
+    assert result.control_state is State.AUTO
+
+
+def test_in_suggest_empty_searches_change_nothing_more() -> None:
+    conversation = chat([search(), text_reply("No encontré nada.")])
+    conversation.move((Event.LOW_CONFIDENCE, Actor.SYSTEM))
+
+    result = conversation.say("¿y la capital de Francia?")
+
+    assert result.events == ()
+    assert [o.kind for o in result.outbound] == ["draft"]
 
 
 # --------------------------------------------------------------------------- signals

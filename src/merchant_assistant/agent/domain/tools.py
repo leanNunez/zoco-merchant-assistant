@@ -53,7 +53,12 @@ class BuscarDocumentacionArgs(BaseModel):
         StringConstraints(
             strip_whitespace=True, min_length=QUERY_LENGTH[0], max_length=QUERY_LENGTH[1]
         ),
-        Field(description="What to look up, in the merchant's own words or a short paraphrase."),
+        # A full question, as the merchant wrote it: it is what the search's relevance floor
+        # was calibrated on (bootstrap.MIN_BM25_SCORE). A bare keyword scores lower.
+        Field(
+            description="The merchant's question in their own words, as a full question, "
+            "not a list of keywords."
+        ),
     ]
 
 

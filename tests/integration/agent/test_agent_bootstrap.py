@@ -20,6 +20,7 @@ from merchant_assistant.bootstrap import (
     DOCS_DIR,
     ComplaintsAdapter,
     SalesAdapter,
+    SearchAdapter,
     build_agent_service,
     build_business_hours,
     build_search,
@@ -29,9 +30,13 @@ from merchant_assistant.complaints.service import ComplaintService
 from merchant_assistant.control import BusinessHours
 from merchant_assistant.knowledge.adapters.filesystem import load_documents
 from merchant_assistant.knowledge.adapters.sqlite_cache import SqliteEmbeddingCache
-from merchant_assistant.knowledge.chunking import chunk_corpus
+from merchant_assistant.knowledge.bm25 import BM25Index
+from merchant_assistant.knowledge.chunking import Chunk, chunk_corpus
+from merchant_assistant.knowledge.documents import Document
 from merchant_assistant.knowledge.embedding import embedding_key
 from merchant_assistant.knowledge.errors import DocumentFormatError
+from merchant_assistant.knowledge.ranking import ScoredChunk
+from merchant_assistant.knowledge.text import Tokenizer
 from merchant_assistant.sales.adapters.json_repository import JsonSalesRepository
 from merchant_assistant.sales.errors import FutureSalesDate
 from merchant_assistant.sales.service import SalesService
@@ -225,3 +230,43 @@ def test_the_documents_directory_comes_from_the_settings(tmp_path: Path) -> None
 
     with pytest.raises(DocumentFormatError, match="no DOC-"):
         build_search(offline(tmp_path, docs_dir=empty), today=lambda: TODAY)
+
+
+class EverythingIsNear:
+    """A vector side as it behaves: it always returns a neighbour, however unrelated."""
+
+    name = "always"
+
+    def __init__(self, chunk: Chunk) -> None:
+        self._chunk = chunk
+
+    def search(self, query: str, k: int) -> list[ScoredChunk]:
+        return [ScoredChunk(self._chunk.id, self._chunk.doc_id, 0.99)]
+
+
+def corpus() -> tuple[tuple[Document, ...], tuple[Chunk, ...], BM25Index]:
+    documents = load_documents(DOCS_DIR)
+    chunks = chunk_corpus(documents, AGENT_CHUNKING)
+    return documents, chunks, BM25Index(chunks, Tokenizer(stem=False))
+
+
+def test_the_lexical_floor_wins_over_a_retriever_that_always_finds_neighbours() -> None:
+    documents, chunks, lexical = corpus()
+    near = EverythingIsNear(chunks[0])
+
+    floored = SearchAdapter(near, chunks, documents, lexical=lexical)
+    unfloored = SearchAdapter(near, chunks, documents, lexical=lexical, min_score=0.0)
+
+    assert floored.search("¿Cuál es la capital de Francia?").status == "no_data"
+    assert floored.search("¿cuánto dura la reserva del carrito?").status == "ok"
+    assert unfloored.search("¿Cuál es la capital de Francia?").status == "ok"
+
+
+@pytest.mark.parametrize("floor", [-1.0, float("nan")])
+def test_a_negative_or_missing_floor_is_refused(floor: float) -> None:
+    documents, chunks, lexical = corpus()
+
+    with pytest.raises(ValueError, match="min_score"):
+        SearchAdapter(
+            EverythingIsNear(chunks[0]), chunks, documents, lexical=lexical, min_score=floor
+        )

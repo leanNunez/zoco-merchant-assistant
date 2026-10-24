@@ -65,6 +65,13 @@ DOCS_DIR = Path("docs")  # the default of Settings.docs_dir; tests read the real
 # (the tie preference the evaluation declares before measuring).
 AGENT_CHUNKING = ChunkingStrategy("section")
 PASSAGES_PER_SEARCH = 4
+# The lexical floor of `buscar_documentacion` (SPEC_REVIEW F9, ADR-0004). BM25 scores any shared
+# token (there are no stopwords) and a vector search always returns neighbours, so "no results"
+# almost never happens by itself. Calibrated offline on this corpus and AGENT_CHUNKING, with
+# no API: the lowest best score of the 20 kit questions is 5.871 (Q13) and the highest of 16
+# off-topic questions is 4.626 ("¿Cómo se hace un asado?"); the floor sits at the midpoint,
+# 0.62 from each side. tests/integration/agent/test_agent_retrieval_floor.py pins it.
+MIN_BM25_SCORE = 5.25
 
 SearchMode = Literal["hybrid", "degraded"]
 
@@ -100,7 +107,13 @@ def build_embedder(settings: Settings) -> CachedEmbedder:
 
 
 class SearchAdapter:
-    """A knowledge `Retriever` as the agent's `KnowledgeSearch`: passages with their validity."""
+    """A knowledge `Retriever` as the agent's `KnowledgeSearch`: passages with their validity.
+
+    A query whose best BM25 score over the corpus is below `min_score` is `no_data`, whatever
+    the retriever would return: that is the deterministic signal the turn turns into
+    `low_confidence`, and it holds in hybrid mode too, where the vector side alone would always
+    find neighbours.
+    """
 
     def __init__(
         self,
@@ -108,14 +121,25 @@ class SearchAdapter:
         chunks: tuple[Chunk, ...],
         documents: tuple[Document, ...],
         *,
+        lexical: BM25Index,
+        min_score: float = MIN_BM25_SCORE,
         k: int = PASSAGES_PER_SEARCH,
     ) -> None:
+        if not min_score >= 0:  # written so that NaN is refused too
+            raise ValueError("min_score must be >= 0")
         self._retriever = retriever
         self._chunks = {chunk.id: chunk for chunk in chunks}
         self._documents = {document.id: document for document in documents}
+        self._lexical = lexical
+        self._min_score = min_score
         self._k = k
 
+    def best_lexical_score(self, query: str) -> float:
+        return max(self._lexical.scores(query), default=0.0)
+
     def search(self, query: str) -> SearchOutcome:
+        if self.best_lexical_score(query) < self._min_score:
+            return SearchOutcome("no_data", ())
         passages = []
         for scored in self._retriever.search(query, self._k):
             document = self._documents[scored.doc_id]
@@ -177,30 +201,26 @@ def build_search(
     """
     documents = load_documents(settings.docs_dir if docs_dir is None else docs_dir)
     chunks = chunk_corpus(documents, AGENT_CHUNKING)
-    bm25 = BM25Retriever(BM25Index(chunks, Tokenizer(stem=False)))
+    lexical = BM25Index(chunks, Tokenizer(stem=False))
+    bm25 = BM25Retriever(lexical)
+
+    def adapter(retriever: Retriever) -> SearchAdapter:
+        return SearchAdapter(retriever, chunks, documents, lexical=lexical)
 
     def with_validity(base: Retriever) -> Retriever:
         return MetadataRetriever(base, documents, mode="demote", today=today)
 
     if settings.openai_api_key is None:
-        return SearchBuild(_adapter(with_validity(bm25), chunks, documents), "degraded", "no_key")
+        return SearchBuild(adapter(with_validity(bm25)), "degraded", "no_key")
     embedder = build_embedder(settings)
     keys = [embedding_key(embedder.model, chunk.index_text) for chunk in chunks]
     cache = SqliteEmbeddingCache(settings.embeddings_cache_path)
     if len(cache.get_many(keys)) != len(set(keys)):
-        return SearchBuild(
-            _adapter(with_validity(bm25), chunks, documents), "degraded", "incomplete_cache"
-        )
+        return SearchBuild(adapter(with_validity(bm25)), "degraded", "incomplete_cache")
     vectors = embedder.embed([chunk.index_text for chunk in chunks])  # all hits: no API call
     vector = VectorRetriever(VectorIndex(chunks, vectors), embedder)
     hybrid = HybridRetriever([vector, bm25], depth=len(chunks))
-    return SearchBuild(_adapter(with_validity(hybrid), chunks, documents), "hybrid", "complete")
-
-
-def _adapter(
-    retriever: Retriever, chunks: tuple[Chunk, ...], documents: tuple[Document, ...]
-) -> SearchAdapter:
-    return SearchAdapter(retriever, chunks, documents)
+    return SearchBuild(adapter(with_validity(hybrid)), "hybrid", "complete")
 
 
 # ---------------------------------------------------------------------- the agent

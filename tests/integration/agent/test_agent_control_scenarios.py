@@ -7,15 +7,19 @@ test asserts observable facts: what reached the customer, rows in the database, 
 log in the stored state, and what the model was shown.
 """
 
+import functools
 import json
 import random
+import tempfile
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
-from datetime import date, datetime, time
+from dataclasses import dataclass, field, replace
+from datetime import datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+from hypothesis import event, given, settings
+from hypothesis import strategies as st
 
 from merchant_assistant.agent.adapters.memory_store import InMemoryConversationStore
 from merchant_assistant.agent.adapters.scripted_model import (
@@ -35,6 +39,7 @@ from merchant_assistant.agent.application.operator import CommandResult, Operato
 from merchant_assistant.agent.application.prompts import describe_hours
 from merchant_assistant.agent.domain.drafts import Draft, DraftKind
 from merchant_assistant.agent.domain.errors import (
+    CommandError,
     CommandNotAllowed,
     DraftNotPending,
     OperatorReplyNotAllowed,
@@ -54,14 +59,15 @@ from merchant_assistant.agent.domain.templates import (
     registered,
 )
 from merchant_assistant.agent.domain.tools import CREAR_RECLAMO, TOOL_SPECS, ToolSpec
-from merchant_assistant.agent.ports import Passage, SearchOutcome
-from merchant_assistant.bootstrap import ComplaintsAdapter, SalesAdapter
+from merchant_assistant.agent.ports import KnowledgeSearch, SearchOutcome
+from merchant_assistant.bootstrap import DOCS_DIR, ComplaintsAdapter, SalesAdapter, build_search
 from merchant_assistant.complaints.adapters.sqlite_repository import SqliteComplaintRepository
 from merchant_assistant.complaints.service import ComplaintService
 from merchant_assistant.control import (
     Actor,
     AttemptOutcome,
     BusinessHours,
+    ControlError,
     Event,
     GuardRejected,
     InvalidTransition,
@@ -70,6 +76,7 @@ from merchant_assistant.control import (
 )
 from merchant_assistant.sales.adapters.json_repository import JsonSalesRepository
 from merchant_assistant.sales.service import SalesService
+from merchant_assistant.shared.config import Settings
 
 pytestmark = pytest.mark.integration
 
@@ -107,17 +114,23 @@ class MovableClock:
         return self.instant
 
 
-class FakeSearch:
-    """Passages per exact query; any other query finds nothing."""
+class RecordingSearch:
+    """The real search over the real corpus (degraded mode, no API), recording the queries."""
 
-    def __init__(self, passages: Mapping[str, Sequence[Passage]] | None = None) -> None:
-        self._passages = dict(passages or {})
+    def __init__(self, inner: KnowledgeSearch) -> None:
+        self._inner = inner
         self.queries: list[str] = []
 
     def search(self, query: str) -> SearchOutcome:
         self.queries.append(query)
-        found = tuple(self._passages.get(query, ()))
-        return SearchOutcome("ok" if found else "no_data", found)
+        return self._inner.search(query)
+
+
+@functools.cache
+def real_search() -> KnowledgeSearch:
+    # Stateless and read-only: built once for the whole module, Hypothesis examples included.
+    settings = Settings(_env_file=None, openai_api_key=None, docs_dir=DOCS_DIR)
+    return build_search(settings, today=lambda: OPEN.date()).search
 
 
 @dataclass
@@ -128,7 +141,7 @@ class World:
     store: InMemoryConversationStore
     repository: SqliteComplaintRepository
     clock: MovableClock
-    search: FakeSearch
+    search: RecordingSearch
 
     def say(self, text: str) -> TurnResult:
         return self.agent.handle_user_message(CID, text)
@@ -148,7 +161,6 @@ def make_world(
     steps: Iterable[ScriptStep] = (),
     *,
     now: datetime = OPEN,
-    passages: Mapping[str, Sequence[Passage]] | None = None,
 ) -> World:
     clock = MovableClock(now)
     sales_path = directory / "ventas.json"
@@ -157,7 +169,7 @@ def make_world(
     repository = SqliteComplaintRepository(directory / "reclamos.db")
     repository.initialize()
     complaints = ComplaintsAdapter(ComplaintService(repository, clock))
-    search = FakeSearch(passages)
+    search = RecordingSearch(real_search())
     executor = ToolExecutor(
         search,
         sales,
@@ -180,8 +192,8 @@ def texts(result: TurnResult | CommandResult) -> list[str]:
     return [outbound.text for outbound in result.outbound]
 
 
-def passage(doc_id: str, text: str) -> Passage:
-    return Passage(doc_id, text, date(2026, 1, 1), date(2027, 12, 31))
+def search_call(query: str) -> ModelReply:
+    return calls_reply(tool_call("buscar_documentacion", {"consulta": query}))
 
 
 def log_rows(world: World) -> list[tuple[State, State, Event, Actor, AttemptOutcome, str | None]]:
@@ -249,24 +261,42 @@ def expected_question() -> str:
     return confirmation_request(PendingAction.create(validated, OPEN, turn=1, control_version=0))
 
 
-def test_2_in_suggest_an_answer_reaches_the_customer_only_once_approved(tmp_path: Path) -> None:
-    world = make_world(tmp_path, [text_reply("Las liquidaciones salen en 48 horas.")])
-    enter_suggest(world)
+def test_2_an_off_topic_question_hands_the_answer_and_then_a_complaint_to_the_operator(
+    tmp_path: Path,
+) -> None:
+    world = make_world(
+        tmp_path,
+        [
+            search_call("¿Cuál es la capital de Francia?"),
+            text_reply("No tengo información sobre eso."),
+            propose_reply(A),
+        ],
+    )
 
-    drafted = world.say("¿cuándo cobro?")
-    draft = only_draft(world, DraftKind.REPLY)
-    approved = world.team.approve_draft(CID, draft.id, Actor.OPERATOR)
+    # An off-topic question: the real search finds nothing above its floor.
+    drafted = world.say("¿Cuál es la capital de Francia?")
+    reply = only_draft(world, DraftKind.REPLY)
+    assert drafted.events == ("low_confidence:applied",)
+    assert drafted.control_state is State.SUGGEST
+    assert drafted.outbound == (Outbound("draft", "No tengo información sobre eso.", reply.id),)
+    assert [r.status for r in drafted.tools] == ["no_data"]
 
-    assert drafted.outbound == (
-        Outbound("draft", "Las liquidaciones salen en 48 horas.", draft.id),
-    )
-    assert approved.outbound == (
-        Outbound("reply", "Las liquidaciones salen en 48 horas.", draft.id),
-    )
-    assert world.stored().messages[-1] == Message(
-        Role.ASSISTANT, "Las liquidaciones salen en 48 horas."
-    )
-    assert world.team.drafts(CID) == ()
+    sent = world.team.approve_draft(CID, reply.id, Actor.OPERATOR)
+    assert sent.outbound == (Outbound("reply", "No tengo información sobre eso.", reply.id),)
+    assert world.stored().messages[-1] == Message(Role.ASSISTANT, "No tengo información sobre eso.")
+
+    # The model proposes a complaint: a question for the operator, nothing pending or sent.
+    ask_in_suggest(world)
+    # The customer confirms: an approval for the operator, still no row and nothing sent.
+    confirmed = world.say("sí")
+    approval = only_draft(world, DraftKind.ACTION_APPROVAL)
+    assert (confirmed.outbound, confirmed.gate, world.rows) == ((), "confirmed", 0)
+
+    executed = world.team.approve_draft(CID, approval.id, Actor.OPERATOR)
+
+    assert world.rows == 1
+    assert texts(executed) == [registered("REC-000001", created=True)]
+    assert world.model.call_count == 3
 
 
 def test_2_in_suggest_a_complaint_needs_the_customer_and_then_the_operator(tmp_path: Path) -> None:
@@ -693,3 +723,236 @@ def test_9_every_command_leaves_a_record_with_the_five_fields(tmp_path: Path) ->
             "invalid_transition",
         ),
     ]
+
+
+# --------------------------------------------------------------------------- 10: interleavings
+
+ASK = "Quiero reclamar: pagué la entrada y no me llegó el correo."
+CUSTOMER_TEXTS = [ASK, ASK, "sí", "sí", "Sí.", "no", "otra cosa", "idiota",
+                  "quiero hablar con una persona", "¿Cuál es la capital de Francia?",
+                  "¿cuánto dura la reserva del carrito?"]  # fmt: skip
+# Off-topic queries are the way into SUGGEST, so they are drawn more often.
+QUERIES = [
+    "¿Cuál es la capital de Francia?",
+    "receta de empanadas",
+    "¿Quién ganó el mundial 2022?",
+    "¿cuánto dura la reserva del carrito?",
+]
+COMPLAINTS = [A, {"motivo": "Pago doble", "descripcion": "Me cobraron dos veces la entrada."}]
+MODEL_MOVES = ["text", "search", "search", "propose", "propose", "claim"]
+COMMANDS = ["takeover", "release", "block", "unblock", "reply", "approve", "reject"]
+# Weighted by repetition: customer messages and draft decisions move a conversation the most;
+# the team is mostly the team, but customers and the system try commands too.
+ACTIONS = ["say", "say", "say", "say", "approve", "approve", "clock", *COMMANDS]
+ACTORS = [Actor.OPERATOR, Actor.OPERATOR, Actor.SUPERVISOR, Actor.SUPERVISOR, *Actor]
+TIMES = [OPEN, OPEN, OPEN, CLOSED]
+EXPECTED_REFUSALS = (ControlError, CommandError)
+
+
+def wild_model(data: st.DataObject) -> ScriptStep:
+    """Answers, searches on or off topic, proposes one of two complaints, or claims a
+    registration, at random; it always proposes when the customer just asked to complain."""
+
+    def step(messages: Sequence[Message], tools: Sequence[ToolSpec]) -> ModelReply:
+        if messages[-1] == Message(Role.USER, ASK) and CREAR_RECLAMO in {t.name for t in tools}:
+            return propose_reply(data.draw(st.sampled_from(COMPLAINTS)))
+        kind = data.draw(st.sampled_from(MODEL_MOVES))
+        if kind == "search":
+            return search_call(data.draw(st.sampled_from(QUERIES)))
+        if kind == "propose":
+            return propose_reply(data.draw(st.sampled_from(COMPLAINTS)))
+        if kind == "claim":
+            return text_reply("Listo, quedó registrado.")
+        return text_reply("Te cuento lo que sé.")
+
+    return step
+
+
+def endless(step: ScriptStep) -> Iterable[ScriptStep]:
+    while True:
+        yield step
+
+
+@dataclass(frozen=True)
+class Step:
+    action: str  # "say", "clock" or one of COMMANDS
+    text: str = ""
+    actor: Actor = Actor.CUSTOMER
+    draft: str = "newest"  # "newest" waiting draft, or an explicit id
+    instant: datetime = OPEN
+
+
+@dataclass
+class Ledger:
+    """What the invariants need to remember across steps."""
+
+    confirmed_sets: set[tuple[str, str]] = field(default_factory=set)
+    approval_drafts: set[str] = field(default_factory=set)
+
+
+def random_step(data: st.DataObject, world: World) -> Step:
+    action = data.draw(st.sampled_from(ACTIONS))
+    if action == "say":
+        return Step("say", text=data.draw(st.sampled_from(CUSTOMER_TEXTS)))
+    if action == "clock":
+        return Step("clock", instant=data.draw(st.sampled_from(TIMES)))
+    stored = world.store.load(CID)
+    drafts = [] if stored is None else [d.id for d in stored.drafts]
+    waiting = [] if stored is None else [d.id for d in stored.pending_drafts]
+    newest = waiting[-1:] * 6  # the newest waiting draft is usually the one that matters
+    draft = data.draw(st.sampled_from([*newest, *waiting, *drafts, "D-0999"]))
+    return Step(action, actor=data.draw(st.sampled_from(ACTORS)), draft=draft)
+
+
+def complaint_key(arguments: str) -> tuple[str, str]:
+    data = json.loads(arguments)
+    return str(data["motivo"]).casefold(), str(data["descripcion"]).casefold()
+
+
+def run_command(world: World, step: Step) -> CommandResult:
+    team, actor = world.team, step.actor
+    draft = step.draft
+    if draft == "newest":
+        waiting = world.team.drafts(CID)
+        draft = waiting[-1].id if waiting else "D-0999"
+    match step.action:
+        case "takeover":
+            return team.takeover(CID, actor)
+        case "release":
+            return team.release(CID, actor)
+        case "block":
+            return team.block(CID, actor)
+        case "unblock":
+            return team.unblock(CID, actor)
+        case "reply":
+            return team.operator_reply(CID, actor, "Hola, te escribe una persona del equipo.")
+        case "approve":
+            return team.approve_draft(CID, draft, actor)
+        case _:
+            return team.reject_draft(CID, draft, actor)
+
+
+def check_turn(before: State, result: TurnResult, ledger: Ledger, rows_added: int) -> None:
+    synced = "out_of_hours_started:applied" in result.events
+    start = State.AUTO if synced and before in (State.SUGGEST, State.HUMAN) else before
+    kinds = [outbound.kind for outbound in result.outbound]
+    assert "operator" not in kinds
+    if start in (State.HUMAN, State.BLOCKED):
+        # In HUMAN the agent sends nothing; in BLOCKED nobody does.
+        assert result.outbound == ()
+        assert result.model_calls == 0
+    if result.control_state is State.SUGGEST:
+        assert set(kinds) <= {"draft"}
+    if result.control_state in (State.HUMAN, State.BLOCKED):
+        # Only the one notice of the turn that handed the conversation over or suspended it.
+        assert set(kinds) <= {"notice"}
+        assert not kinds or start not in (State.HUMAN, State.BLOCKED)
+    if result.gate == "confirmed":
+        ledger.confirmed_sets.update(
+            complaint_key(record.arguments)
+            for record in result.tools
+            if record.name == CREAR_RECLAMO
+        )
+        if start is State.SUGGEST:
+            ledger.approval_drafts.update(result.drafts)
+            event("customer confirmed in SUGGEST")
+    if rows_added:
+        event("row written by a turn")
+        # A turn writes a row only in AUTO, on the customer's own yes, without the model.
+        assert (result.gate, result.model_calls, start) == ("confirmed", 0, State.AUTO)
+
+
+def check_command(step: Step, result: CommandResult, ledger: Ledger, rows_added: int) -> None:
+    kinds = [outbound.kind for outbound in result.outbound]
+    if step.action in ("takeover", "release", "block", "unblock"):
+        assert result.outbound == ()
+    if "operator" in kinds:
+        assert (step.action, result.control_state) == ("reply", State.HUMAN)
+    if "reply" in kinds:
+        # Only an operator's decision on a draft, while the operator reviews (SUGGEST).
+        assert step.action in ("approve", "reject")
+        assert result.control_state is State.SUGGEST
+    assert result.control_state is not State.BLOCKED or result.outbound == ()
+    if rows_added:
+        event("row written by an operator approval")
+        # Only approving the ACTION_APPROVAL that a customer's yes in SUGGEST created.
+        assert step.action == "approve"
+        assert result.registered
+        assert any(f"draft_approved:{draft}" in result.events for draft in ledger.approval_drafts)
+
+
+def perform(world: World, ledger: Ledger, step: Step) -> None:
+    stored = world.store.load(CID)
+    before = State.AUTO if stored is None else stored.control_state
+    rows_before = world.rows
+    if step.action == "clock":
+        world.clock.instant = step.instant
+        return
+    if step.action == "say":
+        result = world.say(step.text)
+        check_turn(before, result, ledger, world.rows - rows_before)
+    else:
+        try:
+            command = run_command(world, step)
+        except EXPECTED_REFUSALS:
+            assert world.rows == rows_before
+        else:
+            check_command(step, command, ledger, world.rows - rows_before)
+    after = world.stored().control_state if world.store.load(CID) else State.AUTO
+    if before is State.BLOCKED and after is not State.BLOCKED:
+        # Nothing but a supervisor ever takes a conversation out of BLOCKED.
+        assert (step.action, step.actor) in {
+            ("unblock", Actor.SUPERVISOR),
+            ("release", Actor.SUPERVISOR),
+        }
+        event("left BLOCKED")
+    assert world.rows <= len(ledger.confirmed_sets)
+
+
+def finish(world: World) -> None:
+    event(f"rows: {world.rows}")
+    final = world.store.load(CID)
+    for message in () if final is None else final.messages:
+        assert "Traceback" not in (message.content or "")
+
+
+@settings(max_examples=200)
+@given(data=st.data())
+def test_10_random_interleavings_keep_every_rule_of_the_control_machine(
+    data: st.DataObject,
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        world = make_world(Path(directory), endless(wild_model(data)))
+        ledger = Ledger()
+        # Reaching SUGGEST by chance takes an off-topic search answered in hours; starting
+        # there half of the time explores what the operator's drafts allow.
+        if data.draw(st.booleans()):
+            enter_suggest(world)
+        for _ in range(data.draw(st.integers(min_value=1, max_value=40))):
+            perform(world, ledger, random_step(data, world))
+        finish(world)
+
+
+# The complaint flow in SUGGEST, as the operator and the customer would play it.
+TWO_APPROVALS = (
+    Step("say", text=ASK),
+    Step("approve", actor=Actor.OPERATOR),
+    Step("say", text="sí"),
+    Step("approve", actor=Actor.OPERATOR),
+)
+
+
+@settings(max_examples=200)
+@given(data=st.data())
+def test_10_the_two_approvals_interleaved_with_anything_keep_every_rule(
+    data: st.DataObject,
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        world = make_world(Path(directory), endless(wild_model(data)))
+        ledger = Ledger()
+        enter_suggest(world)
+        for planned in TWO_APPROVALS:
+            for _ in range(data.draw(st.integers(min_value=0, max_value=2))):
+                perform(world, ledger, random_step(data, world))
+            perform(world, ledger, planned)
+        finish(world)
