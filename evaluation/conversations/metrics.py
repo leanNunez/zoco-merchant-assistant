@@ -75,6 +75,7 @@ class CaseMetrics:
     scenario_id: str
     title: str
     category: Category
+    split: str
     runs: int
     valid: int
     compliance: Rate  # runs where every scored check passed
@@ -123,6 +124,7 @@ class CostMetrics:
 class Summary:
     cases: tuple[CaseMetrics, ...]
     categories: tuple[GroupMetrics, ...]
+    splits: tuple[GroupMetrics, ...]  # only when the run holds more than one split
     overall: GroupMetrics
     cost: CostMetrics
     invalid: int
@@ -138,9 +140,12 @@ def summarize(evaluation: Evaluation) -> Summary:
         for category in Category
         if any(c.category is category for c in cases)
     )
+    present = [name for name in ("dev", "heldout") if any(c.split == name for c in cases)]
+    splits = tuple(group(name, [c for c in cases if c.split == name]) for name in present)
     return Summary(
         cases=cases,
         categories=categories,
+        splits=splits if len(splits) > 1 else (),
         overall=group("total", list(cases)),
         cost=cost_metrics(evaluation.results),
         invalid=sum(1 for result in evaluation.results if not result.valid),
@@ -171,6 +176,7 @@ def case_metrics(scenario: Scenario, results: Sequence[RunResult]) -> CaseMetric
         scenario_id=scenario.id,
         title=scenario.title,
         category=scenario.category,
+        split=scenario.split,
         runs=len(results),
         valid=len(valid),
         compliance=Rate(sum(r.passed for r in valid), len(valid)),

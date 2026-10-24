@@ -57,6 +57,11 @@ CATEGORY_NAMES = {
     Category.POLICY_ATTACK: "Intentos de violar las políticas",
     Category.STATE_CROSSING: "Cruces de estados de la máquina de control",
 }
+SPLIT_NAMES = {
+    "dev": "`dev`: los escenarios con los que se ajustó el agente (números optimistas)",
+    "heldout": "`heldout`: escenarios reservados, nunca usados para ajustar (medición sin sesgo)",
+    "all": "`all`: `dev` y `heldout` juntos (ver la tabla por partición)",
+}
 _KIND = {CheckKind.LOCK: "LOCK", CheckKind.UTILITY: "UTILITY", CheckKind.EVIDENCE: "EVIDENCIA"}
 _WHEN = {
     When.CONFIRMATION_REQUESTED: "solo si el último mensaje pide confirmar",
@@ -81,6 +86,7 @@ class Provenance:
     reps: int
     base_seed: int
     only: tuple[str, ...]
+    split: str
     budget_usd: str | None
     spent_usd: str | None
     unknown_cost_calls: int
@@ -112,6 +118,7 @@ def provenance(evaluation: Evaluation) -> Provenance:
         reps=evaluation.settings.reps,
         base_seed=evaluation.settings.base_seed,
         only=evaluation.settings.only,
+        split=evaluation.settings.split,
         budget_usd=str(evaluation.settings.budget_usd) if live else None,
         spent_usd=None if evaluation.spent_usd is None else str(evaluation.spent_usd),
         unknown_cost_calls=evaluation.unknown_cost_calls,
@@ -144,6 +151,7 @@ def to_json(
         "summary": {
             "overall": _group(summary.overall),
             "categories": [_group(g) for g in summary.categories],
+            "splits": [_group(g) for g in summary.splits],
             "cases": [_case(c) for c in summary.cases],
             "cost": asdict(summary.cost),
             "invalid_runs": summary.invalid,
@@ -221,6 +229,7 @@ def _case(case: CaseMetrics) -> dict[str, object]:
     return {
         "scenario": case.scenario_id,
         "category": case.category,
+        "split": case.split,
         "runs": case.runs,
         "valid": case.valid,
         "insufficient_evidence": case.insufficient,
@@ -304,6 +313,13 @@ def _intro(source: Provenance) -> list[str]:
             "ejecutaron. Ver `errors.jsonl`.",
             "",
         ]
+    if source.split == "dev":
+        lines += [
+            "> Partición `dev`: son los escenarios con los que se ajustaron el prompt y el "
+            "evaluador, así que estos números son optimistas. La medición sin sesgo es la de "
+            "`heldout`.",
+            "",
+        ]
     if source.only:
         lines += [f"> Corrida restringida a: {', '.join(source.only)}.", ""]
     return lines
@@ -324,6 +340,7 @@ def _provenance(source: Provenance) -> list[str]:
         ("sha256 de `data/ventas.json`", f"`{source.sales_sha256[:16]}`"),
         ("Recuperación", ", ".join(f"`{r}`" for r in source.retrieval) or "—"),
         ("Instante de referencia", f"{source.reference_instant} (viernes 12:00 en Buenos Aires)"),
+        ("Partición de escenarios", SPLIT_NAMES[source.split]),
         ("Repeticiones por caso", str(source.reps)),
         ("Semilla base", f"{source.base_seed} (repetición r usa {source.base_seed} + r)"),
     ]
@@ -390,12 +407,32 @@ def _summary(summary: Summary, source: Provenance) -> list[str]:
             f"{_ratio(group.pass_k)} | "
             f"{_ratio(group.lock_runs)} | {_ratio(group.utility_runs)} |"
         )
+    if summary.splits:
+        lines += [
+            "",
+            "### Por partición",
+            "",
+            "`dev` son los escenarios con los que se ajustaron el prompt y el evaluador; "
+            "`heldout`, situaciones nuevas escritas aparte, que nadie usó para iterar. Si "
+            "`heldout` cumple mucho menos que `dev`, el ajuste se pasó de rosca.",
+            "",
+            "| Partición | Casos | Cumplimiento | IC 95% | pass^k | LOCK (corridas) "
+            "| UTILITY (corridas) |",
+            "|---|---|---|---|---|---|---|",
+        ]
+        for group in summary.splits:
+            lines.append(
+                f"| `{group.label}` | {group.cases} | {_ratio(group.compliance)} | "
+                f"{_interval(group.compliance.interval)} | {_ratio(group.pass_k)} | "
+                f"{_ratio(group.lock_runs)} | {_ratio(group.utility_runs)} |"
+            )
     lines += [
         "",
         "### Por caso",
         "",
-        "| Caso | Categoría | Válidas | Cumplimiento | LOCK | UTILITY | Checks que fallan |",
-        "|---|---|---|---|---|---|---|",
+        "| Caso | Categoría | Partición | Válidas | Cumplimiento | LOCK | UTILITY "
+        "| Checks que fallan |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for case in summary.cases:
         failing = "; ".join(f"`{t.name}` en {t.failures}" for t in case.failed) or "—"
@@ -403,7 +440,7 @@ def _summary(summary: Summary, source: Provenance) -> list[str]:
         limit = " ⚠️ limitación conocida" if case.known_limitation else ""
         lines.append(
             f"| [{case.scenario_id}](#{case.scenario_id.lower()}){limit} | "
-            f"{CATEGORY_NAMES[case.category]} | {case.valid}/{case.runs}{mark} | "
+            f"{CATEGORY_NAMES[case.category]} | `{case.split}` | {case.valid}/{case.runs}{mark} | "
             f"{_ratio(case.compliance)} | {_ratio(case.lock_runs)} | {_ratio(case.utility_runs)} "
             f"| {_escape(failing)} |"
         )
@@ -468,7 +505,8 @@ def _case_section(
     lines = [
         f"### {scenario.id}",
         "",
-        f"**{scenario.title}** · {CATEGORY_NAMES[scenario.category]}",
+        f"**{scenario.title}** · {CATEGORY_NAMES[scenario.category]} · "
+        f"partición `{scenario.split}`",
         "",
     ]
     lines += ["**Mensajes del usuario y pasos**", ""]
@@ -646,6 +684,10 @@ def _limits(mode: str) -> list[str]:
         "`low_confidence fired` muestra que el cruce no se ejerció. Los guiones lo fuerzan, así "
         "que el cruce se prueba sin red; con el modelo real, esa evidencia dice cuántas veces se "
         "probó de verdad.",
+        "- **Los escenarios `dev` influyeron en el prompt y en el evaluador.** Se leyeron sus "
+        "transcripciones para decidir qué cambiar, así que su tasa de cumplimiento es optimista "
+        "por construcción. Solo la partición `heldout` (ocho situaciones nuevas, escritas aparte "
+        "y nunca usadas para iterar) mide sin sesgo, y con ocho casos su intervalo es ancho.",
         "- **Tres repeticiones** dan intervalos anchos; los casos con menos de dos corridas "
         "válidas se marcan como evidencia insuficiente.",
     ]

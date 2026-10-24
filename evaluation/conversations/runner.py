@@ -38,7 +38,7 @@ from evaluation.conversations.models import (
 from evaluation.conversations.naive import build_naive
 from evaluation.conversations.observation import Observation, StepFact
 from evaluation.conversations.pricing import cost
-from evaluation.conversations.scenario import Scenario
+from evaluation.conversations.scenario import Scenario, SplitChoice, in_split
 from evaluation.conversations.world import Ground, World, build_real, prepare
 from merchant_assistant.agent.ports import ChatModel
 from merchant_assistant.shared.config import Settings
@@ -71,6 +71,7 @@ class RunSettings:
     reps: int = DEFAULT_REPS
     base_seed: int = 0
     only: tuple[str, ...] = ()
+    split: SplitChoice = "all"
     budget_usd: Decimal = DEFAULT_BUDGET_USD
     conversation_seconds: float = LIVE_CONVERSATION_SECONDS
 
@@ -158,7 +159,7 @@ def run_evaluation(
 ) -> Evaluation:
     if (settings.mode == "live") != (live is not None):
         raise ValueError("the live mode, and only it, needs a LiveSetup")
-    chosen = select(scenarios, settings.only)
+    chosen = select(in_split(scenarios, settings.split), settings.only)
     budget = Budget(settings.budget_usd) if live is not None else None
     builder = (BUILDERS if builders is None else builders).get(settings.mode, build_real)
     results: list[RunResult] = []

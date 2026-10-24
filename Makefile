@@ -1,7 +1,7 @@
 # One command per step. `make check` is what CI runs, so green here means green there.
 
 .DEFAULT_GOAL := help
-.PHONY: help setup format lint typecheck arch test diagram index eval-retrieval eval-agent eval-agent-live dataset db chat check
+.PHONY: help setup format lint typecheck arch test diagram index eval-retrieval eval-agent eval-agent-live eval-agent-heldout dataset db chat check
 
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -47,8 +47,13 @@ eval-agent: ## Conversation evaluation with the scripted models (offline, free, 
 	uv run python -m evaluation.conversations run --mode naive
 	uv run python -m evaluation.conversations run --mode scripted
 
-eval-agent-live: ## Conversation evaluation with the real model (needs a key; spends credit; capped)
-	uv run python -m evaluation.conversations run --mode live
+# The dev split is what the prompt is tuned against. The held-out split is the unbiased
+# measurement: run it once per accepted prompt, never to iterate (ADR-0008).
+eval-agent-live: ## Real-model evaluation on the dev split (needs a key; spends credit; capped)
+	uv run python -m evaluation.conversations run --mode live --split dev
+
+eval-agent-heldout: ## Real-model evaluation on the held-out split (needs a key; run once, never iterate)
+	uv run python -m evaluation.conversations run --mode live --split heldout
 
 dataset: ## Regenerate data/ventas.json
 	uv run python scripts/generate_ventas.py

@@ -15,6 +15,7 @@ state crossings, because the point there is that the code's locks hold whatever 
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -30,6 +31,13 @@ from merchant_assistant.shared.faults import FaultMode
 REFERENCE_INSTANT = datetime(2026, 10, 23, 15, 0, tzinfo=UTC)
 _ID = re.compile(r"^[A-Z][0-9]{2}$|^X[0-9]$")
 _TAG = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+# `dev` scenarios are the ones the prompt and the evaluator were tuned against; `heldout` ones are
+# new wordings of the same situations that nobody iterates on, so their numbers stay honest.
+Split = Literal["dev", "heldout"]
+SplitChoice = Literal["dev", "heldout", "all"]
+SPLITS: tuple[SplitChoice, ...] = ("dev", "heldout", "all")
 
 
 class Category(StrEnum):
@@ -162,6 +170,7 @@ class Scenario:
     # EXPECTED to fail with the scripted model, and the validation pins exactly those.
     known_limitation: str | None = None
     expected_failures: tuple[str, ...] = ()
+    split: Split = "dev"
 
     def __post_init__(self) -> None:
         if not _ID.match(self.id):
@@ -177,6 +186,8 @@ class Scenario:
         scored = [c for c in self.checks if c.kind is not CheckKind.EVIDENCE]
         if not any(check.probe.basis == "fact" for check in scored):
             raise ValueError(f"{self.id}: at least one scored check must rest on a fact")
+        if (self.split == "heldout") != self.id.startswith("H"):
+            raise ValueError(f"{self.id}: held-out scenarios, and only they, are numbered H01...")
         if bool(self.known_limitation) != bool(self.expected_failures):
             raise ValueError(f"{self.id}: a known limitation names the checks it fails")
         if not set(self.expected_failures) <= set(names):
@@ -188,3 +199,8 @@ class Scenario:
 
     def checks_of(self, kind: CheckKind) -> tuple[Check, ...]:
         return tuple(check for check in self.checks if check.kind is kind)
+
+
+def in_split(scenarios: Sequence[Scenario], split: SplitChoice) -> tuple[Scenario, ...]:
+    """The scenarios of one split, in catalog order (`all` keeps every one)."""
+    return tuple(s for s in scenarios if split == "all" or s.split == split)

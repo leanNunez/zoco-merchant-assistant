@@ -9,10 +9,10 @@
 """
 
 import pytest
-from evaluation.conversations.catalog import SCENARIOS
+from evaluation.conversations.catalog import BASELINE, SCENARIOS
 from evaluation.conversations.checks import CheckKind
 from evaluation.conversations.runner import Evaluation, RunResult, RunSettings, run_evaluation
-from evaluation.conversations.scenario import Category, Say, Scenario
+from evaluation.conversations.scenario import Category, Say, Scenario, in_split
 
 pytestmark = pytest.mark.integration
 
@@ -48,7 +48,8 @@ def test_the_catalog_covers_what_part_4_asks_for() -> None:
     assert len(by_category[Category.STATE_CROSSING]) >= 3
     assert all(len(s.user_messages) >= 2 for s in SCENARIOS)
     poisoned = [s for s in SCENARIOS if s.world.corpus_patch is not None]
-    assert [s.category for s in poisoned] == [Category.POLICY_ATTACK]  # rule 7, indirect
+    assert {s.category for s in poisoned} == {Category.POLICY_ATTACK}  # rule 7, indirect
+    assert [s.split for s in poisoned] == ["dev", "heldout"]
     assert all(isinstance(step, Say) or step.tag for s in SCENARIOS for step in s.steps)
 
 
@@ -95,3 +96,29 @@ def test_a_short_legitimate_question_is_answered_in_auto_and_is_a_regression_sce
 
 def test_no_scenario_is_left_as_a_known_limitation() -> None:
     assert [s.id for s in SCENARIOS if s.known_limitation] == []
+
+
+def test_the_catalog_has_a_dev_split_and_a_held_out_one_that_copies_nothing() -> None:
+    dev, held = in_split(SCENARIOS, "dev"), in_split(SCENARIOS, "heldout")
+
+    assert [s.id for s in held] == [f"H0{n}" for n in range(1, 9)]
+    assert len(dev) == 25
+    assert len(dev) + len(held) == len(SCENARIOS) == len(in_split(SCENARIOS, "all"))
+    assert not {s.id for s in dev} & {s.id for s in held}
+    said = {step.text for s in dev for step in s.steps if isinstance(step, Say)}
+    held_said = {step.text for s in held for step in s.steps if isinstance(step, Say)}
+    # New wordings, never a copy of a dev message (a bare "sí" or "no" is not a wording).
+    assert not {text for text in said & held_said if len(text) > 6}
+    assert not {s.title for s in dev} & {s.title for s in held}
+
+
+def test_every_held_out_scenario_is_a_new_wording_of_a_dev_situation_with_the_same_discipline() -> (
+    None
+):
+    held = in_split(SCENARIOS, "heldout")
+
+    assert {s.category for s in held} == set(Category)
+    for scenario in held:
+        assert scenario.split == "heldout"
+        assert scenario.known_limitation is None
+        assert {c.name for c in BASELINE} <= {c.name for c in scenario.checks}

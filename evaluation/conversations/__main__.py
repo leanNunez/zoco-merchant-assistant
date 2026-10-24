@@ -1,4 +1,4 @@
-"""CLI: `python -m evaluation.conversations run --mode scripted|null|naive|live`.
+"""CLI: `python -m evaluation.conversations run --mode scripted|null|naive|live [--split ...]`.
 
 Writes `results.json`, `errors.jsonl` and `report.md` under
 `evaluation/results/conversations/<mode>/`. The scripted run also runs the null and naive modes
@@ -36,7 +36,7 @@ from evaluation.conversations.runner import (
     RunSettings,
     run_evaluation,
 )
-from evaluation.conversations.scenario import Scenario
+from evaluation.conversations.scenario import SPLITS, Scenario, SplitChoice, in_split
 from evaluation.conversations.validation import Validation, validate
 from merchant_assistant.agent.ports import ChatModel
 from merchant_assistant.bootstrap import build_chat_model
@@ -77,13 +77,21 @@ def main(
     run.add_argument("--mode", choices=MODES, required=True)
     run.add_argument("--reps", type=int, default=DEFAULT_REPS)
     run.add_argument("--only", default="", help="ids separados por coma, por ejemplo S01,X2")
+    run.add_argument(
+        "--split",
+        choices=SPLITS,
+        default="all",
+        help="dev: los escenarios con los que se ajusta el agente; heldout: los reservados "
+        "para medir sin sesgo; all: ambos (por defecto)",
+    )
     run.add_argument("--seed", type=int, default=0)
     run.add_argument("--budget-usd", default=None)
     run.add_argument("--out", type=Path, default=None)
     args = parser.parse_args(argv)
     mode: Mode = args.mode
     only = tuple(item.strip() for item in args.only.split(",") if item.strip())
-    known = {scenario.id for scenario in deps.scenarios}
+    split: SplitChoice = args.split
+    known = {scenario.id for scenario in in_split(deps.scenarios, split)}
     unknown = sorted(set(only) - known)
     if unknown:
         print(f"Escenarios desconocidos: {', '.join(unknown)}.", file=sys.stderr)
@@ -94,13 +102,16 @@ def main(
     budget = _budget(args.budget_usd, deps)
     if budget is None:
         return 2
-    settings = RunSettings(mode, reps=args.reps, base_seed=args.seed, only=only, budget_usd=budget)
+    settings = RunSettings(
+        mode, reps=args.reps, base_seed=args.seed, only=only, split=split, budget_usd=budget
+    )
     live = _live(deps) if mode == "live" else None
     if mode == "live" and live is None:
         return 2
     evaluation = run_evaluation(deps.scenarios, settings, live=live)
     validation = _validation(evaluation, deps.scenarios) if mode == "scripted" else None
-    out = args.out or results_dir / mode
+    # A held-out run never overwrites the results the dev iterations are compared against.
+    out = args.out or results_dir / (f"{mode}-heldout" if split == "heldout" else mode)
     write(out, evaluation, validation)
     return _report(out, evaluation)
 
@@ -123,7 +134,9 @@ def _validation(scripted: Evaluation, scenarios: Sequence[Scenario]) -> Validati
     base = scripted.settings
 
     def again(mode: Mode) -> Evaluation:
-        settings = RunSettings(mode, reps=base.reps, base_seed=base.base_seed, only=base.only)
+        settings = RunSettings(
+            mode, reps=base.reps, base_seed=base.base_seed, only=base.only, split=base.split
+        )
         return run_evaluation(scenarios, settings)
 
     return validate(scripted, again("null"), again("naive"))

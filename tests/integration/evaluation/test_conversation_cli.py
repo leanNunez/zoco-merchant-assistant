@@ -145,3 +145,49 @@ def test_refused_credentials_end_the_run_with_a_clear_message(
 
     assert "rechazó las credenciales" in capsys.readouterr().err
     assert "authentication" in (tmp_path / "errors.jsonl").read_text("utf-8")
+
+
+def test_the_split_chooses_the_scenarios_and_a_held_out_run_has_its_own_directory(
+    tmp_path: Path,
+) -> None:
+    deps = live_deps(keyed())
+
+    dev = main(
+        ["run", "--mode", "live", "--split", "dev", "--only", "S04", "--reps", "1"],
+        results_dir=tmp_path,
+        deps=deps,
+    )
+    held = main(
+        ["run", "--mode", "live", "--split", "heldout", "--only", "H01", "--reps", "1"],
+        results_dir=tmp_path,
+        deps=deps,
+    )
+
+    assert (dev, held) == (0, 0)
+    assert (tmp_path / "live" / "report.md").exists()  # dev keeps the directory of the mode
+    held_report = (tmp_path / "live-heldout" / "report.md").read_text("utf-8")
+    assert "| Partición de escenarios | `heldout`" in held_report
+    assert "[H01](#h01)" in held_report
+    assert "[S04]" not in held_report
+    dev_report = (tmp_path / "live" / "report.md").read_text("utf-8")
+    assert "Partición `dev`: son los escenarios con los que se ajustaron" in dev_report
+
+
+def test_a_scenario_of_the_other_split_is_unknown(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    deps = live_deps(keyed())
+    argv = ["run", "--mode", "live", "--out", str(tmp_path), "--split", "dev", "--only", "H01"]
+
+    assert main(argv, deps=deps) == 2
+
+    assert "Escenarios desconocidos: H01" in capsys.readouterr().err
+
+
+def test_the_default_split_runs_both_and_the_report_compares_them(tmp_path: Path) -> None:
+    assert main(["run", "--mode", "null", "--reps", "1", "--out", str(tmp_path)]) == 0
+
+    report = (tmp_path / "report.md").read_text("utf-8")
+    assert "### Por partición" in report
+    assert "| `dev` | 25 |" in report
+    assert "| `heldout` | 8 |" in report
