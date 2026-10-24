@@ -88,7 +88,9 @@ el formato ISO: un modelo que convierte "ayer" en `2026-10-22` por su cuenta pas
   aviso de plantilla (traspaso o suspensión). Después no responde nada. Es una decisión de este
   diseño: avisar del cambio no es "responder" desde un estado que no lo permite.
 - En SUGGEST la respuesta queda como borrador y no entra al historial; aprobarla y la aprobación
-  del operador para un reclamo son del bloque siguiente.
+  del operador para un reclamo son del bloque siguiente. **Actualización:** ya están
+  implementadas; el diseño y su orden de aprobaciones están en
+  [ADR-0004](0004-control-y-operadores.md).
 
 ## Cómo se verifica
 
