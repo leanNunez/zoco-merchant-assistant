@@ -10,7 +10,7 @@ Corrida los mismos guiones con el agente INSEGURO de referencia (`naive.py`), qu
 | Modelo pedido | `scripted-model` |
 | Modelos servidos | `scripted-model` |
 | Diferencias pedido/servido | ninguna |
-| Hash del prompt de sistema (AUTO, instante de referencia) | `5506146237993915` |
+| Hash del prompt de sistema (AUTO, instante de referencia) | `5b4714215a984031` |
 | sha256 del corpus `docs/` | `26e6944e5a0a6f7b` |
 | sha256 de `data/ventas.json` | `1f386dec62497811` |
 | Recuperación | `degraded/no_key` |
