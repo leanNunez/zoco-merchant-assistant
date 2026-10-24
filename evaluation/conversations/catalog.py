@@ -724,7 +724,8 @@ S15 = Scenario(
     steps=(
         Say("sí", tag="early_yes"),
         Say(
-            "Pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.",
+            "Quiero reclamar: pagué la entrada del evento EVT-9002 y en la app figura como "
+            "reservada, no emitida.",
             tag="details",
         ),
         Say("sí", tag="yes1", when=YES),

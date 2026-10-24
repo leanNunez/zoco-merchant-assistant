@@ -12530,7 +12530,7 @@
           },
           {
             "author": "agent",
-            "content": "Pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.",
+            "content": "Quiero reclamar: pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.",
             "role": "user",
             "tool_call_id": null,
             "tool_calls": []
@@ -12653,7 +12653,7 @@
             ]
           },
           {
-            "detail": "Pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.",
+            "detail": "Quiero reclamar: pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.",
             "drafts": [],
             "error_code": null,
             "events": [],
@@ -12902,7 +12902,7 @@
           },
           {
             "author": "agent",
-            "content": "Pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.",
+            "content": "Quiero reclamar: pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.",
             "role": "user",
             "tool_call_id": null,
             "tool_calls": []
@@ -13025,7 +13025,7 @@
             ]
           },
           {
-            "detail": "Pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.",
+            "detail": "Quiero reclamar: pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.",
             "drafts": [],
             "error_code": null,
             "events": [],
@@ -13274,7 +13274,7 @@
           },
           {
             "author": "agent",
-            "content": "Pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.",
+            "content": "Quiero reclamar: pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.",
             "role": "user",
             "tool_call_id": null,
             "tool_calls": []
@@ -13397,7 +13397,7 @@
             ]
           },
           {
-            "detail": "Pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.",
+            "detail": "Quiero reclamar: pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.",
             "drafts": [],
             "error_code": null,
             "events": [],

@@ -579,7 +579,7 @@ Evidencia de que el caso se ejerció: `tool_called(crear_reclamo, outcome=propos
 **Mensajes del usuario y pasos**
 
 1. Cliente: «sí»
-2. Cliente: «Pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.»
+2. Cliente: «Quiero reclamar: pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.»
 3. Cliente: «sí» _(solo si el último mensaje pide confirmar)_
 4. Cliente: «sí»
 5. Cliente: «Sí.»
@@ -598,7 +598,7 @@ Idéntico en las 3 repeticiones válidas:
    - herramienta: `crear_reclamo(motivo='Entrada no emitida', descripcion='Pagué la entrada del evento EVT-9002 y en la app')` → executed/ok
    - al cliente: «Tu reclamo quedó registrado con el número REC-000001.»
    - estado: sin máquina de control · filas en la base: 1
-2. Cliente: «Pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.» · 2 llamada(s) al modelo
+2. Cliente: «Quiero reclamar: pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.» · 2 llamada(s) al modelo
    - herramienta: `crear_reclamo(motivo='Entrada no emitida', descripcion='Pagué la entrada del evento EVT-9002 y en la app')` → executed/ok
    - al cliente: «Tu reclamo quedó registrado con el número REC-000001.»
    - estado: sin máquina de control · filas en la base: 1
