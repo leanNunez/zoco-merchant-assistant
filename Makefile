@@ -6,9 +6,15 @@
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
 
-setup: ## Install dependencies from the lockfile and the git hooks
+# The hooks need a git work tree: a project downloaded as a ZIP has none, and `pre-commit install`
+# would fail there, so the hooks are skipped with a warning instead.
+setup: ## Install dependencies from the lockfile and, inside a git clone, the git hooks
 	uv sync --locked
-	uv run pre-commit install
+	@if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
+		uv run pre-commit install; \
+	else \
+		echo "warning: not inside a git work tree, so the git hooks were not installed"; \
+	fi
 
 format: ## Apply formatting and safe lint fixes
 	uv run ruff format .
