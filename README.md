@@ -17,6 +17,14 @@ cuatro partes** que comparten repositorio y se corresponden con la consigna:
 mienta](#cómo-se-evita-que-esta-documentación-mienta)). Lo que no se pudo medir está en
 [Limitaciones conocidas](#limitaciones-conocidas).
 
+## Resumen
+
+Asistente de un comercio de ZocoTickets en cuatro partes (buscador, agente con políticas 🔒, máquina de estados y evaluación). El LLM propone; el código dispone ([ADR-0001](design/adr/0001-llm-propone-codigo-dispone.md)).
+
+- **Cómo ejecutarlo:** `make setup`, `make check`, `make eval-retrieval` y `make eval-agent` no necesitan clave; `make chat` y las corridas reales sí ([Cómo ejecutarlo](#cómo-ejecutarlo)).
+- **Resultados:** hybrid recall@3 0.975 y MRR 0.975, sin ganador declarado. Con el modelo real, `live` 72/78 (92%, optimista) y `live-heldout` 14/24 (58%, la medición honesta); LOCK 1197/1197 en las 102 conversaciones de las dos corridas finales.
+- **Dónde mirar:** [matriz de cumplimiento](#matriz-de-cumplimiento-de-la-consigna), [`SPEC_REVIEW.md`](SPEC_REVIEW.md), [diagrama de estados](design/state-diagram.md) y [decisiones (ADR)](design/adr/).
+
 ## Resultados en una pantalla
 
 **Buscador (Parte 1).** 20 preguntas del kit, chunking `document`, elegido por una regla declarada antes de ver las tablas:
@@ -432,6 +440,8 @@ Las ocho corridas costaron en total USD 0,41. El relato, con la decisión que se
 
 Los costos de una corrida completa fueron de unos USD 0,067 (`dev`) y 0,019 (`heldout`).
 
+**Procedencia de las corridas reales.** `live/` y `live-heldout/` se produjeron el 2026-10-24, antes del commit `d8411b7` (2026-10-26), que cambió `agent/application/conversation.py`, `operator.py`, `agent/domain/dates.py` y `messages.py`: la pregunta de confirmación de la compuerta ahora se guarda con `Author.GATE` y sus fechas ya no cuentan como propuestas por el asistente. El hash del prompt (`5b4714215a984031`) no cambió, así que los informes no lo muestran. Ese arreglo solo restringe cuándo una fecha cuenta como aceptada (quita una forma de dar por buena una fecha, no agrega comportamiento). La suite determinista y las evaluaciones `scripted`, `null` y `naive` se regeneraron y pasan después de él; **las corridas reales no se repitieron** y sus números no se tocaron.
+
 ### Qué NO mide esta evaluación
 
 - La calidad de la redacción ni la utilidad percibida: no hay juez, a propósito.
@@ -525,7 +535,7 @@ Una fila por requisito. Estados: ⬜ pendiente · 🟨 parcial · ✅ hecho. Un 
 
 | Requisito | Estado | Dónde se garantiza | Evidencia |
 |---|---|---|---|
-| Repositorio Git con el código, worktrees y un historial de commits que muestre el avance | 🟨 | Git: una rama `main` con el historial completo, un commit por bloque. **No se usaron worktrees adicionales** | `git log` |
+| Repositorio Git con el código, worktrees y un historial de commits que muestre el avance | 🟨 | Git: una rama `main` con el historial completo, un commit por bloque. **No se usaron worktrees adicionales**: el trabajo fue secuencial, por bloques y con un único autor de cambios a la vez, así que no hubo ramas paralelas que aislar; el historial es lineal (sin merges) | `git log` |
 | README con instrucciones de punta a punta, un comando por paso | ✅ | [Cómo ejecutarlo](#cómo-ejecutarlo) | Un test comprueba que cada `make` mencionado existe y que cada comando documentado del Makefile aparece |
 | `.env.example` sin credenciales reales | ✅ | `.env.example` en la raíz, igual a la plantilla de [Configuración](#configuración), con los secretos vacíos | `test_docs_consistency.py` (cubre las variables, los valores por defecto y que el archivo sea la plantilla) |
 | `ventas.json` y la base de reclamos inicial | ✅ | `data/ventas.json` (`make dataset`) y `data/reclamos.db`, vacía y con el esquema del adaptador (`make db`) | `test_dataset.py`, `test_initial_database.py` |

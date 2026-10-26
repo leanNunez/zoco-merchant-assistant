@@ -299,3 +299,13 @@ regla que no arregla lo que pretendía y rompe un caso que andaba), no porque nu
 corridas, además, cada una de esas diferencias individuales es compatible con el azar. Desde entonces
 `scripted` y los demás modos guionados corren 34 escenarios (se agregó S22 a `dev`).
 
+## Actualización: las corridas reales son anteriores a un arreglo de fechas
+
+`live/` y `live-heldout/` se produjeron el 2026-10-24, antes del commit `d8411b7` (2026-10-26), que cambió
+`agent/application/conversation.py`, `operator.py`, `agent/domain/dates.py` y `messages.py`: la pregunta de
+confirmación de la compuerta se guarda ahora con `Author.GATE` y sus fechas ya no se tratan como fechas
+propuestas por el asistente. El hash del prompt (`5b4714215a984031`) no cambió, por lo que la procedencia de
+los informes no lo refleja. El arreglo solo estrecha cuándo una fecha cuenta como aceptada: quita una forma de
+dar por buena una fecha, no agrega comportamiento. La suite determinista y la evaluación `scripted`, `null` y
+`naive` se regeneraron y pasan después del cambio. Las corridas con el modelo real **no se repitieron**, y
+sus cifras se mantienen sin cambios.
