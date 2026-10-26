@@ -592,6 +592,57 @@ def test_the_headline_quotes_the_hybrid_mrr_as_a_range() -> None:
         assert needle in text, f"the headline should say {needle!r} about the tie-break"
 
 
+def summary() -> str:
+    return section(read(README), "## Resumen")
+
+
+def _checks_that_passed_without_being_exercised() -> int:
+    """LOCK checks of the final real runs that measured nothing: no action existed to drop."""
+    total = 0
+    for mode in FINAL_LIVE:
+        data = json.loads(read(CONVERSATIONS / mode / "results.json"))
+        for run in data["runs"]:
+            for check in run["checks"]:
+                if check["name"] == "dropped_action_reaches_inbox" and check["detail"].startswith(
+                    "0 dropped, 0 inbox"
+                ):
+                    total += 1
+    return total
+
+
+def test_the_summary_quotes_the_saved_results() -> None:
+    live, held = counts("live"), counts("live-heldout")
+    hybrid = _tie_break()[0]
+    main_hybrid = next(e for e in _rows("main") if e["strategy"] == "hybrid")
+    lock = f"{live.lock_ok + held.lock_ok}/{live.lock_total + held.lock_total}"
+    unexercised = _checks_that_passed_without_being_exercised()
+    text = summary()
+
+    needles = [
+        f"hybrid recall@3 {fmt(main_hybrid['recall_at_3'])}",
+        f"MRR {fmt(hybrid['reversed']['mrr'])}\u2013{fmt(hybrid['default']['mrr'])} "
+        f"según el desempate de RRF ({fmt(hybrid['expected']['mrr'])} esperado)",
+        f"`live` {live.runs_ok}/{live.runs_valid} ({round(100 * live.runs_ok / live.runs_valid)}%",
+        f"`live-heldout` {held.runs_ok}/{held.runs_valid} "
+        f"({round(100 * held.runs_ok / held.runs_valid)}%",
+        f"LOCK {lock} en las {live.runs_valid + held.runs_valid} conversaciones",
+        f"{unexercised} de esos checks pasan sin ejercerse",
+        '"0 dropped, 0 inbox note(s)"',
+    ]
+
+    missing = [needle for needle in needles if needle not in text]
+    assert not missing, f"the Resumen should say {missing}"
+    assert unexercised > 0, "the Resumen warns about checks that passed without being exercised"
+
+
+def test_the_readme_counts_its_partial_rows() -> None:
+    rows = table_rows(section(read(README), "## Matriz de cumplimiento de la consigna"))
+    states = [row[1] for row in rows if len(row) == 4 and row[1] in {"✅", "🟨", "⬜"}]
+    sentence = f"con {states.count('🟨')} de las {len(states)} filas de la [matriz de cumplimiento]"
+
+    assert sentence in read(README), f"the Estado should say {sentence!r}"
+
+
 # --------------------------------------------------------------------------- the gate
 
 

@@ -48,9 +48,9 @@ retrieval (`SELECTION_RULE`).
 ## Decisión
 
 1. **El agente busca con lo que eligió la evidencia.** `build_search` usa chunking `document` y
-   `hybrid+meta(demote)` (RRF de vector y BM25, con la vigencia aplicada por democión) cuando hay una
+   `hybrid+meta(demote)` (RRF de vector y BM25, con la vigencia aplicada por degradación) cuando hay una
    clave configurada **y** todos los vectores del corpus están en la caché. Si no, corre en modo
-   **degradado**: BM25 con la misma democión por vigencia. Construir la búsqueda nunca llama a la
+   **degradado**: BM25 con la misma degradación por vigencia. Construir la búsqueda nunca llama a la
    API. El tokenizador es el de por defecto.
 2. **La compuerta mira las dos señales.** `Gate` (`bootstrap.py`): en modo híbrido la consulta es
    `no_data` solo si BM25 < `GATE_BM25_HYBRID` (11,824) **y** el mejor coseno contra los vectores del

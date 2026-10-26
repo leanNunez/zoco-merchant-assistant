@@ -305,7 +305,16 @@ corridas, además, cada una de esas diferencias individuales es compatible con e
 `agent/application/conversation.py`, `operator.py`, `agent/domain/dates.py` y `messages.py`: la pregunta de
 confirmación de la compuerta se guarda ahora con `Author.GATE` y sus fechas ya no se tratan como fechas
 propuestas por el asistente. El hash del prompt (`5b4714215a984031`) no cambió, por lo que la procedencia de
-los informes no lo refleja. El arreglo solo estrecha cuándo una fecha cuenta como aceptada: quita una forma de
-dar por buena una fecha, no agrega comportamiento. La suite determinista y la evaluación `scripted`, `null` y
-`naive` se regeneraron y pasan después del cambio. Las corridas con el modelo real **no se repitieron**, y
-sus cifras se mantienen sin cambios.
+los informes no lo refleja. Qué cambió y qué no:
+
+- El arreglo solo estrecha cuándo una fecha cuenta como aceptada. El único efecto de comportamiento: un "sí" o
+  un "no" que contesta una pregunta de confirmación ya retirada y que contenía una fecha recibe ahora la plantilla
+  "nada pendiente", en lugar de pasar al modelo.
+- `Author.GATE` no se envía al modelo: el adaptador (`openai_chat_model.py`) manda la pregunta de confirmación
+  como un mensaje normal del asistente, igual que antes.
+- `scripted` se regeneró y coincide byte a byte con lo que produce el código (tests de deriva); lo único que
+  cambió en sus transcripciones es el autor de esos mensajes (`gate` en lugar de `agent`). Los resultados de
+  `null` (0/102 por diseño) y de `naive` no cambiaron.
+- Las corridas con el modelo real **no se repitieron**, y sus cifras se mantienen sin cambios. Se volvió a
+  aplicar la regla de fechas sobre las conversaciones guardadas: las 44 llamadas a `consultar_ventas` (33 en
+  `live` y 11 en `live-heldout`) se resuelven igual.

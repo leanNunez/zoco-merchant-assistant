@@ -293,10 +293,12 @@ BM25); y los umbrales se ajustaron sobre las mismas consultas con que se midiero
 pasaría con personas reales. Con el modelo real, además, `low_confidence` casi no se dispara: el modelo
 contesta las preguntas fuera de tema sin buscar (la evidencia `low_confidence fired` de X2 es 0/3 en
 `evaluation/results/conversations/live/report.md`), así que SUGGEST se ejerce con modelos guionados.
-Otro límite, señalado por una revisión independiente y sin corregir: la guarda de horario de `low_confidence`
+Otro límite, señalado por una revisión independiente (un subagente de Claude Code) y sin corregir: la guarda de horario de `low_confidence`
 usa el reloj leído al empezar el turno (`now` en `ConversationService.handle_user_message`). Si la llamada al
 modelo cruza las 18:00, la transición AUTO → SUGGEST se aplica fuera de horario, la respuesta queda como
-borrador y el registro muestra la hora anterior; el turno siguiente lo corrige (`sync_hours` vuelve a AUTO).
+borrador y el registro muestra la hora anterior. El turno siguiente corrige el estado (`sync_hours` vuelve a AUTO),
+pero esa transición descarta los borradores sin aprobar (`DISCARD_UNAPPROVED_DRAFTS`): la respuesta producida al
+cruzar las 18:00 se pierde y el cliente nunca la recibe.
 La corrección sugerida es volver a leer el reloj antes de disparar el evento (`_fire`).
 
 ## F10. Un reclamo a medio confirmar sobrevive a un cambio de control
@@ -623,11 +625,15 @@ solo registrar otro, con su propia confirmación.
 pregunta de plantilla; una segunda llamada en la misma respuesta se ignora; el efecto solo se ejecuta con un
 `Confirmed` (`tests/integration/agent/test_agent_policies.py::test_1_a_model_call_to_crear_reclamo_only_asks_for_confirmation`,
 `test_8_two_proposals_in_one_reply_keep_only_the_first`, `tests/unit/agent/test_agent_architecture.py`).
-Una revisión independiente notó que la prueba de la compuerta (`_GATE_PROOF`) se podía importar y con ella
-fabricar un `Confirmed` fuera de `pending.py` sin que nada lo detectara. Cerrado con un test que recorre el
-AST de todo el paquete y falla si otro módulo nombra la prueba o construye un `Confirmed`
+Una revisión independiente (un subagente de Claude Code) notó que la prueba de la compuerta (`_GATE_PROOF`) se podía importar y con ella
+fabricar un `Confirmed` fuera de `pending.py` sin que nada lo detectara. Cerrado en parte con un test que recorre el
+AST de todos los módulos de `src/merchant_assistant` salvo `pending.py` y falla si encuentra una llamada
+`Confirmed(...)` (también por un alias de import o como `modulo.Confirmed(...)`), cualquier mención de
+`_GATE_PROOF` o su import
 (`tests/unit/agent/test_agent_architecture.py::test_no_module_but_the_gate_can_build_a_confirmed`,
-`test_the_scan_does_see_a_forged_confirmed`).
+`test_the_scan_does_see_a_forged_confirmed`). Límite: no detecta una construcción por reflexión
+(`object.__new__` con `object.__setattr__`, una subclase de `Confirmed` o un `getattr` con un nombre calculado), y no
+mira `tests/` ni `evaluation/`. Es un freno contra el descuido, no una barrera contra código hostil.
 
 ## P4. "Sí" repetido sin nada pendiente
 
@@ -757,16 +763,26 @@ se resuelven preguntando en 3 de 3 corridas, pero el modelo también pide confir
 ambigüedad ("5 de octubre de 2026", H02: 0 de 3) y fechas que el cliente da dentro de un reclamo (S19), lo que
 el código no puede evitar sin dejar de ser conservador (ver el apartado siguiente).
 
-Una revisión independiente encontró un hueco, ya cerrado: la pregunta de confirmación de un reclamo es un
+Una revisión independiente (un subagente de Claude Code) encontró un hueco, ya cerrado: la pregunta de confirmación de un reclamo es un
 mensaje del asistente que muestra la descripción escrita por el modelo. Si el "sí" del cliente no confirmaba
 el reclamo (la versión de control había cambiado, o el cierre de la franja lo retiró en SUGGEST), el turno
 seguía al modelo y una fecha de esa descripción contaba como propuesta y aceptada. Ahora la pregunta se guarda
 con `Author.GATE` y `dates_proposed_in` no lee fechas de ella: un "sí" confirma el reclamo, nunca una fecha
 (`tests/unit/agent/test_agent_dates.py::test_a_yes_to_the_gates_question_never_accepts_a_date_its_description_mentions`,
 `tests/integration/agent/test_agent_control_scenarios.py::test_11_a_yes_that_does_not_confirm_the_complaint_does_not_ground_its_date`,
-`test_11_a_yes_to_a_question_the_closing_time_withdrew_finds_nothing_pending`). Límite conocido, sin corregir:
-un "sí" a un mensaje del asistente que menciona varias fechas las ancla a todas (`dates_stated_by_assistant`
-devuelve el conjunto). La corrección sugerida es aceptar solo cuando el mensaje menciona exactamente una.
+`test_11_a_yes_to_a_question_the_closing_time_withdrew_finds_nothing_pending`). Dos límites conocidos, sin corregir:
+
+1. Un "sí" a un mensaje del asistente que menciona varias fechas las ancla a todas (`dates_stated_by_assistant`
+   devuelve el conjunto). Aceptar solo cuando el mensaje menciona exactamente una cierra este caso y ningún otro.
+2. **Hueco residual, reproducido con un modelo guionado:** el arreglo de `Author.GATE` solo cubre la pregunta de
+   la compuerta. Si el *modelo* escribe un mensaje propio (`Author.AGENT`) con una fecha y una pregunta sobre otra
+   cosa ("Lamento lo de las ventas del 22/10/2026. ¿Querés que registre un reclamo?"), el "sí" siguiente ancla
+   el 22/10/2026 y `consultar_ventas` corre con ella. Exige que el modelo desobedezca las reglas de fechas de
+   `prompts.py`, afecta solo a una herramienta de lectura (nunca a un efecto) y ningún test del repositorio lo
+   cubre. Aceptar la fecha solo si el mensaje menciona exactamente una **no** lo cierra (este mensaje menciona
+   una). La corrección robusta es que la pregunta por una fecha la produzca el código, con su propio autor (como
+   la pregunta de la compuerta), y que solo esa pregunta pueda anclar una fecha: así tampoco importa cuántas
+   fechas mencione un texto libre del modelo.
 
 ## P9. DOC-11 define categorías que `crear_reclamo` no tiene
 
@@ -833,8 +849,9 @@ sin confirmar. Lo que apareció es lo que ningún candado puede garantizar:
 
 ## Alternativas consideradas
 
-Un análisis independiente de la misma especificación coincidió en casi todo y difirió en dos decisiones de
-diseño. Se dejan registradas, con el motivo de no adoptarlas.
+Otro análisis de la misma especificación, generado por Gemini a pedido del autor para auditar posibles trampas
+(no lo escribió el autor; es independiente de esta implementación, no de la IA), coincidió en casi todo y
+difirió en dos decisiones de diseño. Se dejan registradas, con el motivo de no adoptarlas.
 
 - **F2: qué hacer con BLOCKED + `operator_release`.** Ese análisis propuso borrar la fila y exigir además el rol
   SUPERVISOR en `supervisor_unblock`. Esta implementación conserva la fila y restringe su actor a SUPERVISOR.

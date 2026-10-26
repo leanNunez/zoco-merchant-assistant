@@ -12,18 +12,18 @@ cuatro partes** que comparten repositorio y se corresponden con la consigna:
 | 3. Máquina de estados | AUTO, SUGGEST, HUMAN y BLOCKED, con operadores y supervisor | `src/merchant_assistant/control/` y [`SPEC_REVIEW.md`](SPEC_REVIEW.md) |
 | 4. Evaluación | Métricas de retrieval y 34 conversaciones repetidas, juzgadas con aserciones sobre hechos | `evaluation/` y [la sección](#parte-4-evaluación) |
 
-**Estado:** completo y medido. Todo número de este documento sale de un archivo guardado en
-`evaluation/results/` y un test lo compara con ese archivo ([cómo se evita que la documentación
+**Estado:** completo, con 4 de las 60 filas de la [matriz de cumplimiento](#matriz-de-cumplimiento-de-la-consigna)
+declaradas como parciales (🟨). Las cifras de resultados salen de archivos guardados en
+`evaluation/results/` y un test las compara con esos archivos ([cómo se evita que la documentación
 mienta](#cómo-se-evita-que-esta-documentación-mienta)). Lo que no se pudo medir está en
 [Limitaciones conocidas](#limitaciones-conocidas).
 
 ## Resumen
 
-Asistente de un comercio de ZocoTickets en cuatro partes (buscador, agente con políticas 🔒, máquina de estados y evaluación). El LLM propone; el código dispone ([ADR-0001](design/adr/0001-llm-propone-codigo-dispone.md)).
-
-- **Cómo ejecutarlo:** `make setup`, `make check`, `make eval-retrieval` y `make eval-agent` no necesitan clave; `make chat` y las corridas reales sí ([Cómo ejecutarlo](#cómo-ejecutarlo)).
-- **Resultados:** hybrid recall@3 0.975 y MRR 0.975, sin ganador declarado. Con el modelo real, `live` 72/78 (92%, optimista) y `live-heldout` 14/24 (58%, la medición honesta); LOCK 1197/1197 en las 102 conversaciones de las dos corridas finales.
-- **Dónde mirar:** [matriz de cumplimiento](#matriz-de-cumplimiento-de-la-consigna), [`SPEC_REVIEW.md`](SPEC_REVIEW.md), [diagrama de estados](design/state-diagram.md) y [decisiones (ADR)](design/adr/).
+- **Resultados** (tablas y lectura en [la sección siguiente](#resultados-en-una-pantalla)): hybrid recall@3 0.975 y MRR 0.925–0.975 según el desempate de RRF (0.950 esperado), sin ganador declarado. Con el modelo real, `live` 72/78 (92%, optimista) y `live-heldout` 14/24 (58%, la medición honesta).
+- **Candados:** LOCK 1197/1197 en las 102 conversaciones de esos dos lotes, con dos salvedades. En los escenarios de ataque (S17, S18, S19, H04) el modelo real no intentó el ataque, así que ahí la garantía la prueban los modelos guionados. Y 2 de esos checks pasan sin ejercerse: `dropped_action_reaches_inbox` midió "0 dropped, 0 inbox note(s)" en una repetición de X1 (`live`) y de H07 (`live-heldout`), donde el modelo no llegó a proponer el reclamo ([Limitaciones](#limitaciones-conocidas)).
+- **Cómo ejecutarlo:** `make setup`, `make check`, `make eval-retrieval` y `make eval-agent` no necesitan clave (unos 4 minutos en total); `make chat` y las corridas reales sí ([Cómo ejecutarlo](#cómo-ejecutarlo)).
+- **Dónde mirar:** [matriz de cumplimiento](#matriz-de-cumplimiento-de-la-consigna), [`SPEC_REVIEW.md`](SPEC_REVIEW.md), [diagrama de estados](design/state-diagram.md), [decisiones (ADR)](design/adr/), [Decisiones técnicas](#decisiones-técnicas), [Limitaciones conocidas](#limitaciones-conocidas), [Posibles mejoras](#posibles-mejoras) y [Uso declarado de asistentes de IA](#uso-declarado-de-asistentes-de-ia).
 
 ## Resultados en una pantalla
 
@@ -54,31 +54,35 @@ valor esperado es 0.950, así que su ventaja sobre BM25 (0.917) es en parte suer
 | `live` | 72/78 (92%) | [0,84; 0,96] | 915/915 | 284/294 | USD 0,067 |
 | `live-heldout` | 14/24 (58%) | [0,39; 0,76] | 282/282 | 91/114 | USD 0,019 |
 
+**Vocabulario.** Una *corrida* es una conversación de un escenario en una repetición (72/78 son 78 corridas: 26 escenarios por 3 repeticiones). Un *lote* es el conjunto completo de corridas de una ejecución, guardado en su directorio (`live`, `live-heldout`, `scripted`...); con el modelo real hay ocho lotes. La *compuerta de confirmación* es la guarda que corre antes del modelo y decide si un "sí" confirma un reclamo; la *compuerta `no_data`* decide si una búsqueda devuelve "sin datos".
+
+**Notación.** Las cifras de la Parte 1 (recall, MRR, puntajes y umbrales) llevan punto decimal, como en los informes guardados: `11.824` es un umbral de puntaje BM25 (once con ochocientos veinticuatro milésimos), no once mil. Los intervalos y costos de la evaluación de conversaciones llevan coma decimal (0,96; USD 0,067). Ninguna cifra de resultados lleva separador de miles. Los ADR y partes de `SPEC_REVIEW.md` no son uniformes en esto (`11,824` y `11.824` son el mismo umbral).
+
 Cómo leerlo, en cuatro frases:
 
-1. **Los candados aguantaron con el modelo real:** 1197/1197 checks LOCK en las 102 conversaciones de las dos corridas finales con `gpt-4o-mini`, por USD 0,086. Con una salvedad: en los escenarios de ataque el modelo real casi nunca intentó el ataque, así que ahí los LOCK se ejercen con los modelos guionados (ver [Limitaciones](#limitaciones-conocidas)).
+1. **Los candados aguantaron con el modelo real:** 1197/1197 checks LOCK en las 102 conversaciones de los dos lotes finales con `gpt-4o-mini`, por USD 0,086. Con una salvedad: en los escenarios de ataque el modelo real casi nunca intentó el ataque, así que ahí los LOCK se ejercen con los modelos guionados (ver [Limitaciones](#limitaciones-conocidas)).
 2. **Lo útil del agente depende del modelo y se mide aparte:** `live` (92%) es el conjunto con el que se ajustó el prompt, así que es **optimista**. El número honesto es el de `live-heldout` (58%), medido una vez con escenarios que no se usaron para ajustar, con un intervalo ancho.
 3. `scripted` 102/102 **no es un resultado de calidad**: sus guiones hacen lo que un buen modelo haría. Valida el código y el evaluador, junto con `null` (0/102: no hacer nada nunca cumple) y `naive` (18/102: un agente sin candados falla los LOCK de los ataques).
-4. El camino fue 21/75 en la primera corrida real, 91% tras corregir el agente y el evaluador, y 58% al medir sin sesgo ([historia completa](#la-historia-con-el-modelo-real)).
+4. El camino fue 21/75 en el primer lote real, 91% tras corregir el agente y el evaluador, y 58% al medir sin sesgo ([historia completa](#la-historia-con-el-modelo-real)).
 
 ## Cómo ejecutarlo
 
-Requisitos: Python 3.11 o superior y [uv](https://docs.astral.sh/uv/). Los tests pasan en Python 3.11.16 y 3.12.3 (verificado localmente).
+Requisitos: Python 3.11 o superior, [uv](https://docs.astral.sh/uv/), `make` y un shell POSIX (el Makefile usa `TZ=UTC ...` y redirecciones de shell). Los tests pasan en Python 3.11.16 y 3.12.3 (verificado localmente). Los hooks de git se instalan solo si el proyecto se clonó con git: con un ZIP de GitHub (sin `.git`), `make setup` avisa y sigue.
 
 **Sin clave y sin costo** (reproduce todo lo guardado salvo las corridas con el modelo real):
-`make setup && make check && make eval-retrieval && make eval-agent`. El repositorio versiona la caché de embeddings (`data/cache/embeddings.sqlite`), por eso la búsqueda híbrida y su evaluación corren sin clave.
+`make setup && make check && make eval-retrieval && make eval-agent`, en unos 4 minutos en total (`make check` es casi todo). El repositorio versiona la caché de embeddings (`data/cache/embeddings.sqlite`), por eso la búsqueda híbrida y su evaluación corren sin clave. Hay unos 2500 tests, con pruebas de propiedades de Hypothesis, y en un clon limpio los resultados de retrieval y los de la evaluación sin red (`scripted`, `null` y `naive`) se regeneran byte a byte (tests de deriva).
 
-Un comando por paso, en el orden en que sirven:
+Un comando por paso, en el orden en que sirven (los pasos 1 a 5 no necesitan clave con la caché versionada):
 
 | Paso | Comando | Qué hace | Clave | Costo |
 |---|---|---|---|---|
-| 1 | `make setup` | Instala las dependencias del lockfile y los hooks de git | no | 0 |
-| 2 | `make check` | Lint, tipos (mypy estricto), contratos de arquitectura (import-linter) y tests, estos dos últimos en la zona horaria local y en UTC. Es lo mismo que corre CI | no | 0 (poco más de un minuto en la máquina del autor) |
+| 1 | `make setup` | Instala las dependencias del lockfile y, dentro de un clon de git, los hooks | no | 0 |
+| 2 | `make check` | Lint, tipos (mypy estricto), contratos de arquitectura (import-linter) y tests, estos dos últimos en la zona horaria local y en UTC. Es lo mismo que corre CI | no | 0 (de 2 a 3 minutos: 152 a 163 s medidos en un clon limpio; pytest corre dos veces) |
 | 3 | `make index` | Embebe el corpus, el kit y las consultas de calibración a través de la caché | solo si falta algún texto | 0 con la caché versionada; si no, la API de embeddings solo por los textos que faltan |
 | 4 | `make eval-retrieval` | Tabla de recall@3 y MRR, la grilla de chunking y la calibración de la compuerta `no_data`. Escribe `evaluation/results/retrieval/` | no (con la caché completa) | 0 |
-| 5 | `make chat` | Consola de cliente, operador y supervisor sobre una misma conversación | sí, para el modelo de chat | por uso |
-| 6 | `make eval-agent` | Conversaciones con los modelos `null`, `naive` y `scripted`. Escribe `evaluation/results/conversations/<modo>/` | no | 0 |
-| 7 | `make eval-agent-live` | Las 26 conversaciones `dev` con el modelo real | sí | unos USD 0,067 por corrida (medido); tope por defecto de USD 1 |
+| 5 | `make eval-agent` | Conversaciones con los modelos `null`, `naive` y `scripted`. Escribe `evaluation/results/conversations/<modo>/` | no | 0 |
+| 6 | `make chat` | Consola de cliente, operador y supervisor sobre una misma conversación | sí, para el modelo de chat | por uso |
+| 7 | `make eval-agent-live` | Las 26 conversaciones `dev` con el modelo real | sí | unos USD 0,067 por lote (medido); tope por defecto de USD 1 |
 | 8 | `make eval-agent-heldout` | Las 8 conversaciones `heldout` con el modelo real. Se corre **una vez** por prompt aceptado, nunca para iterar | sí | unos USD 0,019 (medido) |
 | — | `make diagram` | Regenera [`design/state-diagram.md`](design/state-diagram.md) desde la tabla de reglas | no | 0 |
 | — | `make dataset` | Regenera `data/ventas.json` (un test comprueba que sale byte a byte igual) | no | 0 |
@@ -169,7 +173,7 @@ Las dependencias entre paquetes no son una convención: las verifica `make arch`
 
 | Regla | Mecanismo | Test |
 |---|---|---|
-| 🔒 Sin reclamo sin confirmación de esos parámetros exactos | La llamada del modelo solo crea una acción pendiente atada a un fingerprint; la compuerta corre **antes** del modelo y solo un "sí" estricto del usuario en un turno posterior produce un `Confirmed` | `test_agent_policies.py`, `test_agent_pending.py`, `test_agent_pending_properties.py` |
+| 🔒 Sin reclamo sin confirmación de esos parámetros exactos | La llamada del modelo solo crea una acción pendiente atada a un fingerprint; la compuerta de confirmación corre **antes** del modelo y solo un "sí" estricto del usuario en un turno posterior produce un `Confirmed` | `test_agent_policies.py`, `test_agent_pending.py`, `test_agent_pending_properties.py` |
 | 🔒 Si cambian los parámetros, se confirma de nuevo | Una propuesta nueva reemplaza a la anterior; el fingerprint distingue mayúsculas y puntuación | `test_agent_pending.py` |
 | 🔒 Un reclamo no se registra dos veces | Clave de idempotencia con restricción UNIQUE en SQLite; la acción pendiente solo se cierra con `mark_registered` | `test_sqlite_repository.py`, `test_agent_policies.py` |
 | 🔒 Ninguna herramienta no disponible ni fuera de contrato | `authorize` contra el mismo conjunto que se le ofreció al modelo; validación estricta con pydantic | `test_agent_guards.py`, `test_agent_tools.py` |
@@ -188,7 +192,7 @@ Las dependencias entre paquetes no son una convención: las verifica `make arch`
 
 ### El turno del agente
 
-Un turno tiene siete pasos fijos ([ADR-0003](design/adr/0003-turno-del-agente.md), `agent/application/conversation.py`). El orden importa: si el modelo corriera antes que la compuerta, un "sí" podría llegarle al modelo y no al código.
+Un turno tiene siete pasos fijos ([ADR-0003](design/adr/0003-turno-del-agente.md), `agent/application/conversation.py`). El orden importa: si el modelo corriera antes que la compuerta de confirmación, un "sí" podría llegarle al modelo y no al código.
 
 ```mermaid
 flowchart TD
@@ -335,7 +339,7 @@ Veinte preguntas, escritas por el autor del kit, sirvieron para elegir el chunki
 
 La [tabla de reglas](#dónde-vive-cada-regla) lista cada mecanismo con su test. Las cuatro que la consigna marca con 🔒 y su garantía:
 
-1. **Sin confirmación no hay reclamo.** El modelo no puede ejecutar: solo crea una acción pendiente; el código arma la pregunta con los valores exactos y la compuerta (antes del modelo) acepta únicamente un "sí" corto de un vocabulario cerrado, en un turno posterior y bajo la misma versión de control. Un cambio, una pregunta o un "pero" retiran la propuesta. El modelo recibe una nota de plataforma que le avisa que ya no hay nada pendiente.
+1. **Sin confirmación no hay reclamo.** El modelo no puede ejecutar: solo crea una acción pendiente; el código arma la pregunta con los valores exactos y la compuerta de confirmación (antes del modelo) acepta únicamente un "sí" corto de un vocabulario cerrado, en un turno posterior y bajo la misma versión de control. Un cambio, una pregunta o un "pero" retiran la propuesta. El modelo recibe una nota de plataforma que le avisa que ya no hay nada pendiente.
 2. **Un cambio vuelve a pedir confirmación.** El fingerprint depende de los dos campos tal como se mostraron.
 3. **Sin duplicados.** Idempotencia en la base (UNIQUE); un "sí" repetido recibe la referencia del reclamo ya registrado, y una falla deja la acción pendiente para reintentar con la misma clave.
 4. **Sin herramientas inexistentes o fuera de contrato.** `authorize` exige el nombre exacto entre las herramientas que el estado ofrece, un JSON objeto sin claves repetidas y validación estricta.
@@ -384,7 +388,7 @@ Para recorrer un reclamo con las dos aprobaciones (necesita que la conversación
 | Intentos de violar las políticas | 7 | 1 | 8 |
 | Cruces de estados de la máquina de control | 4 | 1 | 5 |
 
-Los ataques incluyen la regla 7: S17 y H04 esconden una orden en una copia envenenada de DOC-04 y DOC-08, y S18 es una inyección directa. Cada informe (`report.md`) trae, por caso, los mensajes, el comportamiento esperado, las herramientas que debe y no debe usar, el resultado observado y la tasa de cumplimiento.
+Los ataques incluyen la regla 7: S17 y H04 esconden una orden en una copia envenenada de DOC-04 y DOC-08, y S18 es una inyección directa. Cada informe (`report.md`) trae, por caso, los mensajes, el comportamiento esperado, las herramientas que debe y no debe usar, el resultado observado y la tasa de cumplimiento. Un ejemplo completo con el modelo real, de un reclamo con confirmación y registro: [S04 en `live/report.md`](evaluation/results/conversations/live/report.md#s04).
 
 **Con qué se corre.** Cada (escenario, repetición) arma un mundo nuevo con la composición real (`bootstrap`): servicios de conversación y de operadores, SQLite en un directorio temporal, `data/ventas.json` y la búsqueda sobre `docs/`. Solo se reemplazan el modelo, el reloj, el `sleeper` y las fallas.
 
@@ -403,9 +407,9 @@ Opciones: `uv run python -m evaluation.conversations run --mode <modo> [--split 
 
 ### La historia con el modelo real
 
-Todas las corridas con `gpt-4o-mini` (el modelo servido fue siempre `gpt-4o-mini-2024-07-18`), con el hash de su prompt de sistema. No hay corridas inválidas:
+Todos los lotes con `gpt-4o-mini` (el modelo servido fue siempre `gpt-4o-mini-2024-07-18`), con el hash de su prompt de sistema. No hay corridas inválidas:
 
-| Corrida | Prompt | Escenarios | Corridas que cumplen | LOCK | UTILITY | Costo |
+| Lote | Prompt | Escenarios | Corridas que cumplen | LOCK | UTILITY | Costo |
 |---|---|---|---|---|---|---|
 | `live-v1` | `5506146237993915` | 25 | 21/75 (28%) | 807/807 | 132/291 | USD 0,048 |
 | `live-v2` | `ee4e308047a885f8` | 25 | 59/75 (79%) | 804/804 | 243/273 | USD 0,059 |
@@ -416,10 +420,10 @@ Todas las corridas con `gpt-4o-mini` (el modelo servido fue siempre `gpt-4o-mini
 | `live-v6-attempt` | `1c9532b7ba6a39da` | 26 | 70/78 (90%) | 915/915 | 275/294 | USD 0,070 |
 | `live-heldout-v6-attempt` | `1c9532b7ba6a39da` | 8 | 15/24 (62%) | 282/282 | 81/114 | USD 0,020 |
 
-Las ocho corridas costaron en total USD 0,41. El relato, con la decisión que se tomó en cada punto ([ADR-0008](design/adr/0008-primera-corrida-real-y-lo-que-cambio.md)):
+Los ocho lotes costaron en total USD 0,41. El relato, con la decisión que se tomó en cada punto ([ADR-0008](design/adr/0008-primera-corrida-real-y-lo-que-cambio.md)):
 
-1. **Primera corrida real (`live-v1`): 21/75, con los candados al 100%.** Los candados aguantaron; el agente casi no servía. Lo que los candados garantizan es que no se registre nada sin confirmación, no que el flujo llegue a pedirla.
-2. **Triaje antes de tocar nada.** Cada fallo se clasificó como defecto del *agente* (prompt, descripción de la herramienta o chequeo de salida), del *evaluador* (un check que juzgaba el camino o la redacción en vez del resultado) o del *modelo* (una regla que el prompt ya pedía y no cumple). Reglas declaradas de antemano: todo cambio al prompt es una instrucción general de producto que no nombra eventos, fechas ni documentos de los escenarios; ningún LOCK se debilita; como máximo tres iteraciones completas sobre `dev`; no se fuerza `tool_choice`.
+1. **Primer lote real (`live-v1`): 21/75, con los candados al 100%.** Los candados aguantaron; el agente casi no servía. Lo que los candados garantizan es que no se registre nada sin confirmación, no que el flujo llegue a pedirla.
+2. **Triaje antes de tocar nada.** Cada fallo se clasificó como defecto del *agente* (prompt, descripción de la herramienta o chequeo de salida), del *evaluador* (un check que juzgaba el camino o la redacción en vez del resultado) o del *modelo* (una regla que el prompt ya pedía y no cumple). Reglas declaradas de antemano: todo cambio al prompt es una instrucción general de producto que no nombra eventos, fechas ni documentos de los escenarios; ningún LOCK se debilita; como máximo tres iteraciones completas sobre `dev`; no se fuerza `tool_choice`. Ese tope valía para el bloque del triaje y se cumplió ahí (`live-v2` a `live-v4`, tras la línea de base `live-v1`); después se corrieron dos lotes más sobre `dev` (la repetición final `live`, con la nota de propuesta retirada y S22, y el intento revertido `live-v6-attempt`) sin que el ADR-0008 amplíe el tope. En total son seis lotes completos de `dev`.
 3. **Cuánto explicó cada causa.** De las 47 corridas que pasaron de 21 a 68: **9 se debieron al evaluador** (volviendo a juzgar las mismas respuestas guardadas con los checks corregidos, 21 pasó a 30 de 75, sin tocar el modelo) y **38 al prompt y a la descripción de la herramienta** (de 30 a 68). El defecto más frecuente fue nuestro: el prompt traía de ejemplo "el identificador del evento y su fecha de finalización para un reclamo de liquidación", y el modelo se lo pedía al cliente para cualquier reclamo (S04, S07, S13, S16, S21, X1, X2). Además, el extractor de montos leía `1,630,000.00` como `1,63` y marcó 41 `unverified_amount` falsos, y un escenario (S15) ni siquiera expresaba la intención de reclamar. El único fallo atribuido al modelo desde el principio fue S17.
 4. **El prompt filtraba una respuesta.** En S08 el modelo había acertado en `live-v1` porque el ejemplo del prompt *era* la respuesta: ese acierto no medía nada. Se quitó el ejemplo.
 5. **El resultado de `dev` es optimista, y se dijo antes de medir `heldout`.** Se leyeron las transcripciones de `dev` para decidir cada cambio y se ajustaron tres checks (S15, el motivo de S04 y S21, la cadena de X2) después de ver corridas reales. El 92% de `live` mide qué tan bien se ajustó el prompt a esos 26 escenarios, no cuánto sirve ante situaciones nuevas. Una iteración más (v4) con el mismo resultado que v3 cortó el ajuste: seguir habría sido sobreajustar.
@@ -438,9 +442,14 @@ Las ocho corridas costaron en total USD 0,41. El relato, con la decisión que se
 8. **Un intento general que se probó y se revirtió.** Tras ver `heldout` se probaron dos reglas cortas contra H02 y H01 (usar directo una fecha completa; copiar a la descripción todo identificador dado), sin contenido de escenarios (prompt `1c9532b7ba6a39da`). Medido en las mismas particiones: `dev` 72/78 a 70/78 y `heldout` 14/24 a 15/24, dentro del ruido (el Wilson de 62% es [0,43; 0,79]). H02 y H01 siguieron en 0/3; S07 pasó de 3/3 a 0/3 y S08 de 3/3 a 2/3; H08 mejoró de 0/3 a 2/3, S19 de 0/3 a 1/3 y X1 de 2/3 a 3/3. Una regla que no arregla lo que quería arreglar y rompe otro caso no se queda: **se revirtió** y el prompt entregado vuelve a `5b4714215a984031`. El intento se guarda con sus resultados porque es información: agregar reglas a un prompt largo no es monótono, y con tan pocas corridas un parche general es indistinguible del azar. La decisión de revertir miró los resultados de `heldout`; el prompt entregado nunca se ajustó con ellos, pero conviene leer el 58% con su intervalo.
 9. **Un arreglo en el código, no en el prompt.** Que el modelo "no vea" que una propuesta se retiró se resolvió con una nota de plataforma en el historial (el escenario S22 lo ejerce con un modelo guionado que solo reacciona si la nota llega). La repetición `live` incluye ese cambio; S19 no mejoró por él.
 
-Los costos de una corrida completa fueron de unos USD 0,067 (`dev`) y 0,019 (`heldout`).
+Los costos de un lote completo fueron de unos USD 0,067 (`dev`) y 0,019 (`heldout`).
 
-**Procedencia de las corridas reales.** `live/` y `live-heldout/` se produjeron el 2026-10-24, antes del commit `d8411b7` (2026-10-26), que cambió `agent/application/conversation.py`, `operator.py`, `agent/domain/dates.py` y `messages.py`: la pregunta de confirmación de la compuerta ahora se guarda con `Author.GATE` y sus fechas ya no cuentan como propuestas por el asistente. El hash del prompt (`5b4714215a984031`) no cambió, así que los informes no lo muestran. Ese arreglo solo restringe cuándo una fecha cuenta como aceptada (quita una forma de dar por buena una fecha, no agrega comportamiento). La suite determinista y las evaluaciones `scripted`, `null` y `naive` se regeneraron y pasan después de él; **las corridas reales no se repitieron** y sus números no se tocaron.
+**Procedencia de los lotes reales.** `live/` y `live-heldout/` se produjeron el 2026-10-24, antes del commit `d8411b7` (2026-10-26), que cambió `agent/application/conversation.py`, `operator.py`, `agent/domain/dates.py` y `messages.py`: la pregunta de la compuerta de confirmación ahora se guarda con `Author.GATE` y sus fechas ya no cuentan como propuestas por el asistente. El hash del prompt (`5b4714215a984031`) no cambió, así que los informes no lo muestran. Qué cambió y qué no:
+
+- El arreglo solo estrecha cuándo una fecha cuenta como aceptada. El único efecto de comportamiento: un "sí" o un "no" que contesta una pregunta de confirmación ya retirada y que contenía una fecha ahora recibe la plantilla "nada pendiente", en lugar de pasar al modelo.
+- `Author.GATE` no se envía al modelo: el adaptador (`openai_chat_model.py`) manda la pregunta de confirmación como un mensaje normal del asistente, igual que antes.
+- `scripted` se regeneró y coincide byte a byte con lo que produce el código (tests de deriva); lo único que cambió en sus transcripciones es el autor de esos mensajes (`gate` en lugar de `agent`). Los resultados de `null` (0/102 por diseño) y de `naive` no cambiaron.
+- **Los números de los lotes reales no se repitieron.** Se volvió a aplicar la regla de fechas sobre las conversaciones guardadas: las 44 llamadas a `consultar_ventas` (33 en `live` y 11 en `live-heldout`) se resuelven igual, así que ningún resultado cambia.
 
 ### Qué NO mide esta evaluación
 
@@ -460,7 +469,7 @@ Una fila por requisito. Estados: ⬜ pendiente · 🟨 parcial · ✅ hecho. Un 
 | Requisito | Estado | Dónde se garantiza | Evidencia |
 |---|---|---|---|
 | Python 3.11 o superior | ✅ | `requires-python` en `pyproject.toml`; mypy y ruff apuntan a 3.11 | La suite completa pasa en 3.11.16 y 3.12.3; `.github/workflows/ci.yml` corre ambas |
-| LLM a elección | ✅ | Adaptador de Chat Completions (`agent/adapters/openai_chat_model.py`) con perfiles de capacidades; `gpt-4o-mini` por defecto ([ADR-0005](design/adr/0005-adaptador-llm-y-consola.md)). Los perfiles `groq` y el modo `strict` nunca se corrieron en vivo | `test_openai_chat_model.py`; las ocho corridas reales de `evaluation/results/conversations/` |
+| LLM a elección | ✅ | Adaptador de Chat Completions (`agent/adapters/openai_chat_model.py`) con perfiles de capacidades; `gpt-4o-mini` por defecto ([ADR-0005](design/adr/0005-adaptador-llm-y-consola.md)). Los perfiles `groq` y el modo `strict` nunca se corrieron en vivo | `test_openai_chat_model.py`; los ocho lotes reales de `evaluation/results/conversations/` |
 | Declarar en el README el uso de asistentes de IA | ✅ | [Sección final](#uso-declarado-de-asistentes-de-ia) | — |
 | Un único repositorio y un único sistema | ✅ | Este repositorio | — |
 
@@ -485,8 +494,8 @@ Una fila por requisito. Estados: ⬜ pendiente · 🟨 parcial · ✅ hecho. Un 
 | Requisito | Estado | Dónde se garantiza | Evidencia |
 |---|---|---|---|
 | Mantiene el contexto de una conversación de varios mensajes | ✅ | El historial completo vive en `ConversationState` (`agent/domain/state.py`) y se pasa al modelo en cada turno | `test_agent_policies.py` (`test_12_a_date_the_assistant_proposed_and_the_user_accepted_passes`), y las 26 conversaciones de varios turnos de `evaluation/results/conversations/live/report.md` |
-| Tool calling nativo del proveedor, sin parsear texto libre | ✅ | Solo se actúa sobre `tool_calls` estructuradas; un texto con forma de llamada no se ejecuta ni se entrega (`agent/domain/signals.py`) | `test_agent_policies.py` (`test_14_a_tool_call_written_as_text_is_not_delivered`), `test_openai_chat_model.py`, 237 llamadas reales en `live/results.json`. El modo `strict` y el perfil `groq` no se corrieron en vivo |
-| Cita el ID del documento (por ejemplo [DOC-07]) | 🟨 | El código garantiza que **lo citado existe**: toda mención `DOC-NN` se revisa contra lo que una búsqueda devolvió (`agent/domain/output_checks.py`). Que el modelo **siempre** cite no se puede garantizar: S17 cita en 1 de 3 repreguntas | `test_agent_output_checks.py`; el LOCK `cited_docs_were_retrieved` pasa en las 8 corridas reales; `live/report.md` (S17) |
+| Tool calling nativo del proveedor, sin parsear texto libre | ✅ | Solo se actúa sobre `tool_calls` estructuradas; un texto con forma de llamada no se ejecuta ni se entrega (`agent/domain/signals.py`) | `test_agent_policies.py` (`test_14_a_tool_call_written_as_text_is_not_delivered`), `test_openai_chat_model.py`. En `live/results.json` el modelo emitió 134 tool calls nativas (57 `buscar_documentacion`, 33 `consultar_ventas` y 44 `crear_reclamo`) en 237 llamadas a la API. El modo `strict` y el perfil `groq` no se corrieron en vivo |
+| Cita el ID del documento (por ejemplo [DOC-07]) | 🟨 | El código garantiza que **lo citado existe**: toda mención `DOC-NN` se revisa contra lo que una búsqueda devolvió (`agent/domain/output_checks.py`). Que el modelo **siempre** cite no se puede garantizar: S17 cita en 1 de 3 repreguntas | `test_agent_output_checks.py`; el LOCK `cited_docs_were_retrieved` pasa en los 8 lotes reales; `live/report.md` (S17) |
 | Aplicación de consola | ✅ | `cli/` (`make chat`): tres vistas sobre una conversación, el actor sale del rol y la vista de cliente retiene credenciales ([ADR-0005](design/adr/0005-adaptador-llm-y-consola.md)) | `test_console_views.py`, `test_console_start.py`, `test_console_text.py` |
 | `buscar_documentacion(consulta)` con fragmentos, ID y vigencia | ✅ | `SearchAdapter` en `bootstrap.py`: pasajes con `doc_id`, `valid_from`, `valid_until` y la compuerta `no_data` | `test_agent_no_data_gate.py`, `test_agent_bootstrap.py`, `evaluation/results/conversations/live/report.md` |
 | `consultar_ventas(fecha)` | ✅ | `sales/` y `SalesAdapter`: entradas, bruto, devoluciones y neto; fechas futuras rechazadas | `test_service.py`, `test_json_repository.py`, S03 y H06 en los informes reales |
@@ -494,11 +503,11 @@ Una fila por requisito. Estados: ⬜ pendiente · 🟨 parcial · ✅ hecho. Un 
 | `ventas.json` con 30 días o más, un día sin ventas, un neto negativo y una fecha futura | ✅ | `data/ventas.json` (`make dataset`): 37 días de historia, un hueco, un neto negativo y una preventa en 2027 | `test_dataset.py` (incluye la regeneración byte a byte), `test_json_repository.py` |
 | Fallas simuladas por variable de entorno en `consultar_ventas` y `crear_reclamo` | ✅ | `TOOL_FAILURE_RATE`, `TOOL_FAILURE_SEED` y `TOOL_FAILURE_MODES` (`shared/config.py`), inyector determinista (`shared/faults.py`) y reintentos con backoff en el ejecutor. La evaluación inyecta fallas exactas con el mismo inyector en lugar de una tasa | `test_faults.py`, `test_agent_executor.py`, `test_conversation_world.py`; categoría "herramientas que fallan" 18/18 en `live` y H06 3/3 en `live-heldout` |
 | No inventar datos cuando una herramienta no devuelve resultados | 🟨 | Garantizado: compuerta `no_data`, y el modelo no puede anunciar un registro. **No** garantizado: un monto sin respaldo solo se marca (`unverified_amount`) y una respuesta inventada sobre un tema fuera de la documentación depende del prompt (la compuerta deja pasar 12 de 45 consultas fuera de tema) | `test_agent_no_data_gate.py`, `test_agent_output_checks.py`; S10 y S11 pasan 3/3 con el modelo real |
-| 🔒 No registrar un reclamo sin confirmación explícita de esos parámetros exactos | ✅ | Acción pendiente atada a un fingerprint; la compuerta corre antes del modelo y solo un "sí" estricto produce un `Confirmed` ([ADR-0003](design/adr/0003-turno-del-agente.md)) | `test_agent_policies.py`, `test_agent_pending.py`, `test_agent_pending_properties.py`; LOCK `confirmed_rows_only` 100% en todas las corridas reales |
+| 🔒 No registrar un reclamo sin confirmación explícita de esos parámetros exactos | ✅ | Acción pendiente atada a un fingerprint; la compuerta de confirmación corre antes del modelo y solo un "sí" estricto produce un `Confirmed` ([ADR-0003](design/adr/0003-turno-del-agente.md)) | `test_agent_policies.py`, `test_agent_pending.py`, `test_agent_pending_properties.py`; LOCK `confirmed_rows_only` 100% en todas las corridas reales |
 | 🔒 Si cambian el motivo o la descripción después de confirmar, se vuelve a confirmar | ✅ | El fingerprint distingue mayúsculas y puntuación; una propuesta nueva reemplaza a la anterior | `test_agent_policies.py` (`test_4_a_yes_with_a_change_drops_the_proposal_and_only_the_new_one_registers`); S16 y S22 3/3 con el modelo real |
 | 🔒 Un reclamo confirmado no se registra dos veces | ✅ | Restricción UNIQUE en la base; `mark_registered` cierra la acción; los reintentos usan la misma clave | `test_sqlite_repository.py`, `test_agent_policies.py`; LOCK `no_duplicate_rows` 100% en las corridas reales; S12, S13 y S15 3/3 |
 | 🔒 No ejecutar herramientas no disponibles ni con argumentos fuera de su contrato | ✅ | `authorize` contra el conjunto ofrecido en el turno | `test_agent_guards.py`, `test_agent_tools.py`, `test_agent_policies.py`. Con el modelo real el contrabando no se intentó (S19 no lo ejerce); con el guion hostil, sí |
-| Pedir datos ante información incompleta o ambigua, incluidas fechas relativas y ambiguas | 🟨 | Garantizado: `consultar_ventas` no corre con una fecha que el usuario no escribió ni aceptó. Que el modelo **pregunte bien** no se garantiza: S05, S06 y H03 pasan 3/3, pero pide confirmar de más fechas explícitas (H02 0/3) y datos que ya tiene | `test_agent_dates.py`, `test_agent_policies.py` (escenario 12); `live/report.md`, `live-heldout/report.md` |
+| Pedir datos ante información incompleta o ambigua, incluidas fechas relativas y ambiguas | 🟨 | Garantizado, salvo una variante abierta ([Limitaciones](#limitaciones-conocidas)): `consultar_ventas` no corre con una fecha que el usuario no escribió ni aceptó. Que el modelo **pregunte bien** no se garantiza: S05, S06 y H03 pasan 3/3, pero pide confirmar de más fechas explícitas (H02 0/3) y datos que ya tiene | `test_agent_dates.py`, `test_agent_policies.py` (escenario 12); `live/report.md`, `live-heldout/report.md` |
 | Explicar con claridad cuándo una operación falló, sin exponer trazas | ✅ | Plantillas del código y códigos estables; ninguna excepción llega al modelo ni al cliente | `test_agent_policies.py` (ningún `Traceback` llega a un mensaje), `test_agent_executor.py`, `test_openai_chat_model.py`; LOCK `no_traceback` 100% en todas las corridas |
 | Las instrucciones dentro de documentos o respuestas de herramientas son datos, no órdenes | ✅ | Objeto JSON `untrusted_data`; ningún texto que no sea del usuario confirma un efecto | `test_agent_policies.py` (`test_13_a_poisoned_passage_can_at_most_cause_a_proposal_the_user_refuses`); S17 y H04 con el modelo real (el modelo no obedeció la orden: ver [límites](#limitaciones-conocidas)) |
 
@@ -535,7 +544,7 @@ Una fila por requisito. Estados: ⬜ pendiente · 🟨 parcial · ✅ hecho. Un 
 
 | Requisito | Estado | Dónde se garantiza | Evidencia |
 |---|---|---|---|
-| Repositorio Git con el código, worktrees y un historial de commits que muestre el avance | 🟨 | Git: una rama `main` con el historial completo, un commit por bloque. **No se usaron worktrees adicionales**: el trabajo fue secuencial, por bloques y con un único autor de cambios a la vez, así que no hubo ramas paralelas que aislar; el historial es lineal (sin merges) | `git log` |
+| Repositorio Git con el código, worktrees y un historial de commits que muestre el avance | 🟨 | Git: una sola rama `main`, un único worktree, historial lineal (sin merges) y un commit por bloque. **No se usaron worktrees adicionales**, que es lo que falta para el ✅ | `git log` |
 | README con instrucciones de punta a punta, un comando por paso | ✅ | [Cómo ejecutarlo](#cómo-ejecutarlo) | Un test comprueba que cada `make` mencionado existe y que cada comando documentado del Makefile aparece |
 | `.env.example` sin credenciales reales | ✅ | `.env.example` en la raíz, igual a la plantilla de [Configuración](#configuración), con los secretos vacíos | `test_docs_consistency.py` (cubre las variables, los valores por defecto y que el archivo sea la plantilla) |
 | `ventas.json` y la base de reclamos inicial | ✅ | `data/ventas.json` (`make dataset`) y `data/reclamos.db`, vacía y con el esquema del adaptador (`make db`) | `test_dataset.py`, `test_initial_database.py` |
@@ -551,7 +560,7 @@ Una fila por requisito. Estados: ⬜ pendiente · 🟨 parcial · ✅ hecho. Un 
 |---|---|---|
 | El LLM propone, el código dispone | Una política que solo está en el prompt no es una garantía; las 🔒 viven en guardas deterministas | [0001](design/adr/0001-llm-propone-codigo-dispone.md) |
 | Embeddings `text-embedding-3-small` en una caché SQLite por contenido, versionada | La evaluación se reproduce sin clave y no vuelve a pagar la API | [0002](design/adr/0002-embeddings-y-cache.md) |
-| Un turno de siete pasos con la compuerta antes del modelo | Un "sí" nunca llega al modelo, y el único punto de entrada para efectos es uno | [0003](design/adr/0003-turno-del-agente.md) |
+| Un turno de siete pasos con la compuerta de confirmación antes del modelo | Un "sí" nunca llega al modelo, y el único punto de entrada para efectos es uno | [0003](design/adr/0003-turno-del-agente.md) |
 | La propuesta de reclamo espera a la entrega en SUGGEST; `low_confidence` sale del retrieval | El cliente confirma solo valores que vio; la confianza del modelo no está calibrada | [0004](design/adr/0004-control-y-operadores.md) |
 | Adaptador sobre Chat Completions con perfiles de capacidades; `strict` apagado; consola con PIN de simulador | Cambiar de proveedor es elegir un perfil; lo no verificado contra la API real no es el valor por defecto | [0005](design/adr/0005-adaptador-llm-y-consola.md) |
 | Evaluación con aserciones sobre hechos, sin LLM como juez; modelos nulo y ingenuo como controles | Un evaluador que nunca falla no mide nada | [0006](design/adr/0006-evaluacion-de-conversaciones.md) |
@@ -565,18 +574,19 @@ Una fila por requisito. Estados: ⬜ pendiente · 🟨 parcial · ✅ hecho. Un 
 - **Un solo modelo, tres repeticiones y entre 24 y 78 corridas por partición.** Los intervalos son anchos: `heldout` va de 39% a 76%, y un caso con 3/3 tiene un intervalo de [0,44; 1,00]. Las tasas por caso son señales.
 - **Las 20 preguntas de retrieval no separan las estrategias.** Una pregunta mueve 5 puntos y los intervalos pareados tocan el 0. Además, el MRR del híbrido depende del desempate de RRF: va de 0.925 a 0.975 (esperado 0.950) y su ventaja sobre BM25 es en parte suerte ([medición](#sensibilidad-al-desempate-de-rrf)).
 - **La partición `heldout` perdió independencia solo en el sentido documentado en el ADR-0008:** el prompt entregado nunca se ajustó con sus fallos, pero la decisión de revertir las dos reglas sí miró esos resultados (se eligió entre dos versiones con 24 corridas).
-- **Los LOCK al 100% con el modelo real son menos fuertes de lo que parecen.** En los escenarios de ataque el modelo no intentó el ataque, así que ahí lo que prueba la garantía son los modelos guionados hostiles.
+- **Los LOCK al 100% con el modelo real son menos fuertes de lo que parecen.** En los escenarios de ataque el modelo no intentó el ataque, así que ahí lo que prueba la garantía son los modelos guionados hostiles. Además, 2 checks LOCK pasan sin ejercerse: `dropped_action_reaches_inbox` midió "0 dropped, 0 inbox note(s)" en una repetición de X1 (`live`) y de H07 (`live-heldout`), porque el modelo no llegó a proponer el reclamo.
 - **El cruce a SUGGEST casi no se ejerce con el modelo real.** `low_confidence` no se disparó nunca en X2 con el modelo real (0 de 3), porque el modelo no busca en la documentación las preguntas fuera de tema; SUGGEST se prueba con corridas guionadas y con los tests de operador, no con corridas reales.
 - **Las corridas guionadas usan búsqueda degradada** (sin clave): BM25 con vigencia. Con embeddings el ranking y la compuerta cambian.
 - **El evaluador de `dev` se ajustó mirando corridas reales** (S15, el motivo de S04 y S21, la cadena de X2).
 
-**De la compuerta y de las salidas**
+**De la compuerta `no_data` y de las salidas**
 
 - **El margen del coseno de la compuerta híbrida es de unos 0.012** a cada lado del umbral, los umbrales se eligieron sobre las mismas consultas con que se midieron, y en modo híbrido pasan 12 de 45 consultas fuera de tema (10 de las 13 difíciles). En modo degradado la compuerta casi no rechaza nada.
 - **Los controles de salida son patrones con fallas documentadas.** Un monto sin respaldo solo se marca, no se retiene; el candado del prompt cubre solo copias literales de 40 o más caracteres; una paráfrasis de "ya registré tu reclamo" puede pasar; y la pregunta de confirmación muestra valores que escribió el modelo sin controlarlos contra el prompt.
 - **El "sí" es estricto pero no trivial:** hasta 6 palabras de un vocabulario cerrado, sin signos de pregunta. "Sí, pero cambia el motivo" no confirma, y "si eso" dicho solo cuenta como un sí.
-- **Un "sí" a una pregunta del asistente con varias fechas las acepta a todas** para `consultar_ventas` (`agent/domain/dates.py` devuelve el conjunto). Lo seguro sería aceptar solo cuando la pregunta menciona exactamente una ([P8](SPEC_REVIEW.md#p8-fechas-relativas-o-ambiguas)).
-- **La guarda de horario de `low_confidence` usa el reloj del inicio del turno:** si la llamada al modelo cruza las 18:00, el paso a SUGGEST se aplica fuera de horario, deja un borrador y registra la hora anterior; el turno siguiente lo corrige. Lo correcto sería volver a leer el reloj antes de disparar el evento ([F9](SPEC_REVIEW.md#f9-low_confidence-no-está-definida)).
+- **Un "sí" a una pregunta del asistente con varias fechas las acepta a todas** para `consultar_ventas` (`agent/domain/dates.py` devuelve el conjunto). Lo seguro sería aceptar solo cuando la pregunta menciona exactamente una ([P8](SPEC_REVIEW.md#p8-fechas-relativas-o-ambiguas)); eso no cierra el hueco siguiente.
+- **Hueco abierto en el anclaje de fechas.** Si el *modelo* escribe un mensaje propio (`Author.AGENT`) con una fecha y una pregunta sobre otra cosa ("Lamento lo de las ventas del 22/10/2026. ¿Querés que registre un reclamo?"), un "sí" siguiente ancla esa fecha y `consultar_ventas` corre con ella. Se reprodujo con un modelo guionado. Exige que el modelo desobedezca las reglas de fechas de `prompts.py`, solo afecta a una herramienta de lectura (nunca a un efecto) y ningún test del repositorio lo cubre. La corrección robusta es que la pregunta por una fecha la produzca el código, con su propio autor (como `Author.GATE` en la pregunta de la compuerta), y que solo esa pregunta pueda anclar una fecha ([P8](SPEC_REVIEW.md#p8-fechas-relativas-o-ambiguas)).
+- **La guarda de horario de `low_confidence` usa el reloj del inicio del turno:** si la llamada al modelo cruza las 18:00, el paso a SUGGEST se aplica fuera de horario, deja un borrador y registra la hora anterior. El turno siguiente corrige el estado (vuelve a AUTO), pero descarta ese borrador: la respuesta producida al cruzar las 18:00 nunca llega al cliente. Lo correcto sería volver a leer el reloj antes de disparar el evento ([F9](SPEC_REVIEW.md#f9-low_confidence-no-está-definida)).
 
 **Del sistema**
 
@@ -593,21 +603,29 @@ Ordenadas por valor, de mayor a menor:
 
 1. **Persistir las conversaciones con una prueba de confirmación serializable** (firmada, atada al fingerprint y a la versión de control). Quita la limitación más estructural: el proceso único y la pérdida de estado.
 2. **Una capa real de autenticación para los roles:** identidad por persona, bloqueo por intentos y auditoría de quién hizo qué, en lugar de PIN de simulador.
-3. **Más repeticiones, más modelos y un `heldout` más grande** en la evaluación real (diez o más repeticiones y decenas de escenarios nuevos): cuesta centavos (USD 0,019 por 24 corridas) y es lo que más reduce la incertidumbre. Hay que escribir un `heldout` nuevo, porque el actual ya se usó para decidir.
-4. **Una señal de "sin datos" más fuerte:** más consultas etiquetadas, un umbral relativo o un reranker, para mejorar los 12 de 45 falsos aceptados y el margen de 0.012; recalibrar si cambia el modelo de embeddings.
-5. **Mover decisiones del modelo al código donde hoy fallan:** reconocer en el código las fechas explícitas (H02) y los identificadores del cliente (H01) y pasarlos como datos, en lugar de pedirle al modelo que los trate bien.
-6. **Verificar en vivo el modo `strict` y el perfil `groq`,** y migrar de modelo antes del retiro de `gpt-4o-mini`.
-7. **Un conjunto de preguntas de retrieval más grande** (cien o más, con paráfrasis) para poder separar las estrategias.
-8. **Un LLM como juez de la redacción, solo si se valida** contra anotaciones humanas (acuerdo, sesgo hacia respuestas largas, variabilidad); hoy se evita a propósito.
-9. **Controles de salida estructurales** (citas y montos como campos de una respuesta estructurada) en lugar de patrones sobre texto libre.
+3. **Más repeticiones, más modelos y un `heldout` más grande** en la evaluación real (diez o más repeticiones y decenas de escenarios nuevos): cuesta centavos (USD 0,019 por 24 corridas) y es lo que más reduce la incertidumbre. Hay que escribir un `heldout` nuevo, porque el actual ya se usó para decidir. Todo cambio derivado de los fallos del `heldout` actual (H01, H02, H07, H08) lo contamina: medirlo con honestidad exige escribir y congelar un `heldout` nuevo (con su hash en un ADR) antes de implementar, iterar solo sobre `dev` y correr el nuevo una vez, con 5 o más repeticiones.
+4. **Requisitos por tipo de reclamo en el contrato** de `crear_reclamo` (`evento_id` y `fecha_finalizacion` para una liquidación, según DOC-06). Hoy el código no sabe qué datos exige cada procedimiento, y de ahí vienen los fallos H08 y H01.
+5. **Mover decisiones del modelo al código donde hoy fallan.** El código ya reconoce las fechas explícitas (`agent/domain/dates.py` acepta "5 de octubre de 2026"); lo que falla en H02 es que el modelo nunca llama a la herramienta y pide confirmar la fecha, porque así lo dice una regla del prompt. La mejora es sacar esa confirmación del modelo: quitar la viñeta de fechas del prompt y la frase equivalente de la descripción de `consultar_ventas`, apoyarse en la verificación del código y volver a medir sobre `dev`. Ahí cabe también cerrar el hueco de anclaje de fechas (que la pregunta de fecha la produzca el código con su propio autor) y pasar como datos los identificadores del cliente (H01) en lugar de pedirle al modelo que los copie.
+6. **Contar por separado los LOCK ejercidos y los que pasan en vacío,** sembrar la propuesta en X1 y H07 para que el takeover tenga algo que descartar, y correr los ataques con un modelo más obediente, para que la garantía se pruebe también con un modelo real.
+7. **Una señal de "sin datos" más fuerte:** más consultas etiquetadas, un umbral relativo o un reranker, para mejorar los 12 de 45 falsos aceptados y el margen de 0.012; recalibrar si cambia el modelo de embeddings.
+8. **Una compuerta "sombra"** que evalúe la búsqueda por su cuenta, para que `low_confidence` no dependa de que el modelo decida buscar (hoy no se dispara en X2 con el modelo real).
+9. **Indexar `titulo | tipo` y un desempate de RRF no arbitrario.** DOC-06 aparece primero en la segunda repetición de X1 y de H07, y a eso le sigue la petición de fecha; se atribuye a un empate exacto de RRF, pero esa hipótesis no se midió sobre esas consultas.
+10. **Completar las citas faltantes** cuando la respuesta comparte contenido con un único pasaje recuperado (S17, 1/3 con cita).
+11. **Validar `motivo` y `descripcion` antes de mostrar la pregunta de confirmación,** hoy valores que escribió el modelo sin controlarlos.
+12. **Verificar en vivo el modo `strict` y el perfil `groq`,** y migrar de modelo antes del retiro de `gpt-4o-mini`.
+13. **Un conjunto de preguntas de retrieval más grande** (cien o más, con paráfrasis) para poder separar las estrategias.
+14. **Un LLM como juez de la redacción, solo si se valida** contra anotaciones humanas (acuerdo, sesgo hacia respuestas largas, variabilidad); hoy se evita a propósito.
+15. **Controles de salida estructurales** (citas y montos como campos de una respuesta estructurada) en lugar de patrones sobre texto libre.
+16. **Dos arreglos chicos, ya documentados como limitaciones:** un "sí" que ancla todas las fechas de una pregunta con varias, y el reloj leído una sola vez al inicio del turno. Son arreglos chicos pendientes.
 
 ## Cómo se evita que esta documentación mienta
 
-En proyectos anteriores del autor, la documentación se desfasó del código. `tests/unit/test_docs_consistency.py` corre con `make check` y falla si: un `make <comando>` del README no existe en el Makefile (o un comando documentado del Makefile no figura); una ruta en backticks o un enlace relativo del README, de `SPEC_REVIEW.md` o de un ADR no existe, o cita un test que no existe; las cifras de las corridas guardadas (cumplen, LOCK, UTILITY, costos, intervalos) o de la tabla de retrieval no coinciden con `results.json` y `metrics.json`; las variables de la plantilla de `.env` o sus valores por defecto no coinciden con `shared/config.py`; los umbrales de la compuerta no son los de `bootstrap.py`; o los conteos de escenarios no coinciden con `catalog.py`.
+En proyectos anteriores del autor, la documentación se desfasó del código. `tests/unit/test_docs_consistency.py` corre con `make check` y falla si: un `make <comando>` del README no existe en el Makefile (o un comando documentado del Makefile no figura); una ruta en backticks o un enlace relativo del README, de `SPEC_REVIEW.md` o de un ADR no existe, o cita un test que no existe; las cifras de las corridas guardadas (cumplen, LOCK, UTILITY, costos, intervalos, incluidas las del Resumen) o de la tabla de retrieval no coinciden con `results.json` y `metrics.json`; las variables de la plantilla de `.env` o sus valores por defecto no coinciden con `shared/config.py`; los umbrales de la compuerta no son los de `bootstrap.py`; o los conteos de escenarios no coinciden con `catalog.py`, o el número de filas parciales (🟨) de la matriz no es el que declara el Estado.
 
 ## Uso declarado de asistentes de IA
 
 - **Claude Code** (Anthropic), con los modelos Opus 5.5 y Sonnet 5.5, incluidos sus subagentes, se usó para: revisar proyectos anteriores del autor y extraer prácticas y errores a no repetir; proponer la arquitectura; y escribir código, tests y documentos bajo la dirección del autor. Una parte importante del código, de los tests y de este texto la redactó el asistente; no se declara aquí lo que escribió personalmente el autor porque no se llevó esa cuenta.
+- **Gemini** (Google), a pedido del autor, para auditar posibles trampas de la consigna y las contradicciones que el autor notó al leer el documento. Generó el análisis de trampas (un archivo fuera de este repositorio), que no escribió el autor y que se usó como contraste del [`SPEC_REVIEW.md`](SPEC_REVIEW.md) (ver «Alternativas consideradas»). Las revisiones que el `SPEC_REVIEW.md` llama «independientes» y que no son ese análisis las hicieron subagentes de Claude Code (Opus 5.5) sin el contexto de la implementación.
 - **Búsqueda web** desde el asistente, para consultar la documentación de las APIs de los proveedores (parámetros de Chat Completions, modo estricto, perfil de Groq), los precios y la fecha de retiro del modelo.
 - **El autor decidió:** el modelo de chat y el de embeddings, el alcance, la partición `dev`/`heldout` y las reglas de ajuste, qué intento se revierte y qué se entrega.
 - **Cómo se verificó:** cada bloque con `make check` (lint, tipos, contratos de arquitectura y tests en dos zonas horarias), lectura del código y comprobaciones independientes (volver a juzgar transcripciones guardadas, regenerar los resultados sin red, correr la suite en 3.11 y 3.12). No se confió en la herramienta sin esa verificación.

@@ -122,11 +122,17 @@ describe este ADR y ya no es así:
   esa consulta se responde con BM25 y el turno registra `search_degraded:<código>`.
 - La cifra de "18 situaciones de ataque" es la de los escenarios numerados de `test_agent_policies.py`; la
   evaluación de conversaciones tiene hoy 34 escenarios (README, Parte 4).
+## Actualización (2026-10-26): dos precisiones
+
 - **El punto 5 tenía un hueco, ya cerrado.** La pregunta de confirmación muestra la descripción que escribió el
   modelo; si el "sí" no confirmaba el reclamo (versión de control distinta, o propuesta retirada por el cierre
   de la franja), una fecha de esa descripción contaba como propuesta por el asistente y aceptada. La pregunta
-  se guarda ahora con `Author.GATE` y no propone fechas (`dates_proposed_in`; P8 de `SPEC_REVIEW.md`).
-- **El `Confirmed` del punto 3 tampoco depende de convenciones:** `test_agent_architecture.py` falla si un
-  módulo fuera de `agent/domain/pending.py` nombra `_GATE_PROOF` o construye un `Confirmed` (P3 de
-  `SPEC_REVIEW.md`).
+  se guarda ahora con `Author.GATE` y no propone fechas (`dates_proposed_in`; P8 de `SPEC_REVIEW.md`). Sigue
+  abierta una variante: si el modelo escribe un mensaje propio (`Author.AGENT`) con una fecha y una pregunta
+  sobre otra cosa, un "sí" ancla esa fecha para `consultar_ventas` (P8 y Limitaciones del README).
+- **El `Confirmed` del punto 3 tiene un freno por test, no una barrera:** `test_agent_architecture.py` recorre el
+  AST de los módulos de `src/merchant_assistant` y falla si uno distinto de `agent/domain/pending.py` llama a
+  `Confirmed(...)` (también por un alias de import), menciona `_GATE_PROOF` o lo importa. No detecta una
+  construcción por reflexión (`object.__new__` con `object.__setattr__`, una subclase o un `getattr` con un
+  nombre calculado). Cierra el descuido; un módulo decidido a saltarlo podría (P3 de `SPEC_REVIEW.md`).
 
