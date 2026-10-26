@@ -261,7 +261,7 @@ class OperatorService:
         change.state = replace(state, pending=pending_state)
         change.events.append("confirmation_pending")
         self._mark_approved(change, draft, actor, now)
-        self._say(change, draft.text, draft.id)
+        self._say(change, draft.text, draft.id, author=Author.GATE)
 
     def _execute(
         self,
@@ -347,9 +347,11 @@ class OperatorService:
         change.state = replace(change.state, drafts=drafts)
         change.events.append(f"draft_approved:{draft.id}")
 
-    def _say(self, change: _Change, text: str, draft_id: str) -> None:
+    def _say(
+        self, change: _Change, text: str, draft_id: str, *, author: Author = Author.AGENT
+    ) -> None:
         """A message that follows an operator's decision: delivered and added to the history."""
-        change.state = change.state.with_messages(Message(Role.ASSISTANT, text))
+        change.state = change.state.with_messages(Message(Role.ASSISTANT, text, author=author))
         change.outbound.append(Outbound("reply", text, draft_id))
 
     # ------------------------------------------------------------------ the machinery

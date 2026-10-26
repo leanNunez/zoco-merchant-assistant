@@ -1371,7 +1371,7 @@ def test_11_a_takeover_and_a_release_leave_the_drop_note_for_the_model(tmp_path:
 
     (_, call) = world.model.calls
     assert call.messages[-3:] == (
-        Message(Role.ASSISTANT, texts(asked)[0]),
+        Message(Role.ASSISTANT, texts(asked)[0], author=Author.GATE),
         DROPPED,
         Message(Role.USER, "¿pudieron ver mi reclamo?"),
     )
@@ -1519,6 +1519,49 @@ def test_11_a_sales_date_is_not_grounded_by_a_note_or_hidden_by_one(tmp_path: Pa
         ("consultar_ventas", "rejected", "date_not_confirmed")
     ]
     assert notes_in(world.stored().messages) == [INVALIDATED]
+
+
+# A description may carry a date the model wrote ("ayer" -> 22/10/2026). The gate's question
+# shows it, but a yes to that question confirms the complaint, never the date (ADR-0003 §5).
+DATED = {"motivo": "Ventas no acreditadas", "descripcion": "No se acreditaron las del 22/10/2026."}
+ASK_SALES = calls_reply(tool_call("consultar_ventas", {"fecha": "2026-10-22"}))
+
+
+def test_11_a_yes_that_does_not_confirm_the_complaint_does_not_ground_its_date(
+    tmp_path: Path,
+) -> None:
+    world = make_world(tmp_path, [propose_reply(DATED), ASK_SALES, text_reply("¿Qué día?")])
+    world.say("Ayer no me acreditaron las ventas, quiero reclamar.")
+    with pytest.raises(ControlError):
+        world.team.block(CID, Actor.OPERATOR)  # refused, but the control version moved
+
+    answered = world.say("sí")
+
+    assert answered.gate == "invalidated"
+    assert [(r.name, r.outcome, r.error_code) for r in answered.tools] == [
+        ("consultar_ventas", "rejected", "date_not_confirmed")
+    ]
+    assert world.rows == 0
+
+
+def test_11_a_yes_to_a_question_the_closing_time_withdrew_finds_nothing_pending(
+    tmp_path: Path,
+) -> None:
+    world = make_world(tmp_path, [propose_reply(DATED), ASK_SALES, text_reply("Listo.")])
+    enter_suggest(world)
+    world.say("Ayer no me acreditaron las ventas, quiero reclamar.")
+    question = only_draft(world, DraftKind.CONFIRMATION_REQUEST)
+    world.team.approve_draft(CID, question.id, Actor.OPERATOR)
+    world.clock.instant = CLOSED  # back to AUTO: the delivered question is no longer pending
+
+    answered = world.say("sí")
+
+    # The template answers; the model is not asked, so its date never reaches the sales tool.
+    assert answered.gate == "nothing_pending"
+    assert texts(answered) == [f"{nothing_pending(None)}\n\n{hours_notice(WINDOW)}"]
+    assert answered.tools == ()
+    assert len(world.model.calls) == 1
+    assert world.rows == 0
 
 
 @settings(max_examples=200)

@@ -20,6 +20,10 @@ viernes pasado", "la semana pasada"), never fills in a missing year ("22 de octu
 reads a two-digit year, and never reads `m/d/yyyy` (US order). Every one of those is a question
 to ask the user, not a date to extract. The cost of being this strict is that a legitimate
 request can be refused once and the agent has to ask; that is the safe failure.
+
+The gate's confirmation question (`Author.GATE`) never proposes a date: the only free text in
+it is the description the model wrote, and a yes to it confirms the complaint. A date written
+there is the model's reading, so a yes to that question grounds nothing (ADR-0003 §5).
 """
 
 from __future__ import annotations
@@ -29,7 +33,7 @@ import unicodedata
 from collections.abc import Sequence
 from datetime import date
 
-from merchant_assistant.agent.domain.messages import Message, Role
+from merchant_assistant.agent.domain.messages import Author, Message, Role
 from merchant_assistant.agent.domain.notes import is_platform_note
 from merchant_assistant.agent.domain.replies import ReplyKind, classify_reply
 
@@ -92,12 +96,20 @@ def dates_stated_by_assistant(text: str) -> frozenset[date]:
     return frozenset(found)
 
 
+def dates_proposed_in(message: Message) -> frozenset[date]:
+    """The dates an assistant message puts to the user; none in the gate's question."""
+    if message.author is Author.GATE:
+        return frozenset()
+    return dates_stated_by_assistant(message.content or "")
+
+
 def is_grounded(day: date, history: Sequence[Message]) -> bool:
     """Whether `day` comes from the user and not from the model's own interpretation.
 
     True when a USER message wrote the date explicitly, or when the LAST user message is a
     strict yes and the message right before it is an ASSISTANT message stating that date
-    (the assistant proposed an interpretation and the user accepted it).
+    (the assistant proposed an interpretation and the user accepted it). The gate's
+    confirmation question is not such a message (`dates_proposed_in`).
     """
     if any(day in explicit_dates(message.content or "") for message in _user_messages(history)):
         return True
@@ -112,7 +124,7 @@ def accepted_assistant_dates(history: Sequence[Message]) -> frozenset[date]:
         return frozenset()
     if classify_reply(last_user.content or "") is not ReplyKind.AFFIRMATIVE:
         return frozenset()
-    return dates_stated_by_assistant(proposal.content or "")
+    return dates_proposed_in(proposal)
 
 
 def assistant_message_before_last_user(history: Sequence[Message]) -> Message | None:

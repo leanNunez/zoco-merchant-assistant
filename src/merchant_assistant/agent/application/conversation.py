@@ -60,7 +60,7 @@ from merchant_assistant.agent.application.executor import (
 from merchant_assistant.agent.application.prompts import describe_hours, system_prompt
 from merchant_assistant.agent.domain.dates import (
     assistant_message_before_last_user,
-    dates_stated_by_assistant,
+    dates_proposed_in,
     is_grounded,
 )
 from merchant_assistant.agent.domain.drafts import Draft, DraftKind, DraftStatus, next_draft_id
@@ -72,7 +72,7 @@ from merchant_assistant.agent.domain.errors import (
     DateNotConfirmed,
 )
 from merchant_assistant.agent.domain.guards import ValidatedCall, authorize
-from merchant_assistant.agent.domain.messages import Message, Role, ToolCall
+from merchant_assistant.agent.domain.messages import Author, Message, Role, ToolCall
 from merchant_assistant.agent.domain.notes import NOTE_TEXTS, Withdrawal, add_note
 from merchant_assistant.agent.domain.output_checks import (
     canonical_doc_id,
@@ -248,12 +248,13 @@ class _Turn:
 class _Reply:
     """What the turn would say. In SUGGEST it becomes a draft instead of being sent.
 
-    `action` marks the confirmation question of a complaint the model proposed in SUGGEST;
-    `confirmed` is a customer's yes in SUGGEST, which says nothing and waits for an operator.
+    `kind="question"` is the gate's confirmation question, stored as `Author.GATE`; `action`
+    marks the one of a complaint the model proposed in SUGGEST; `confirmed` is a customer's
+    yes in SUGGEST, which says nothing and waits for an operator.
     """
 
     text: str | None
-    kind: Literal["reply", "notice"] = "reply"
+    kind: Literal["reply", "notice", "question"] = "reply"
     action: PendingAction | None = None
     confirmed: Confirmed | None = None
     from_model: bool = False  # the model's own answer (checked), not a code template
@@ -597,7 +598,7 @@ class ConversationService:
                 },
             )
             return state.with_messages(_tool_message(call, content)), _Reply(
-                question, action=action
+                question, kind="question", action=action
             )
         pending_state, _ = propose(state.pending, action)
         turn.tools.append(ToolRecord(call.name, call.arguments, "proposed", "pending_confirmation"))
@@ -611,7 +612,7 @@ class ConversationService:
             },
         )
         state = replace(state, pending=pending_state).with_messages(_tool_message(call, content))
-        return state, _Reply(question)
+        return state, _Reply(question, kind="question")
 
     def _read(
         self, state: ConversationState, validated: ValidatedCall, call: ToolCall, turn: _Turn
@@ -699,7 +700,8 @@ class ConversationService:
                 state = state.with_messages(Message(Role.ASSISTANT, text))
             elif capabilities.delivery is Delivery.SEND and reply.action is None:
                 outbound.append(Outbound("reply", text))
-                state = state.with_messages(Message(Role.ASSISTANT, text))
+                author = Author.GATE if reply.kind == "question" else Author.AGENT
+                state = state.with_messages(Message(Role.ASSISTANT, text, author=author))
             elif capabilities.delivery is Delivery.DRAFT:
                 # Not in the history: the customer has not seen it until an operator approves.
                 kind = DraftKind.REPLY if reply.action is None else DraftKind.CONFIRMATION_REQUEST
@@ -808,9 +810,12 @@ def _found_nothing(state: ConversationState, reply: _Reply, turn: _Turn) -> bool
 
 
 def _answers_a_date_question(state: ConversationState) -> bool:
-    """A bare "sí" or "no" right after the assistant stated a date answers THAT question."""
+    """A bare "sí" or "no" right after the assistant stated a date answers THAT question.
+
+    Not after the gate's question: a yes to a complaint that is no longer pending gets the
+    nothing-pending template, whatever date its description mentions."""
     previous = assistant_message_before_last_user(state.messages)
-    return previous is not None and bool(dates_stated_by_assistant(previous.content or ""))
+    return previous is not None and bool(dates_proposed_in(previous))
 
 
 def offered_tools(capabilities: Capabilities) -> dict[str, ToolSpec]:

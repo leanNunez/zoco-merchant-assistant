@@ -8,6 +8,10 @@ An assistant message says who wrote it: the agent (the model, or a code-owned te
 person of the merchant's team who answered while the conversation was in HUMAN. Both reach the
 customer from the merchant's side, so both are `Role.ASSISTANT`; the `author` keeps them apart
 in the stored history and the transcripts, and a provider adapter can map it.
+
+The confirmation gate's question is marked apart too (`Author.GATE`): it is a code-owned
+template, but it embeds the description the model wrote, and a yes to it confirms the
+complaint, never a date that description happens to mention (`domain/dates.py`).
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ class Role(StrEnum):
 class Author(StrEnum):
     AGENT = "agent"  # the model or a template owned by the code
     OPERATOR = "operator"  # a person of the merchant's team, answering in HUMAN
+    GATE = "gate"  # the gate's confirmation question for a pending complaint
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,11 +57,11 @@ class Message:
     author: Author = Author.AGENT
 
     def __post_init__(self) -> None:
-        if self.author is Author.OPERATOR:
+        if self.author is not Author.AGENT:
             if self.role is not Role.ASSISTANT:
-                raise InvalidMessage("only a message to the customer can be written by an operator")
+                raise InvalidMessage(f"only a message to the customer can be by {self.author}")
             if self.tool_calls or self.content is None or not self.content.strip():
-                raise InvalidMessage("an operator message is plain text, without tool calls")
+                raise InvalidMessage(f"a message by {self.author} is plain text, no tool calls")
         match self.role:
             case Role.ASSISTANT:
                 if self.tool_call_id is not None:

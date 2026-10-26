@@ -2804,7 +2804,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-1234 el 20 de octubre y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -3065,7 +3065,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-1234 el 20 de octubre y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -3326,7 +3326,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-1234 el 20 de octubre y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -5416,7 +5416,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Error al validar QR\nDescripción: En el evento EVT-2201 el lector de la puerta marca QR inválido en todas las entradas, incluso en las pagadas.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -5710,7 +5710,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Error al validar QR\nDescripción: En el evento EVT-2201 el lector de la puerta marca QR inválido en todas las entradas, incluso en las pagadas.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -6004,7 +6004,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Error al validar QR\nDescripción: En el evento EVT-2201 el lector de la puerta marca QR inválido en todas las entradas, incluso en las pagadas.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -6336,7 +6336,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Liquidación no recibida\nDescripción: El evento EVT-5678 finalizó el 2026-10-09 y pasaron más de cinco días hábiles sin liquidación.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -6683,7 +6683,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Liquidación no recibida\nDescripción: El evento EVT-5678 finalizó el 2026-10-09 y pasaron más de cinco días hábiles sin liquidación.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -7030,7 +7030,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Liquidación no recibida\nDescripción: El evento EVT-5678 finalizó el 2026-10-09 y pasaron más de cinco días hábiles sin liquidación.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -9926,7 +9926,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Cobro duplicado\nDescripción: Me cobraron dos veces la misma entrada del evento EVT-7001 el 2026-10-21.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -10175,7 +10175,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Cobro duplicado\nDescripción: Me cobraron dos veces la misma entrada del evento EVT-7001 el 2026-10-21.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -10424,7 +10424,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Cobro duplicado\nDescripción: Me cobraron dos veces la misma entrada del evento EVT-7001 el 2026-10-21.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -10685,7 +10685,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-8100 y nunca me llegó el correo con el QR.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -11013,7 +11013,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-8100 y nunca me llegó el correo con el QR.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -11341,7 +11341,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-8100 y nunca me llegó el correo con el QR.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -11681,7 +11681,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Cobro duplicado\nDescripción: Me cobraron dos veces la entrada del evento EVT-3001.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -11734,7 +11734,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Cobro duplicado\nDescripción: Me cobraron dos veces la entrada del evento EVT-3001.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -12065,7 +12065,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Cobro duplicado\nDescripción: Me cobraron dos veces la entrada del evento EVT-3001.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -12118,7 +12118,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Cobro duplicado\nDescripción: Me cobraron dos veces la entrada del evento EVT-3001.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -12449,7 +12449,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Cobro duplicado\nDescripción: Me cobraron dos veces la entrada del evento EVT-3001.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -12502,7 +12502,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Cobro duplicado\nDescripción: Me cobraron dos veces la entrada del evento EVT-3001.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -12835,7 +12835,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -13213,7 +13213,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -13591,7 +13591,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-9002 y en la app figura como reservada, no emitida.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -13943,7 +13943,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-1234 y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -13984,7 +13984,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Cobro duplicado\nDescripción: Pagué la entrada del evento EVT-1234 y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -14273,7 +14273,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-1234 y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -14314,7 +14314,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Cobro duplicado\nDescripción: Pagué la entrada del evento EVT-1234 y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -14603,7 +14603,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-1234 y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -14644,7 +14644,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Cobro duplicado\nDescripción: Pagué la entrada del evento EVT-1234 y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -14953,7 +14953,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Baja de cuenta\nDescripción: El comercio pidió dar de baja su cuenta y todos sus eventos.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -15307,7 +15307,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Baja de cuenta\nDescripción: El comercio pidió dar de baja su cuenta y todos sus eventos.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -15661,7 +15661,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Baja de cuenta\nDescripción: El comercio pidió dar de baja su cuenta y todos sus eventos.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -16001,7 +16001,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Prueba\nDescripción: Prueba de reclamo sin confirmación.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -16334,7 +16334,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Prueba\nDescripción: Prueba de reclamo sin confirmación.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -16667,7 +16667,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Prueba\nDescripción: Prueba de reclamo sin confirmación.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -17070,7 +17070,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Error al validar QR\nDescripción: El lector de QR rechazó entradas válidas en el evento EVT-4410 anoche.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -17461,7 +17461,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Error al validar QR\nDescripción: El lector de QR rechazó entradas válidas en el evento EVT-4410 anoche.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -17852,7 +17852,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Error al validar QR\nDescripción: El lector de QR rechazó entradas válidas en el evento EVT-4410 anoche.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -19076,7 +19076,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-1234 el 20 de octubre y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -19343,7 +19343,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-1234 el 20 de octubre y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -19610,7 +19610,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-1234 el 20 de octubre y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -19889,7 +19889,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-3300 y no me llegó el correo.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -19930,7 +19930,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-3301 y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -20249,7 +20249,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-3300 y no me llegó el correo.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -20290,7 +20290,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-3301 y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -20609,7 +20609,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-3300 y no me llegó el correo.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -20650,7 +20650,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-3301 y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -21012,7 +21012,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-1234 el 20 de octubre y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -21431,7 +21431,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-1234 el 20 de octubre y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -21850,7 +21850,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-1234 el 20 de octubre y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -22292,7 +22292,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-1234 y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -22756,7 +22756,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-1234 y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -23220,7 +23220,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entrada no emitida\nDescripción: Pagué la entrada del evento EVT-1234 y no me llegó el correo con la entrada.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -26245,7 +26245,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entradas no entregadas\nDescripción: En el evento EVT-6120 varios compradores tienen el pago aprobado pero la entrada nunca les llegó al correo.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -26557,7 +26557,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entradas no entregadas\nDescripción: En el evento EVT-6120 varios compradores tienen el pago aprobado pero la entrada nunca les llegó al correo.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -26869,7 +26869,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Entradas no entregadas\nDescripción: En el evento EVT-6120 varios compradores tienen el pago aprobado pero la entrada nunca les llegó al correo.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -28897,7 +28897,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Pedido de reintegro total\nDescripción: El comercio exige el reintegro total de sus ventas del mes.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -29251,7 +29251,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Pedido de reintegro total\nDescripción: El comercio exige el reintegro total de sus ventas del mes.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -29605,7 +29605,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Pedido de reintegro total\nDescripción: El comercio exige el reintegro total de sus ventas del mes.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -31794,7 +31794,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Rechazo de QR válidos\nDescripción: Anoche, en el ingreso del evento EVT-5150, el escáner rechazaba los QR de entradas válidas.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -32213,7 +32213,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Rechazo de QR válidos\nDescripción: Anoche, en el ingreso del evento EVT-5150, el escáner rechazaba los QR de entradas válidas.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -32632,7 +32632,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Rechazo de QR válidos\nDescripción: Anoche, en el ingreso del evento EVT-5150, el escáner rechazaba los QR de entradas válidas.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -33030,7 +33030,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Liquidación no recibida\nDescripción: El evento EVT-4040 finalizó el 2026-09-30 y no recibí ninguna liquidación.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -33377,7 +33377,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Liquidación no recibida\nDescripción: El evento EVT-4040 finalizó el 2026-09-30 y no recibí ninguna liquidación.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,
@@ -33724,7 +33724,7 @@
             "tool_calls": []
           },
           {
-            "author": "agent",
+            "author": "gate",
             "content": "Voy a registrar este reclamo:\nMotivo: Liquidación no recibida\nDescripción: El evento EVT-4040 finalizó el 2026-09-30 y no recibí ninguna liquidación.\nSi es correcto, respondé \"sí\" para registrarlo. Si no, respondé \"no\" para cancelarlo.",
             "role": "assistant",
             "tool_call_id": null,

@@ -107,8 +107,13 @@ def test_an_operator_message_is_an_assistant_message_marked_with_its_author() ->
         pytest.param(Role.ASSISTANT, "  ", (), None, id="blank"),
     ],
 )
-def test_an_operator_writes_only_plain_text_to_the_customer(
-    role: Role, content: str | None, tool_calls: tuple[ToolCall, ...], tool_call_id: str | None
+@pytest.mark.parametrize("author", [Author.OPERATOR, Author.GATE])
+def test_an_operator_or_the_gate_writes_only_plain_text_to_the_customer(
+    role: Role,
+    content: str | None,
+    tool_calls: tuple[ToolCall, ...],
+    tool_call_id: str | None,
+    author: Author,
 ) -> None:
     with pytest.raises(InvalidMessage):
-        Message(role, content, tool_calls, tool_call_id, author=Author.OPERATOR)
+        Message(role, content, tool_calls, tool_call_id, author=author)

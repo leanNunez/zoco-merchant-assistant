@@ -7,11 +7,12 @@ import pytest
 from merchant_assistant.agent.domain.dates import (
     accepted_assistant_dates,
     assistant_message_before_last_user,
+    dates_proposed_in,
     dates_stated_by_assistant,
     explicit_dates,
     is_grounded,
 )
-from merchant_assistant.agent.domain.messages import Message, Role, ToolCall
+from merchant_assistant.agent.domain.messages import Author, Message, Role, ToolCall
 from merchant_assistant.agent.domain.notes import Withdrawal, note_text
 
 OCT_22 = date(2026, 10, 22)
@@ -110,6 +111,23 @@ def test_a_date_the_assistant_proposed_and_the_user_accepted_is_grounded() -> No
 
     assert is_grounded(OCT_22, history)
     assert accepted_assistant_dates(history) == {OCT_22}
+
+
+def test_a_yes_to_the_gates_question_never_accepts_a_date_its_description_mentions() -> None:
+    # The description is the model's text: "ayer" became 22/10/2026 there, not in a question.
+    question = Message(
+        Role.ASSISTANT,
+        "Voy a registrar este reclamo:\nMotivo: Ventas no acreditadas\n"
+        "Descripción: No se acreditaron las ventas del 22/10/2026.\n"
+        'Si es correcto, respondé "sí" para registrarlo.',
+        author=Author.GATE,
+    )
+    history = [user("Ayer no me acreditaron las ventas."), question, user("sí")]
+
+    assert dates_stated_by_assistant(question.content or "") == {OCT_22}
+    assert dates_proposed_in(question) == frozenset()
+    assert accepted_assistant_dates(history) == frozenset()
+    assert not is_grounded(OCT_22, history)
 
 
 def test_a_platform_note_between_the_proposal_and_the_yes_does_not_hide_the_proposal() -> None:
