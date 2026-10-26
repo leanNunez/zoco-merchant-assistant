@@ -293,6 +293,11 @@ BM25); y los umbrales se ajustaron sobre las mismas consultas con que se midiero
 pasaría con personas reales. Con el modelo real, además, `low_confidence` casi no se dispara: el modelo
 contesta las preguntas fuera de tema sin buscar (la evidencia `low_confidence fired` de X2 es 0/3 en
 `evaluation/results/conversations/live/report.md`), así que SUGGEST se ejerce con modelos guionados.
+Otro límite, señalado por una revisión independiente y sin corregir: la guarda de horario de `low_confidence`
+usa el reloj leído al empezar el turno (`now` en `ConversationService.handle_user_message`). Si la llamada al
+modelo cruza las 18:00, la transición AUTO → SUGGEST se aplica fuera de horario, la respuesta queda como
+borrador y el registro muestra la hora anterior; el turno siguiente lo corrige (`sync_hours` vuelve a AUTO).
+La corrección sugerida es volver a leer el reloj antes de disparar el evento (`_fire`).
 
 ## F10. Un reclamo a medio confirmar sobrevive a un cambio de control
 
@@ -618,6 +623,11 @@ solo registrar otro, con su propia confirmación.
 pregunta de plantilla; una segunda llamada en la misma respuesta se ignora; el efecto solo se ejecuta con un
 `Confirmed` (`tests/integration/agent/test_agent_policies.py::test_1_a_model_call_to_crear_reclamo_only_asks_for_confirmation`,
 `test_8_two_proposals_in_one_reply_keep_only_the_first`, `tests/unit/agent/test_agent_architecture.py`).
+Una revisión independiente notó que la prueba de la compuerta (`_GATE_PROOF`) se podía importar y con ella
+fabricar un `Confirmed` fuera de `pending.py` sin que nada lo detectara. Cerrado con un test que recorre el
+AST de todo el paquete y falla si otro módulo nombra la prueba o construye un `Confirmed`
+(`tests/unit/agent/test_agent_architecture.py::test_no_module_but_the_gate_can_build_a_confirmed`,
+`test_the_scan_does_see_a_forged_confirmed`).
 
 ## P4. "Sí" repetido sin nada pendiente
 
@@ -746,6 +756,17 @@ del código se sostiene y la conducta del modelo se mide aparte: las fechas rela
 se resuelven preguntando en 3 de 3 corridas, pero el modelo también pide confirmar fechas completas y sin
 ambigüedad ("5 de octubre de 2026", H02: 0 de 3) y fechas que el cliente da dentro de un reclamo (S19), lo que
 el código no puede evitar sin dejar de ser conservador (ver el apartado siguiente).
+
+Una revisión independiente encontró un hueco, ya cerrado: la pregunta de confirmación de un reclamo es un
+mensaje del asistente que muestra la descripción escrita por el modelo. Si el "sí" del cliente no confirmaba
+el reclamo (la versión de control había cambiado, o el cierre de la franja lo retiró en SUGGEST), el turno
+seguía al modelo y una fecha de esa descripción contaba como propuesta y aceptada. Ahora la pregunta se guarda
+con `Author.GATE` y `dates_proposed_in` no lee fechas de ella: un "sí" confirma el reclamo, nunca una fecha
+(`tests/unit/agent/test_agent_dates.py::test_a_yes_to_the_gates_question_never_accepts_a_date_its_description_mentions`,
+`tests/integration/agent/test_agent_control_scenarios.py::test_11_a_yes_that_does_not_confirm_the_complaint_does_not_ground_its_date`,
+`test_11_a_yes_to_a_question_the_closing_time_withdrew_finds_nothing_pending`). Límite conocido, sin corregir:
+un "sí" a un mensaje del asistente que menciona varias fechas las ancla a todas (`dates_stated_by_assistant`
+devuelve el conjunto). La corrección sugerida es aceptar solo cuando el mensaje menciona exactamente una.
 
 ## P9. DOC-11 define categorías que `crear_reclamo` no tiene
 

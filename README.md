@@ -565,6 +565,8 @@ Una fila por requisito. Estados: ⬜ pendiente · 🟨 parcial · ✅ hecho. Un 
 - **El margen del coseno de la compuerta híbrida es de unos 0.012** a cada lado del umbral, los umbrales se eligieron sobre las mismas consultas con que se midieron, y en modo híbrido pasan 12 de 45 consultas fuera de tema (10 de las 13 difíciles). En modo degradado la compuerta casi no rechaza nada.
 - **Los controles de salida son patrones con fallas documentadas.** Un monto sin respaldo solo se marca, no se retiene; el candado del prompt cubre solo copias literales de 40 o más caracteres; una paráfrasis de "ya registré tu reclamo" puede pasar; y la pregunta de confirmación muestra valores que escribió el modelo sin controlarlos contra el prompt.
 - **El "sí" es estricto pero no trivial:** hasta 6 palabras de un vocabulario cerrado, sin signos de pregunta. "Sí, pero cambia el motivo" no confirma, y "si eso" dicho solo cuenta como un sí.
+- **Un "sí" a una pregunta del asistente con varias fechas las acepta a todas** para `consultar_ventas` (`agent/domain/dates.py` devuelve el conjunto). Lo seguro sería aceptar solo cuando la pregunta menciona exactamente una ([P8](SPEC_REVIEW.md#p8-fechas-relativas-o-ambiguas)).
+- **La guarda de horario de `low_confidence` usa el reloj del inicio del turno:** si la llamada al modelo cruza las 18:00, el paso a SUGGEST se aplica fuera de horario, deja un borrador y registra la hora anterior; el turno siguiente lo corrige. Lo correcto sería volver a leer el reloj antes de disparar el evento ([F9](SPEC_REVIEW.md#f9-low_confidence-no-está-definida)).
 
 **Del sistema**
 
