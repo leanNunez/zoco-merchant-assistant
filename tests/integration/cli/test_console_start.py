@@ -225,6 +225,27 @@ def test_an_invalid_setting_names_the_variable_and_never_the_value(
     assert "Traceback" not in shown
 
 
+def test_an_invalid_window_from_the_model_validator_says_what_to_fix_without_a_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An error of a `model_validator` has no field in its `loc`: the message must not be empty.
+    monkeypatch.setenv("HUMAN_HOURS_START", "19:00")
+    monkeypatch.setenv("LLM_API_KEY", "sk-FAKE-window-key")
+    monkeypatch.setenv("OPERATOR_PIN", "424242")
+    screen: list[str] = []
+
+    status = main(None, input_fn=_quit, output_fn=screen.append, log_path=tmp_path / "c.log")
+
+    shown = "\n".join(screen)
+    assert status == EXIT_FAILED
+    assert "HUMAN_HOURS_START" in shown
+    assert "HUMAN_HOURS_END" in shown
+    assert "entorno: ." not in shown
+    assert "sk-FAKE-window-key" not in shown
+    assert "424242" not in shown
+    assert "Traceback" not in shown
+
+
 def test_a_failure_of_the_terminal_itself_is_one_generic_line_and_a_log_entry(
     tmp_path: Path,
 ) -> None:

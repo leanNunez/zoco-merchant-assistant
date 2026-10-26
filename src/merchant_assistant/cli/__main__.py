@@ -60,14 +60,7 @@ def main(
         try:
             loaded = Settings() if settings is None else settings
         except ValidationError as invalid:
-            # Names only: the message of a validation error quotes the offending value.
-            fields = sorted(
-                {".".join(str(part) for part in e["loc"]).upper() for e in invalid.errors()}
-            )
-            output_fn(
-                "La configuración no es válida. Revisá en .env o en el entorno: "
-                f"{', '.join(fields)}."
-            )
+            output_fn(invalid_settings(invalid))
             return EXIT_FAILED
         try:
             runtime = build_console_runtime(loaded)
