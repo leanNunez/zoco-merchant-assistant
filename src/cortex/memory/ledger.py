@@ -8,6 +8,7 @@ restart because they live in SQLite, not in memory.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -45,6 +46,15 @@ class PendingAction:
     fingerprint: str | None
     control_version: int
     status: PendingStatus
+
+    def view(self) -> dict[str, object]:
+        """The action with its exact values, for the model and the operator: never a summary."""
+        return {
+            "tool": self.tool,
+            "operation_id": self.operation_id,
+            "status": self.status.value,
+            "arguments": json.loads(self.arguments) if self.arguments else None,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,14 +168,36 @@ class TenantLedger:
         return inserted == 1
 
     def settle_operation(
-        self, operation_id: str, status: OperationStatus, result: str | None = None
+        self,
+        operation_id: str,
+        status: OperationStatus,
+        result: str | None = None,
+        *,
+        effect_in: str | None = None,
     ) -> None:
+        """Record the outcome. `effect_in` names the conversation where a committed effect is
+        journaled, in the same transaction."""
         with self._db.transaction() as tx:
             tx.execute(
                 "UPDATE operations SET status = ?, result = ?, updated_at = ? "
                 "WHERE tenant_id = ? AND operation_id = ?",
                 (status, result, self._db.now(), self.tenant_id, operation_id),
             )
+            if effect_in is not None and status is OperationStatus.COMMITTED:
+                tx.execute(
+                    "INSERT INTO journal (tenant_id, conversation_id, kind, reference, "
+                    "created_at) VALUES (?, ?, 'effect', ?, ?)",
+                    (self.tenant_id, effect_in, operation_id, self._db.now()),
+                )
+
+    def uncertain_operations(self) -> tuple[str, ...]:
+        with self._db.reading() as db:
+            rows = db.execute(
+                "SELECT operation_id FROM operations WHERE tenant_id = ? AND status = 'UNCERTAIN' "
+                "ORDER BY operation_id",
+                (self.tenant_id,),
+            ).fetchall()
+        return tuple(row[0] for row in rows)
 
 
 def _pending(row: tuple[str, str, str, str | None, str | None, int, str]) -> PendingAction:

@@ -20,6 +20,14 @@ from merchant_assistant.shared.clock import Clock
 
 _BUSY_TIMEOUT_SECONDS = 5.0
 
+# The only statements that span every company: after a restart nothing is running, whoever it
+# belonged to. They read no company data. A test allows exactly these and nothing else.
+RECOVERY_STATEMENTS = (
+    "UPDATE conversations SET active_run_id = NULL WHERE active_run_id IS NOT NULL",
+    "UPDATE runs SET status = 'FAILED' WHERE status = 'RUNNING'",
+    "UPDATE operations SET status = 'UNCERTAIN' WHERE status = 'STARTED'",
+)
+
 
 class Database:
     def __init__(self, path: Path, clock: Clock) -> None:
@@ -37,11 +45,8 @@ class Database:
         runs as failed, and mark every write that was in flight as uncertain, so it is
         reconciled by its id before anything else touches it. It reads no company data."""
         with self.transaction() as tx:
-            tx.execute(
-                "UPDATE conversations SET active_run_id = NULL WHERE active_run_id IS NOT NULL"
-            )
-            tx.execute("UPDATE runs SET status = 'FAILED' WHERE status = 'RUNNING'")
-            tx.execute("UPDATE operations SET status = 'UNCERTAIN' WHERE status = 'STARTED'")
+            for statement in RECOVERY_STATEMENTS:
+                tx.execute(statement)
 
     def for_tenant(self, auth: AuthContext) -> TenantStore:
         return TenantStore(self, auth)

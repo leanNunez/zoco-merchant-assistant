@@ -83,3 +83,40 @@ CREATE TABLE IF NOT EXISTS runs (
     started_at      TEXT NOT NULL,
     PRIMARY KEY (tenant_id, run_id)
 );
+
+-- What happened in a conversation, in order. One sequence for every kind, so "after the
+-- takeover" can be measured: a delivery or an effect with a higher seq happened later.
+CREATE TABLE IF NOT EXISTS journal (
+    seq             INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id       TEXT    NOT NULL,
+    conversation_id TEXT    NOT NULL,
+    kind            TEXT    NOT NULL CHECK (kind IN ('takeover', 'delivery', 'effect')),
+    reference       TEXT,
+    created_at      TEXT    NOT NULL,
+    FOREIGN KEY (tenant_id, conversation_id) REFERENCES conversations (tenant_id, conversation_id)
+);
+
+-- What someone owes and until when: an internal task for Zoco, or a date the customer chose.
+CREATE TABLE IF NOT EXISTS commitments (
+    commitment_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id       TEXT    NOT NULL,
+    conversation_id TEXT    NOT NULL,
+    kind            TEXT    NOT NULL CHECK (kind IN ('internal_task', 'contact_date')),
+    responsible     TEXT,
+    due_date        TEXT,
+    status          TEXT    NOT NULL CHECK (status IN ('OPEN', 'CANCELLED')),
+    created_at      TEXT    NOT NULL,
+    FOREIGN KEY (tenant_id, conversation_id) REFERENCES conversations (tenant_id, conversation_id)
+);
+
+CREATE TABLE IF NOT EXISTS followup_decisions (
+    decision_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id       TEXT    NOT NULL,
+    conversation_id TEXT    NOT NULL,
+    run_id          TEXT    NOT NULL,
+    decision        TEXT    NOT NULL
+                    CHECK (decision IN ('CONTACTAR', 'TAREA_INTERNA', 'REPROGRAMAR', 'CANCELAR')),
+    reasons         TEXT    NOT NULL,
+    decided_at      TEXT    NOT NULL,
+    FOREIGN KEY (tenant_id, conversation_id) REFERENCES conversations (tenant_id, conversation_id)
+);

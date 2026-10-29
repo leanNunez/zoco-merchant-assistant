@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from cortex.identity import AuthContext
+from cortex.memory.chat_records import ChatRecords
 from cortex.memory.ledger import TenantLedger
 from cortex.memory.runs import RunJournal
 from merchant_assistant.control.states import State
@@ -51,6 +52,7 @@ class TenantStore:
         self.tenant_id = auth.tenant_id
         self.ledger = TenantLedger(database, auth)
         self.runs = RunJournal(database, auth)
+        self.chat = ChatRecords(database, auth)
 
     def open_conversation(self, conversation_id: str) -> ConversationState:
         """The conversation of this company with that id; created in AUTO the first time."""
@@ -131,7 +133,34 @@ class TenantStore:
                     "created_at) VALUES (?, ?, ?, 'assistant', ?, ?)",
                     (self.tenant_id, conversation_id, run_id, text, self._db.now()),
                 )
+                tx.execute(
+                    "INSERT INTO journal (tenant_id, conversation_id, kind, reference, "
+                    "created_at) VALUES (?, ?, 'delivery', ?, ?)",
+                    (self.tenant_id, conversation_id, run_id, self._db.now()),
+                )
         return current
+
+    def last_message(self, conversation_id: str, role: MessageRole) -> str | None:
+        with self._db.reading() as db:
+            row = db.execute(
+                "SELECT content FROM messages "
+                "WHERE tenant_id = ? AND conversation_id = ? AND role = ? "
+                "ORDER BY message_id DESC LIMIT 1",
+                (self.tenant_id, conversation_id, role),
+            ).fetchone()
+        return None if row is None else str(row[0])
+
+    def last_outbox(
+        self, conversation_id: str, status: Literal["SENT", "SUPPRESSED"]
+    ) -> str | None:
+        with self._db.reading() as db:
+            row = db.execute(
+                "SELECT content FROM outbox "
+                "WHERE tenant_id = ? AND conversation_id = ? AND status = ? "
+                "ORDER BY outbox_id DESC LIMIT 1",
+                (self.tenant_id, conversation_id, status),
+            ).fetchone()
+        return None if row is None else str(row[0])
 
     def sent_count(self, run_id: str) -> int:
         with self._db.reading() as db:

@@ -167,7 +167,10 @@ def _commit(
     how: Literal["executed", "reconciled"],
 ) -> Done:
     context.ledger.settle_operation(
-        operation_id, OperationStatus.COMMITTED, json.dumps(dict(data), ensure_ascii=False)
+        operation_id,
+        OperationStatus.COMMITTED,
+        json.dumps(dict(data), ensure_ascii=False),
+        effect_in=context.conversation_id,
     )
     context.ledger.move_pending(
         operation_id, from_status=PendingStatus.CONFIRMED, to_status=PendingStatus.CONSUMED
