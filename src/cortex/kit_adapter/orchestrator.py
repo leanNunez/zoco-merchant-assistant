@@ -30,7 +30,7 @@ from cortex.chat.events import (
 from cortex.chat.followup import FollowupDecision
 from cortex.config import RunLimits
 from cortex.identity import AuthContext, AuthenticationFailed
-from cortex.kit_adapter.observables import ScenarioFacts, build_output
+from cortex.kit_adapter.observables import ScenarioFacts, build_output, refused_observables
 from cortex.kit_adapter.preconditions import Setup, read_faults, read_preconditions
 from cortex.kit_adapter.scenario import Scenario, UnsupportedScenario, load_scenario
 from cortex.kit_adapter.world import TakeoverDuringRun, World
@@ -45,8 +45,9 @@ DEFAULT_NOW = datetime(2026, 10, 28, 12, 0, tzinfo=UTC)
 
 
 def run_scenario_file(
-    path: Path, *, kit_dir: Path, now: datetime = DEFAULT_NOW
+    path: Path, *, kit_dir: Path, now: datetime = DEFAULT_NOW, workdir: Path | None = None
 ) -> dict[str, object]:
+    """Run a scenario file. With `workdir`, the world stays there for inspection afterwards."""
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as unreadable:
@@ -54,8 +55,11 @@ def run_scenario_file(
     if not isinstance(raw, dict):
         raise UnsupportedScenario("a scenario must be a JSON object")
     scenario = load_scenario(raw)
-    with tempfile.TemporaryDirectory(prefix="cortex-") as workdir:
-        return run_scenario(scenario, kit_dir=kit_dir, workdir=Path(workdir), now=now)
+    if workdir is not None:
+        workdir.mkdir(parents=True, exist_ok=True)
+        return run_scenario(scenario, kit_dir=kit_dir, workdir=workdir, now=now)
+    with tempfile.TemporaryDirectory(prefix="cortex-") as temporary:
+        return run_scenario(scenario, kit_dir=kit_dir, workdir=Path(temporary), now=now)
 
 
 def run_scenario(
@@ -71,7 +75,7 @@ def run_scenario(
     try:
         auth = data.directory.authenticate(scenario.tenant_id, scenario.principal_id)
     except AuthenticationFailed:
-        return _unauthenticated(scenario, run_id, setup.limits)
+        return _unauthenticated(scenario, run_id, setup.limits, now)
 
     separated = world.interleave(setup) if setup.interleaved else None
     world.seed(auth, conversation_id, setup)
@@ -187,6 +191,8 @@ def _follow_up(
         facts = read_followup(raw, tenant_id=auth.tenant_id, conversation_id=conversation_id)
     except EventOutOfScope:
         tracer.emit("chat_event_rejected", step=0, reason="scope_violation")
+        # The contract asks every denial for a tool_rejected event with its reason.
+        tracer.emit("tool_rejected", step=0, tool=None, reason="scope_violation")
         detail = FinishDetail.SCOPE_VIOLATION
     except InvalidEvent as invalid:
         raise UnsupportedScenario(invalid.detail) from None
@@ -208,8 +214,16 @@ def _follow_up(
     return result, decision
 
 
-def _unauthenticated(scenario: Scenario, run_id: str, limits: RunLimits) -> dict[str, object]:
-    """The caller is not who it claims: nothing runs and nothing is stored."""
+def _unauthenticated(
+    scenario: Scenario, run_id: str, limits: RunLimits, now: datetime
+) -> dict[str, object]:
+    """The caller is not who it claims: nothing runs and nothing is stored.
+
+    The contract asks every denial for a `tool_rejected` event with its reason, so the refusal
+    is reported as one, besides the event that says the run itself was refused.
+    """
+    stamp = now.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    refusal = {"timestamp": stamp, "reason": "auth_invalid"}
     return {
         "run_id": run_id,
         "tenant_id": scenario.tenant_id,
@@ -218,7 +232,11 @@ def _unauthenticated(scenario: Scenario, run_id: str, limits: RunLimits) -> dict
         "finish_detail": "auth_invalid",
         "step_count": 0,
         "max_steps": limits.max_steps,
-        "events": [{"seq": 1, "type": "run_rejected", "reason": "auth_invalid"}],
+        "events": [
+            {"seq": 1, "type": "run_rejected", **refusal},
+            {"seq": 2, "type": "tool_rejected", "tool": None, **refusal},
+        ],
         "effects": {"claims_created": 0, "customer_messages_sent": 0},
         "state": {"conversation_mode": None, "control_version": None},
+        **refused_observables(),
     }

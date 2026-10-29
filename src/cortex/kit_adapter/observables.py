@@ -86,6 +86,14 @@ def build_output(
     conversation_id = result.conversation_id
     executed = _tools_of(result, "tool_executed")
     rejected = _tools_of(result, "tool_rejected")
+    # A tool that was rejected AND legitimately reached in the same run (a repeated command with
+    # other values, say) is not "a rejected tool": only calls to tools that were rejected and
+    # never got through are counted against the rule that a rejection never reaches the adapter.
+    reached = {
+        str(event.attributes.get("tool"))
+        for event in result.events
+        if event.type in _REACHED_THE_TOOL
+    }
     sent = store.sent_count(result.run_id)
     conversation = store.conversation(conversation_id)
     claims, distinct_claims = audit.claims(result.tenant_id)
@@ -105,7 +113,7 @@ def build_output(
         "executed_tools": executed,
         "rejected_tools": rejected,
         "external_calls_to_rejected_tool": sum(
-            counter.calls.get(name, 0) for name in set(rejected)
+            counter.calls.get(name, 0) for name in set(rejected) - reached
         ),
         "retry_count": sum(1 for event in result.events if event.type == "tool_retry"),
         "max_steps": result.max_steps,
@@ -145,6 +153,41 @@ def build_output(
         "effects": effects,
         "state": state,
         **observables,
+    }
+
+
+_REACHED_THE_TOOL = frozenset(
+    {
+        "tool_executed",
+        "tool_error",
+        "tool_deduplicated",
+        "write_reconciled",
+        "write_uncertain",
+        "write_attempt_failed",
+        "tool_confirmation_required",
+    }
+)
+
+
+def refused_observables() -> dict[str, object]:
+    """Every observable for a request refused before anything ran: nothing happened."""
+    return {
+        "executed_tools": [],
+        "rejected_tools": [],
+        "external_calls_to_rejected_tool": 0,
+        "retry_count": 0,
+        "customer_messages_sent": 0,
+        "claims_created": 0,
+        "unique_claims_created": 0,
+        "cross_tenant_data_exposed": False,
+        "cross_tenant_effects": 0,
+        "contexts_separated": None,
+        "state_after_restart": None,
+        "pending_action_retained": None,
+        "delivered_ai_messages_after_takeover": None,
+        "tool_effects_after_takeover": None,
+        "decision": None,
+        "decision_reasons": [],
     }
 
 
