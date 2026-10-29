@@ -15,9 +15,9 @@ import pytest
 
 from cortex.bootstrap import HarnessData
 from cortex.identity import AuthContext
-from cortex.kit_adapter import orchestrator
+from cortex.kit_adapter import world
 from cortex.kit_adapter.orchestrator import run_scenario_file
-from cortex.memory.database import Database
+from cortex.memory.database import RECOVERY_STATEMENTS, Database
 from cortex.memory.tenant_store import StoredMessage, TenantStore
 from cortex.tools.adapters.claims import ClaimsDesk
 from cortex.tools.gateway import ToolAdapter
@@ -27,7 +27,11 @@ pytestmark = pytest.mark.integration
 ROOT = Path(__file__).resolve().parents[3]
 EXAMPLES = ROOT / "examples"
 KIT = ROOT / "kit"
-TENANT_TABLES = re.compile(r"\b(conversations|messages|outbox)\b", re.IGNORECASE)
+TENANT_TABLES = re.compile(
+    r"\b(conversations|messages|outbox|pending_actions|operations|runs|journal|commitments"
+    r"|followup_decisions)\b",
+    re.IGNORECASE,
+)
 
 
 def _run(path: Path) -> dict[str, Any]:
@@ -98,8 +102,8 @@ def test_every_query_on_company_data_filters_by_company(
         return connection
 
     monkeypatch.setattr(sqlite3, "connect", tracing_connect)
-    for scenario in ("T02", "T05", "T06", "T08"):
-        _run(EXAMPLES / f"{scenario}.json")
+    for scenario in sorted(EXAMPLES.glob("T*.json")):
+        _run(scenario)
 
     data_statements = [
         s
@@ -108,9 +112,10 @@ def test_every_query_on_company_data_filters_by_company(
         and s.lstrip().upper().startswith(("SELECT", "INSERT", "UPDATE", "DELETE"))
     ]
     assert data_statements
-    assert all("tenant_id" in s for s in data_statements), [
-        s for s in data_statements if "tenant_id" not in s
+    unfiltered = [
+        s for s in data_statements if "tenant_id" not in s and s not in RECOVERY_STATEMENTS
     ]
+    assert not unfiltered, unfiltered
 
 
 # ---------------------------------------------------------------------- the measurements can fail
@@ -142,7 +147,7 @@ def test_tools_bound_to_the_wrong_company_are_detected(monkeypatch: pytest.Monke
 
         return bind
 
-    monkeypatch.setattr(orchestrator, "zoco_tool_binder", wrong_binder)
+    monkeypatch.setattr(world, "zoco_tool_binder", wrong_binder)
 
     assert _run(EXAMPLES / "T02.json")["cross_tenant_data_exposed"] is True
 

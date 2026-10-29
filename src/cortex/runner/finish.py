@@ -24,6 +24,7 @@ class FinishReason(StrEnum):
 
 class FinishDetail(StrEnum):
     ANSWERED = "answered"
+    FOLLOWUP_DECIDED = "followup_decided"
     AUTH_INVALID = "auth_invalid"
     CONVERSATION_BUSY = "conversation_busy"
     RUN_ID_CONFLICT = "run_id_conflict"
@@ -44,6 +45,7 @@ class FinishDetail(StrEnum):
 REASON_OF: Mapping[FinishDetail, FinishReason] = MappingProxyType(
     {
         FinishDetail.ANSWERED: FinishReason.COMPLETED,
+        FinishDetail.FOLLOWUP_DECIDED: FinishReason.COMPLETED,
         FinishDetail.AUTH_INVALID: FinishReason.BLOCKED,
         FinishDetail.CONVERSATION_BUSY: FinishReason.BLOCKED,
         FinishDetail.RUN_ID_CONFLICT: FinishReason.BLOCKED,

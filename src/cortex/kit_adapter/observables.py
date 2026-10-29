@@ -8,9 +8,11 @@ Nothing here reads a scenario's `expected` block; the harness never sees it.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 from pydantic import BaseModel
 
+from cortex.chat.continuity import continuity_card
 from cortex.identity import AuthContext
 from cortex.kit_adapter.audit import Audit
 from cortex.memory.tenant_store import TenantStore
@@ -59,29 +61,46 @@ class _CountedWrite(_Counted):
         return self._writer.lookup(operation_id)
 
 
+@dataclass(frozen=True, slots=True)
+class ScenarioFacts:
+    """What the orchestration of a scenario measured, besides the run itself."""
+
+    contexts_separated: bool | None = None
+    state_after_restart: str | None = None
+    pending_action_retained: bool | None = None
+    # Journal position of the takeover applied in this scenario, if any.
+    takeover_seq: int | None = None
+    decision: str | None = None
+    decision_reasons: tuple[str, ...] = ()
+    chat_events: tuple[Mapping[str, object], ...] = field(default_factory=tuple)
+
+
 def build_output(
     result: RunResult,
     *,
     store: TenantStore,
     counter: CallCounter,
     audit: Audit,
-    contexts_separated: bool | None,
+    facts: ScenarioFacts,
 ) -> dict[str, object]:
+    conversation_id = result.conversation_id
     executed = _tools_of(result, "tool_executed")
     rejected = _tools_of(result, "tool_rejected")
     sent = store.sent_count(result.run_id)
-    conversation = store.conversation(result.conversation_id)
+    conversation = store.conversation(conversation_id)
     claims, distinct_claims = audit.claims(result.tenant_id)
-    effects = {"claims_created": claims, "customer_messages_sent": sent}
-    state = {
-        "conversation_mode": conversation.mode.value if conversation else None,
-        "control_version": conversation.control_version if conversation else None,
-    }
     # Every tool result is tagged with the company its data came from.
     foreign_data = any(
         event.attributes.get("data_tenant") not in (None, result.tenant_id)
         for event in result.events
     )
+    after_takeover = facts.takeover_seq
+    effects = {"claims_created": claims, "customer_messages_sent": sent}
+    state = {
+        "conversation_mode": conversation.mode.value if conversation else None,
+        "control_version": conversation.control_version if conversation else None,
+        "continuity_card": continuity_card(store, conversation_id),
+    }
     observables: dict[str, object] = {
         "executed_tools": executed,
         "rejected_tools": rejected,
@@ -93,27 +112,36 @@ def build_output(
         "customer_messages_sent": sent,
         "claims_created": claims,
         "unique_claims_created": distinct_claims,
-        # Measured by later blocks of work: restart, takeover and follow-ups.
         "cross_tenant_data_exposed": foreign_data,
         "cross_tenant_effects": (
             audit.rows_written_outside(result.tenant_id, result.run_id)
             + audit.claims_outside(result.tenant_id)
         ),
-        "contexts_separated": contexts_separated,
-        "state_after_restart": None,
-        "pending_action_retained": None,
-        "delivered_ai_messages_after_takeover": None,
-        "tool_effects_after_takeover": None,
-        "decision": None,
+        "contexts_separated": facts.contexts_separated,
+        "state_after_restart": facts.state_after_restart,
+        "pending_action_retained": facts.pending_action_retained,
+        "delivered_ai_messages_after_takeover": (
+            None
+            if after_takeover is None
+            else store.chat.count_after(conversation_id, "delivery", after_takeover)
+        ),
+        "tool_effects_after_takeover": (
+            None
+            if after_takeover is None
+            else store.chat.count_after(conversation_id, "effect", after_takeover)
+        ),
+        "decision": facts.decision,
+        "decision_reasons": list(facts.decision_reasons),
     }
     return {
         "run_id": result.run_id,
         "tenant_id": result.tenant_id,
-        "conversation_id": result.conversation_id,
+        "conversation_id": conversation_id,
         "finish_reason": result.finish_reason.value,
         "finish_detail": result.finish_detail.value,
         "step_count": result.step_count,
         "events": [event.as_dict() for event in result.events],
+        "chat_events": [dict(entry) for entry in facts.chat_events],
         "effects": effects,
         "state": state,
         **observables,

@@ -280,8 +280,12 @@ class _Run:
                 "conversation_mode": conversation.mode.value,
                 "control_version": conversation.control_version,
                 "pending_actions": [
-                    _describe(action)
+                    action.view()
                     for action in self.store.ledger.open_actions(self.request.conversation_id)
+                ],
+                "commitments": [
+                    {"kind": c.kind, "responsible": c.responsible, "due_date": c.due_date}
+                    for c in self.store.chat.open_commitments(self.request.conversation_id)
                 ],
             },
             tools=self.catalog.names,
@@ -488,13 +492,3 @@ class _Run:
 
     def _trace(self, type_: str, **attributes: str | int | bool | None) -> None:
         self.tracer.emit(type_, step=self.budget.steps_taken, **attributes)
-
-
-def _describe(action: PendingAction) -> dict[str, object]:
-    """A pending action as the model sees it: exact values, never a summary."""
-    return {
-        "tool": action.tool,
-        "operation_id": action.operation_id,
-        "status": action.status.value,
-        "arguments": json.loads(action.arguments) if action.arguments else None,
-    }

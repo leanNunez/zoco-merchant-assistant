@@ -51,4 +51,5 @@ def test_the_model_sees_its_own_company_data_as_untrusted_tool_results(
         "conversation_mode": "AUTO",
         "control_version": 0,
         "pending_actions": [],
+        "commitments": [],
     }

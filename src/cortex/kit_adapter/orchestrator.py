@@ -1,74 +1,48 @@
 """Runs one kit scenario end to end and returns the contract's output.
 
-Each scenario gets a fresh, isolated world: its own SQLite file in a temporary directory, a
-fixed clock and a manual ticker. Nothing leaks from one scenario to the next, and running the
-same scenario twice gives the same output.
+Each scenario gets a fresh, isolated world (see `world.py`): its own SQLite file in a temporary
+directory, a fixed clock and a manual ticker. Nothing leaks from one scenario to the next, and
+running the same scenario twice gives the same output.
 
-Preconditions are read first, by one handler per key; an unknown key stops the scenario
-(exit code 2) instead of being ignored.
+The order follows the scenario: interleaved conversations, the starting state, the restart, and
+then either a follow-up decision (no model involved) or a run, with the takeover applied before
+it or, through the model, in the middle of it.
 """
 
 from __future__ import annotations
 
 import json
 import tempfile
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field, replace
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from types import MappingProxyType
 
-from cortex.bootstrap import (
-    BUSINESS_TIMEZONE,
-    HarnessData,
-    build_runner,
-    load_harness_data,
-    zoco_tool_binder,
+from cortex.bootstrap import load_harness_data
+from cortex.chat.events import (
+    FOLLOWUP,
+    EventOutOfScope,
+    InvalidEvent,
+    event_type,
+    read_followup,
+    read_takeover,
 )
-from cortex.config import ConfigError, RunLimits
+from cortex.chat.followup import FollowupDecision
+from cortex.config import RunLimits
 from cortex.identity import AuthContext, AuthenticationFailed
-from cortex.kit_adapter.audit import Audit
-from cortex.kit_adapter.observables import CallCounter, build_output
+from cortex.kit_adapter.observables import ScenarioFacts, build_output
+from cortex.kit_adapter.preconditions import Setup, read_faults, read_preconditions
 from cortex.kit_adapter.scenario import Scenario, UnsupportedScenario, load_scenario
-from cortex.memory.database import Database
-from cortex.memory.ledger import PendingAction, PendingStatus
-from cortex.runner.agent_runner import RunRequest, RunResult
+from cortex.kit_adapter.world import TakeoverDuringRun, World
+from cortex.observability.tracer import Tracer
+from cortex.runner.agent_runner import RunResult
+from cortex.runner.finish import REASON_OF, FinishDetail
 from cortex.runner.model import ModelPort
 from cortex.runner.scripted_model import ScriptedModel
-from cortex.timekeeping import ManualTicker
-from cortex.tools.adapters.claims import ClaimsDesk
-from cortex.tools.adapters.faults import FaultKind, FaultPlan
-from cortex.tools.confirmation import canonical_arguments, fingerprint
-from cortex.tools.policy import Approved, PolicyContext, review
-from merchant_assistant.agent.domain.messages import ToolCall
-from merchant_assistant.control.states import State
-from merchant_assistant.shared.clock import FixedClock, business_today
 
 # The instant of the contract's example. Fixed, so a decision that depends on "today" does not
 # change with the day the evaluation is run; `--now` overrides it.
 DEFAULT_NOW = datetime(2026, 10, 28, 12, 0, tzinfo=UTC)
-
-# The second turn of each interleaved conversation: it makes each one read its history after
-# the other company has written to its own.
-FOLLOW_UP = "¿Con quién estoy hablando?"
-INTERLEAVED_REPLY = "OK"
-
-
-@dataclass(frozen=True, slots=True)
-class InterleavedMessage:
-    tenant_id: str
-    conversation_id: str
-    message: str
-
-
-@dataclass(frozen=True, slots=True)
-class Setup:
-    """What the preconditions ask for, before anything runs."""
-
-    limits: RunLimits
-    interleaved: tuple[InterleavedMessage, ...] = field(default_factory=tuple)
-    # Writes the user already confirmed before the scenario starts: (tool, arguments).
-    confirmed_actions: tuple[tuple[str, Mapping[str, object]], ...] = field(default_factory=tuple)
 
 
 def run_scenario_file(
@@ -90,240 +64,155 @@ def run_scenario(
 ) -> dict[str, object]:
     data = load_harness_data(kit_dir)
     setup = read_preconditions(scenario.preconditions, data.config.limits)
-    if scenario.incoming_event is not None:
-        raise UnsupportedScenario("incoming events are not supported yet")
-    faults = read_faults(scenario.faults, data.catalog.names)
-
-    world = _World(data, workdir, now, faults, setup.limits)
-    run_id = f"run-{scenario.conversation_id}"
+    world = World(
+        data, workdir, now, read_faults(scenario.faults, data.catalog.names), setup.limits
+    )
+    conversation_id = scenario.conversation_id
+    run_id = f"run-{conversation_id}"
     try:
         auth = data.directory.authenticate(scenario.tenant_id, scenario.principal_id)
     except AuthenticationFailed:
         return _unauthenticated(scenario, run_id, setup.limits)
 
     separated = world.interleave(setup) if setup.interleaved else None
-    world.seed_confirmed(auth, scenario.conversation_id, setup.confirmed_actions)
-    result = world.run(
-        auth,
-        run_id,
-        scenario.conversation_id,
-        scenario.message,
-        setup.limits,
-        ScriptedModel(scenario.model_script),
-    )
-    return build_output(
-        result,
-        store=world.database.for_tenant(auth),
-        counter=world.counter,
-        audit=world.audit,
+    world.seed(auth, conversation_id, setup)
+    after_restart = _restart(world, auth, conversation_id, setup) if setup.restart else None
+
+    event = scenario.incoming_event
+    chat_log: list[dict[str, object]] = []
+    decision: FollowupDecision | None = None
+    if event is not None and _kind(event) == FOLLOWUP:
+        result, decision = _follow_up(world, auth, conversation_id, run_id, event, setup.limits)
+    else:
+        model: ModelPort = ScriptedModel(scenario.model_script)
+        if event is not None:
+            model = _takeover(world, auth, conversation_id, event, model, chat_log)
+        result = world.run(auth, run_id, conversation_id, scenario.message, setup.limits, model)
+
+    store = world.database.for_tenant(auth)
+    applied = any(entry["type"] == "chat_event_applied" for entry in chat_log)
+    facts = ScenarioFacts(
         contexts_separated=separated,
+        state_after_restart=after_restart.mode if after_restart else None,
+        pending_action_retained=after_restart.pending_retained if after_restart else None,
+        takeover_seq=store.chat.last_takeover_seq(conversation_id) if applied else None,
+        decision=decision.decision.value if decision else None,
+        decision_reasons=decision.reasons if decision else (),
+        chat_events=tuple(chat_log),
+    )
+    return build_output(result, store=store, counter=world.counter, audit=world.audit, facts=facts)
+
+
+# --------------------------------------------------------------------------- restart
+
+
+@dataclass(frozen=True, slots=True)
+class _AfterRestart:
+    mode: str | None
+    pending_retained: bool
+
+
+def _restart(world: World, auth: AuthContext, conversation_id: str, setup: Setup) -> _AfterRestart:
+    """Restart, then read what survived with the objects of the new process."""
+    world.restart()
+    store = world.database.for_tenant(auth)
+    conversation = store.conversation(conversation_id)
+    still_open = {action.operation_id for action in store.ledger.open_actions(conversation_id)}
+    return _AfterRestart(
+        mode=conversation.mode.value if conversation else None,
+        pending_retained=all(operation_id in still_open for _, operation_id in setup.pending),
     )
 
 
-# --------------------------------------------------------------------------- preconditions
+# --------------------------------------------------------------------------- Zoco Chat events
 
 
-def read_preconditions(preconditions: Mapping[str, object], limits: RunLimits) -> Setup:
-    setup = Setup(limits)
-    for key, value in preconditions.items():
-        handler = _PRECONDITIONS.get(key)
-        if handler is None:
-            raise UnsupportedScenario(f"precondition {key!r} is not supported")
-        setup = handler(setup, value)
-    return setup
+def _kind(event: Mapping[str, object]) -> str:
+    try:
+        return event_type(event)
+    except InvalidEvent as invalid:
+        raise UnsupportedScenario(invalid.detail) from None
 
 
-def _limit(name: str) -> Callable[[Setup, object], Setup]:
-    """A precondition that changes one of the run's limits for this scenario."""
+def _takeover(
+    world: World,
+    auth: AuthContext,
+    conversation_id: str,
+    raw: Mapping[str, object],
+    model: ModelPort,
+    log: list[dict[str, object]],
+) -> ModelPort:
+    """Apply the takeover now, or arrange for it to land in the middle of the run."""
+    event = dict(raw)
+    when = event.pop("when", None)
+    try:
+        takeover = read_takeover(event, tenant_id=auth.tenant_id, conversation_id=conversation_id)
+    except EventOutOfScope as refused:
+        log.append({"type": "chat_event_rejected", "reason": refused.code})
+        return model
+    except InvalidEvent as invalid:
+        raise UnsupportedScenario(invalid.detail) from None
 
-    def handler(setup: Setup, value: object) -> Setup:
-        if type(value) is not int:
-            raise UnsupportedScenario(f"{name} must be an integer")
+    def take_over() -> None:
         try:
-            return replace(setup, limits=setup.limits.with_limit(name, value))
-        except ConfigError as invalid:
-            raise UnsupportedScenario(invalid.detail) from None
-
-    return handler
-
-
-def read_faults(
-    raw: Mapping[str, object], tools: tuple[str, ...]
-) -> dict[str, tuple[FaultKind, ...]]:
-    """The kit's `faults`: for each tool, what each of its calls does."""
-    faults: dict[str, tuple[FaultKind, ...]] = {}
-    for tool, kinds in raw.items():
-        if tool not in tools:
-            raise UnsupportedScenario(f"faults name an unknown tool: {tool!r}")
-        if not isinstance(kinds, list) or not kinds:
-            raise UnsupportedScenario(f"the faults of {tool} must be a non-empty list")
-        try:
-            faults[tool] = tuple(FaultKind(str(kind)) for kind in kinds)
-        except ValueError:
-            raise UnsupportedScenario(f"unknown fault kind in {tool}: {kinds!r}") from None
-    return faults
-
-
-def _interleaved_conversations(setup: Setup, value: object) -> Setup:
-    if not isinstance(value, list) or not value:
-        raise UnsupportedScenario("interleaved_conversations must be a non-empty list")
-    entries = []
-    for item in value:
-        if not isinstance(item, dict) or set(item) != {"tenant_id", "conversation_id", "message"}:
-            raise UnsupportedScenario(
-                "each interleaved conversation needs exactly tenant_id, conversation_id and message"
-            )
-        if not all(isinstance(text, str) and text for text in item.values()):
-            raise UnsupportedScenario("interleaved conversation fields must be non-empty strings")
-        entries.append(InterleavedMessage(**item))
-    return replace(setup, interleaved=tuple(entries))
-
-
-def _confirmed_actions(setup: Setup, value: object) -> Setup:
-    if not isinstance(value, list):
-        raise UnsupportedScenario("confirmed_actions must be a list")
-    actions = []
-    for item in value:
-        if not isinstance(item, dict) or set(item) != {"tool", "args"}:
-            raise UnsupportedScenario("each confirmed action needs exactly tool and args")
-        if not isinstance(item["tool"], str) or not isinstance(item["args"], dict):
-            raise UnsupportedScenario("a confirmed action is a tool name and an args object")
-        actions.append((item["tool"], item["args"]))
-    return replace(setup, confirmed_actions=tuple(actions))
-
-
-_PRECONDITIONS: Mapping[str, Callable[[Setup, object], Setup]] = MappingProxyType(
-    {
-        "max_steps": _limit("max_steps"),
-        "total_timeout_ms": _limit("total_timeout_ms"),
-        "tool_timeout_ms": _limit("tool_timeout_ms"),
-        "max_read_retries": _limit("max_read_retries"),
-        "context_window_messages": _limit("context_window_messages"),
-        "interleaved_conversations": _interleaved_conversations,
-        "confirmed_actions": _confirmed_actions,
-    }
-)
-
-
-# --------------------------------------------------------------------------- the world
-
-
-class _World:
-    """The harness of one scenario: one database, one clock, one call counter."""
-
-    def __init__(
-        self,
-        data: HarnessData,
-        workdir: Path,
-        now: datetime,
-        faults: Mapping[str, tuple[FaultKind, ...]],
-        limits: RunLimits,
-    ) -> None:
-        self.data = data
-        self.clock = FixedClock(now)
-        # One clock for the whole scenario: simulated timeouts and waits move it.
-        self.ticker = ManualTicker()
-        self.faults = FaultPlan(faults, ticker=self.ticker, timeout_cost_ms=limits.tool_timeout_ms)
-        self.database = Database(workdir / "cortex.db", self.clock)
-        self.database.initialize()
-        self.claims = ClaimsDesk(workdir / "claims", self.clock)
-        self.audit = Audit(self.database.path, self.claims.directory)
-        self.counter = CallCounter()
-
-    def run(
-        self,
-        auth: AuthContext,
-        run_id: str,
-        conversation_id: str,
-        message: str,
-        limits: RunLimits,
-        model: ModelPort,
-    ) -> RunResult:
-        runner = build_runner(
-            data=self.data,
-            database=self.database,
-            model=model,
-            bind_tools=self.counter.wrap(
-                self.faults.wrap(zoco_tool_binder(self.data, self.claims))
-            ),
-            clock=self.clock,
-            ticker=self.ticker,
-        )
-        return runner.run(RunRequest(run_id, conversation_id, message, auth, limits))
-
-    def seed_confirmed(
-        self,
-        auth: AuthContext,
-        conversation_id: str,
-        actions: tuple[tuple[str, Mapping[str, object]], ...],
-    ) -> None:
-        """Record writes the user confirmed earlier, through the same checks as any request."""
-        if not actions:
+            outcome = world.chat.take_over(auth, conversation_id, takeover)
+        except AuthenticationFailed:
+            log.append({"type": "chat_event_rejected", "reason": "auth_invalid"})
             return
-        store = self.database.for_tenant(auth)
-        conversation = store.open_conversation(conversation_id)
-        context = PolicyContext(auth, State.AUTO, business_today(self.clock, BUSINESS_TIMEZONE))
-        for tool, arguments in actions:
-            verdict = review(
-                ToolCall("seed", tool, json.dumps(arguments)), self.data.catalog, context
-            )
-            if not isinstance(verdict, Approved):
-                raise UnsupportedScenario(f"a confirmed action does not pass the checks: {tool}")
-            store.ledger.record_pending(
-                PendingAction(
-                    operation_id=str(getattr(verdict.arguments, "operation_id", "")),
-                    conversation_id=conversation_id,
-                    tool=tool,
-                    arguments=canonical_arguments(verdict.arguments),
-                    fingerprint=fingerprint(tool, verdict.arguments),
-                    control_version=conversation.control_version,
-                    status=PendingStatus.CONFIRMED,
-                )
-            )
+        log.append(
+            {
+                "type": "chat_event_applied" if outcome.applied else "chat_event_ignored",
+                "version": outcome.version,
+                "responsible": outcome.responsible,
+            }
+        )
 
-    def interleave(self, setup: Setup) -> bool:
-        """Run the interleaved conversations turn by turn and check they never mixed.
+    if when in (None, "before_run"):
+        take_over()
+        return model
+    return TakeoverDuringRun(model, str(when), take_over)
 
-        Round one sends each listed message in order; round two sends a follow-up to each
-        conversation, so every conversation reads its history after the others wrote theirs.
-        Separated means: each model saw only its own conversation's messages, the second turn
-        still saw the first one, and each conversation stored only what was sent to it.
-        """
-        seen: dict[tuple[str, str], list[ScriptedModel]] = {}
-        sent: dict[tuple[str, str], set[str]] = {}
-        rounds = [
-            [
-                (entry.tenant_id, entry.conversation_id, entry.message)
-                for entry in setup.interleaved
-            ],
-            [(entry.tenant_id, entry.conversation_id, FOLLOW_UP) for entry in setup.interleaved],
-        ]
-        for turn in rounds:
-            for tenant_id, conversation_id, message in turn:
-                key = (tenant_id, conversation_id)
-                model = ScriptedModel([{"final": INTERLEAVED_REPLY}])
-                run_id = f"run-{conversation_id}-{len(seen.get(key, [])) + 1}"
-                self.run(
-                    self._auth(tenant_id), run_id, conversation_id, message, setup.limits, model
-                )
-                seen.setdefault(key, []).append(model)
-                sent.setdefault(key, {INTERLEAVED_REPLY}).add(message)
-        return all(self._only_own(key, models, sent[key]) for key, models in seen.items())
 
-    def _only_own(
-        self, key: tuple[str, str], models: list[ScriptedModel], expected: set[str]
-    ) -> bool:
-        stored = self.audit.messages(*key)
-        prompts = [{m.content for p in model.prompts for m in p.messages} for model in models]
-        first_message = next(iter(expected - {INTERLEAVED_REPLY, FOLLOW_UP}), None)
-        remembers = first_message is None or first_message in prompts[-1]
-        return stored == expected and all(p <= stored for p in prompts) and remembers
-
-    def _auth(self, tenant_id: str) -> AuthContext:
-        principal = self.data.test_principals.get(tenant_id)
-        if principal is None:
-            raise UnsupportedScenario(f"no test principal for company {tenant_id!r}")
-        return self.data.directory.authenticate(tenant_id, principal)
+def _follow_up(
+    world: World,
+    auth: AuthContext,
+    conversation_id: str,
+    run_id: str,
+    raw: Mapping[str, object],
+    limits: RunLimits,
+) -> tuple[RunResult, FollowupDecision | None]:
+    """Decide a due follow-up by code. The model is never asked and nothing is sent."""
+    tracer = Tracer(
+        run_id=run_id,
+        tenant_id=auth.tenant_id,
+        conversation_id=conversation_id,
+        clock=world.clock,
+        elapsed_ms=lambda: 0,
+    )
+    decision: FollowupDecision | None = None
+    try:
+        facts = read_followup(raw, tenant_id=auth.tenant_id, conversation_id=conversation_id)
+    except EventOutOfScope:
+        tracer.emit("chat_event_rejected", step=0, reason="scope_violation")
+        detail = FinishDetail.SCOPE_VIOLATION
+    except InvalidEvent as invalid:
+        raise UnsupportedScenario(invalid.detail) from None
+    else:
+        decision = world.chat.follow_up(auth, conversation_id, run_id, facts, tracer)
+        detail = FinishDetail.FOLLOWUP_DECIDED
+    reason = REASON_OF[detail]
+    tracer.emit("run_finished", step=0, finish_reason=reason.value, finish_detail=detail.value)
+    result = RunResult(
+        run_id=run_id,
+        tenant_id=auth.tenant_id,
+        conversation_id=conversation_id,
+        finish_reason=reason,
+        finish_detail=detail,
+        step_count=0,
+        max_steps=limits.max_steps,
+        events=tracer.events,
+    )
+    return result, decision
 
 
 def _unauthenticated(scenario: Scenario, run_id: str, limits: RunLimits) -> dict[str, object]:
