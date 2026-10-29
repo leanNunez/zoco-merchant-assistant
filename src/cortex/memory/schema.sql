@@ -120,3 +120,18 @@ CREATE TABLE IF NOT EXISTS followup_decisions (
     decided_at      TEXT    NOT NULL,
     FOREIGN KEY (tenant_id, conversation_id) REFERENCES conversations (tenant_id, conversation_id)
 );
+
+-- The structured trace of every run, written through as it happens (attributes already
+-- redacted). It survives a crash, so a failed run can be read afterwards.
+CREATE TABLE IF NOT EXISTS trace_events (
+    tenant_id       TEXT    NOT NULL,
+    run_id          TEXT    NOT NULL,
+    seq             INTEGER NOT NULL,
+    conversation_id TEXT    NOT NULL,
+    type            TEXT    NOT NULL,
+    step            INTEGER NOT NULL,
+    timestamp       TEXT    NOT NULL,
+    elapsed_ms      INTEGER NOT NULL,
+    attributes      TEXT    NOT NULL,
+    PRIMARY KEY (tenant_id, run_id, seq)
+);

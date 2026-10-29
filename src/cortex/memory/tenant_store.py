@@ -15,6 +15,7 @@ from cortex.identity import AuthContext
 from cortex.memory.chat_records import ChatRecords
 from cortex.memory.ledger import TenantLedger
 from cortex.memory.runs import RunJournal
+from cortex.memory.traces import TraceStore
 from merchant_assistant.control.states import State
 
 if TYPE_CHECKING:
@@ -53,6 +54,7 @@ class TenantStore:
         self.ledger = TenantLedger(database, auth)
         self.runs = RunJournal(database, auth)
         self.chat = ChatRecords(database, auth)
+        self.traces = TraceStore(database, auth)
 
     def open_conversation(self, conversation_id: str) -> ConversationState:
         """The conversation of this company with that id; created in AUTO the first time."""

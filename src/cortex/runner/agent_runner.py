@@ -29,6 +29,7 @@ from cortex.memory.database import Database
 from cortex.memory.ledger import PendingAction, PendingStatus
 from cortex.memory.runs import Admission
 from cortex.memory.tenant_store import ConversationState, TenantStore, check_external_id
+from cortex.observability.redaction import TraceRedactor
 from cortex.observability.tracer import TraceEvent, Tracer
 from cortex.runner.budget import Budget
 from cortex.runner.finish import REASON_OF, FinishDetail, FinishReason
@@ -143,6 +144,7 @@ class AgentRunner:
     clock: Clock
     ticker: Ticker
     business_tz: tzinfo
+    redactor: TraceRedactor
 
     def run(self, request: RunRequest) -> RunResult:
         check_external_id(request.run_id)
@@ -173,6 +175,7 @@ class _Run:
             conversation_id=request.conversation_id,
             clock=runner.clock,
             elapsed_ms=self.budget.elapsed_ms,
+            redactor=runner.redactor,
         )
         self.base_version = 0
 
@@ -181,7 +184,7 @@ class _Run:
     def execute(self) -> RunResult:
         """Admit the command once, run it, and store its result for any repetition."""
         request = self.request
-        self._trace("run_started")
+        self._trace("run_started", principal=self.tracer.principal(request.auth.principal_id))
         conversation = self.store.open_conversation(request.conversation_id)
         digest = hashlib.sha256(request.message.encode("utf-8")).hexdigest()
         admission = self.store.runs.admit(request.run_id, request.conversation_id, digest)
@@ -192,12 +195,15 @@ class _Run:
             return self._finish(FinishDetail.RUN_ID_CONFLICT)
         if admission.admission is not Admission.ADMITTED:
             return self._finish(FinishDetail.CONVERSATION_BUSY)
+        # Only an admitted run writes its trace: a replay or a refusal must not collide with it.
+        self.tracer.attach(self.store.traces.write)
         try:
             result = self._loop(conversation)
-        except Exception:
-            # A bug must not leave the run without an explicit ending. The traceback goes to the
-            # log only; the result carries a code.
-            _LOG.exception("run %s failed unexpectedly", request.run_id)
+        except Exception as error:
+            # A bug must not leave the run without an explicit ending. The log names the run and
+            # the kind of error, never the message (it may quote user data); the result carries a
+            # code.
+            _LOG.error("run %s failed unexpectedly: %s", request.run_id, type(error).__name__)
             result = self._finish(FinishDetail.INTERNAL_ERROR)
         finally:
             # A call abandoned at its time limit may still be running; nothing waits for it.
@@ -388,6 +394,7 @@ class _Run:
                 conversation_id=self.request.conversation_id,
                 control_version=self.base_version,
                 run_id=self.request.run_id,
+                trace=self._trace,
             ),
         )
         return self._apply_write_outcome(approved, outcome)
@@ -470,7 +477,16 @@ class _Run:
 
     def _finish(self, detail: FinishDetail) -> RunResult:
         reason = REASON_OF[detail]
-        self._trace("run_finished", finish_reason=reason.value, finish_detail=detail.value)
+        self._trace(
+            "run_finished",
+            finish_reason=reason.value,
+            finish_detail=detail.value,
+            steps=self.budget.steps_taken,
+            tools_executed=self.tracer.count("tool_executed"),
+            tools_rejected=self.tracer.count("tool_rejected"),
+            retries=self.tracer.count("tool_retry"),
+            duration_ms=self.budget.elapsed_ms(),
+        )
         return RunResult(
             run_id=self.request.run_id,
             tenant_id=self.request.auth.tenant_id,

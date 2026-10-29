@@ -232,14 +232,15 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "Harness layers: kit adapter > wiring > runner and chat > tools > memory and traces > base"
+name = "Harness layers: kit adapter > wiring > runner and chat > tools > memory > traces > base"
 type = "layers"
 layers = [
     "cortex.kit_adapter",
     "cortex.bootstrap",
     "cortex.runner | cortex.chat",
     "cortex.tools",
-    "cortex.memory | cortex.observability",
+    "cortex.memory",
+    "cortex.observability",
     "cortex.identity | cortex.config | cortex.timekeeping",
 ]
 

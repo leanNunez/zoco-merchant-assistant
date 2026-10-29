@@ -34,7 +34,6 @@ from cortex.kit_adapter.observables import ScenarioFacts, build_output
 from cortex.kit_adapter.preconditions import Setup, read_faults, read_preconditions
 from cortex.kit_adapter.scenario import Scenario, UnsupportedScenario, load_scenario
 from cortex.kit_adapter.world import TakeoverDuringRun, World
-from cortex.observability.tracer import Tracer
 from cortex.runner.agent_runner import RunResult
 from cortex.runner.finish import REASON_OF, FinishDetail
 from cortex.runner.model import ModelPort
@@ -182,13 +181,7 @@ def _follow_up(
     limits: RunLimits,
 ) -> tuple[RunResult, FollowupDecision | None]:
     """Decide a due follow-up by code. The model is never asked and nothing is sent."""
-    tracer = Tracer(
-        run_id=run_id,
-        tenant_id=auth.tenant_id,
-        conversation_id=conversation_id,
-        clock=world.clock,
-        elapsed_ms=lambda: 0,
-    )
+    tracer = world.chat.tracer(auth, conversation_id, run_id)
     decision: FollowupDecision | None = None
     try:
         facts = read_followup(raw, tenant_id=auth.tenant_id, conversation_id=conversation_id)

@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -32,12 +32,18 @@ from cortex.tools.policy import Approved
 from merchant_assistant.shared.errors import DomainError
 
 
+def _ignore(type_: str, **attributes: str | int | bool | None) -> None:
+    """The default when nobody listens to the write's own events."""
+
+
 @dataclass(frozen=True, slots=True)
 class WriteContext:
     ledger: TenantLedger
     conversation_id: str
     control_version: int
     run_id: str
+    # Where the write reports what it tries: a failed attempt, a lookup by operation id.
+    trace: Callable[..., None] = _ignore
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +141,7 @@ def _attempt(
                 ToolResult(name, ok=False, source_tenant=adapter.tenant_id, error=failure.public())
             )
         context.ledger.settle_operation(operation_id, OperationStatus.UNCERTAIN)
+        context.trace("write_attempt_failed", tool=name, reason=failure.code)
         if not retry_if_uncertain:
             return Unresolved(operation_id)
         return _reconcile(approved, adapter, context, operation_id)
@@ -144,10 +151,13 @@ def _attempt(
 def _reconcile(
     approved: Approved, adapter: WriteAdapter, context: WriteContext, operation_id: str
 ) -> WriteOutcome:
+    name = approved.spec.name
     try:
         found = adapter.lookup(operation_id)
     except DomainError:
+        context.trace("write_lookup", tool=name, found=None)  # it could not even be checked
         return Unresolved(operation_id)
+    context.trace("write_lookup", tool=name, found=found is not None)
     if found is not None:
         return _commit(approved.spec.name, adapter, context, operation_id, found, "reconciled")
     # Not applied: one more attempt with the same key. If the first attempt commits late, the

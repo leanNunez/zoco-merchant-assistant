@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 from cortex.config import ConfigError, HarnessConfig, load_harness_config
 from cortex.identity import AuthContext, PrincipalDirectory, PrincipalRecord
 from cortex.memory.database import Database
+from cortex.observability.redaction import TraceRedactor
 from cortex.runner.agent_runner import AgentRunner
 from cortex.runner.finish import FinishReason
 from cortex.runner.model import ModelPort
@@ -35,6 +36,10 @@ from merchant_assistant.agent.domain.tools import (
 from merchant_assistant.shared.clock import Clock
 
 BUSINESS_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
+
+# Salt of the principal hash in traces. Not a secret in this demo (principals are fixtures);
+# a deployment passes its own to `build_runner`.
+DEFAULT_TRACE_SALT = "cortex-trace-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +108,7 @@ def build_runner(
     bind_tools: ToolBinder,
     clock: Clock,
     ticker: Ticker,
+    trace_salt: str = DEFAULT_TRACE_SALT,
 ) -> AgentRunner:
     return AgentRunner(
         database=database,
@@ -112,6 +118,7 @@ def build_runner(
         clock=clock,
         ticker=ticker,
         business_tz=BUSINESS_TIMEZONE,
+        redactor=TraceRedactor(trace_salt),
     )
 
 

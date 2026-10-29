@@ -16,6 +16,7 @@ from cortex.chat.followup import Decision, FollowupDecision, decide
 from cortex.identity import AuthContext, PrincipalDirectory
 from cortex.memory.chat_records import Commitment
 from cortex.memory.database import Database
+from cortex.observability.redaction import TraceRedactor
 from cortex.observability.tracer import Tracer
 from merchant_assistant.control.states import State
 from merchant_assistant.shared.clock import Clock, business_today
@@ -34,6 +35,7 @@ class ChatEvents:
     directory: PrincipalDirectory
     clock: Clock
     business_tz: tzinfo
+    redactor: TraceRedactor
 
     def take_over(self, auth: AuthContext, conversation_id: str, event: Takeover) -> TakeoverResult:
         if event.actor is not None:
@@ -44,6 +46,21 @@ class ChatEvents:
         store.open_conversation(conversation_id)
         applied = store.chat.apply_takeover(conversation_id, event.version, responsible)
         return TakeoverResult(applied, event.version, responsible)
+
+    def tracer(self, auth: AuthContext, conversation_id: str, run_id: str) -> Tracer:
+        """A tracer for an event handled outside a run, written through to the company's traces."""
+        store = self.database.for_tenant(auth)
+        store.open_conversation(conversation_id)
+        tracer = Tracer(
+            run_id=run_id,
+            tenant_id=auth.tenant_id,
+            conversation_id=conversation_id,
+            clock=self.clock,
+            elapsed_ms=lambda: 0,
+            redactor=self.redactor,
+        )
+        tracer.attach(store.traces.write)
+        return tracer
 
     def follow_up(
         self,

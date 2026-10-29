@@ -12,7 +12,13 @@ from collections.abc import Callable, Mapping
 from datetime import datetime
 from pathlib import Path
 
-from cortex.bootstrap import BUSINESS_TIMEZONE, HarnessData, build_runner, zoco_tool_binder
+from cortex.bootstrap import (
+    BUSINESS_TIMEZONE,
+    DEFAULT_TRACE_SALT,
+    HarnessData,
+    build_runner,
+    zoco_tool_binder,
+)
 from cortex.chat.service import ChatEvents
 from cortex.config import RunLimits
 from cortex.identity import AuthContext
@@ -22,6 +28,7 @@ from cortex.kit_adapter.preconditions import Setup
 from cortex.kit_adapter.scenario import UnsupportedScenario
 from cortex.memory.database import Database
 from cortex.memory.ledger import PendingAction, PendingStatus
+from cortex.observability.redaction import TraceRedactor
 from cortex.runner.agent_runner import RunRequest, RunResult
 from cortex.runner.model import FinalAnswer, ModelPort, ModelTurn, Prompt
 from cortex.runner.scripted_model import ScriptedModel
@@ -66,7 +73,13 @@ class World:
 
     @property
     def chat(self) -> ChatEvents:
-        return ChatEvents(self.database, self.data.directory, self.clock, BUSINESS_TIMEZONE)
+        return ChatEvents(
+            self.database,
+            self.data.directory,
+            self.clock,
+            BUSINESS_TIMEZONE,
+            TraceRedactor(DEFAULT_TRACE_SALT),
+        )
 
     def restart(self) -> None:
         """A new process: new objects over the same files, after the startup recovery."""
