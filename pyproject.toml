@@ -18,6 +18,9 @@ dependencies = [
 requires = ["uv_build>=0.12.17,<0.13.0"]
 build-backend = "uv_build"
 
+[tool.uv.build-backend]
+module-name = ["merchant_assistant", "cortex"]
+
 [dependency-groups]
 dev = [
     "hypothesis>=6.170.8",
@@ -76,7 +79,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["merchant_assistant"]
+source = ["merchant_assistant", "cortex"]
 branch = true
 
 # --------------------------------------------------------------------------- architecture
@@ -84,13 +87,13 @@ branch = true
 # checks erodes (it did in a previous project), so CI runs `lint-imports`.
 
 [tool.importlinter]
-root_package = "merchant_assistant"
+root_packages = ["merchant_assistant", "cortex"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Retrieval is built from scratch: Python, numpy and an embeddings API only (brief, Part 1)"
 type = "forbidden"
-source_modules = ["merchant_assistant"]
+source_modules = ["merchant_assistant", "cortex"]
 forbidden_modules = [
     "langchain", "langchain_core", "langchain_community", "langchain_openai", "llama_index",
     "sklearn", "scipy", "pandas", "rank_bm25", "bm25s", "whoosh", "pyserini", "haystack",
@@ -207,4 +210,34 @@ forbidden_modules = [
     "httpx",
     "requests",
     "sqlite3",
+]
+
+# --- the harness (src/cortex): one contract per rule of its architecture
+
+[[tool.importlinter.contracts]]
+name = "The first delivery does not depend on the harness"
+type = "forbidden"
+source_modules = ["merchant_assistant"]
+forbidden_modules = ["cortex"]
+
+[[tool.importlinter.contracts]]
+name = "The harness reuses the pure parts of the first delivery, never its turn engine or its wiring"
+type = "forbidden"
+source_modules = ["cortex"]
+forbidden_modules = [
+    "merchant_assistant.agent.application",
+    "merchant_assistant.agent.adapters",
+    "merchant_assistant.bootstrap",
+    "merchant_assistant.cli",
+]
+
+[[tool.importlinter.contracts]]
+name = "Harness layers: wiring > runner and chat > tools > memory and traces > identity and config"
+type = "layers"
+layers = [
+    "cortex.bootstrap | cortex.kit_adapter",
+    "cortex.runner | cortex.chat",
+    "cortex.tools",
+    "cortex.memory | cortex.observability",
+    "cortex.identity | cortex.config",
 ]
