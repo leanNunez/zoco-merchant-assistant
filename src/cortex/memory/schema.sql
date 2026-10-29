@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS conversations (
                     CHECK (mode IN ('AUTO', 'SUGGEST', 'HUMAN', 'BLOCKED')),
     control_version INTEGER NOT NULL DEFAULT 0 CHECK (control_version >= 0),
     responsible     TEXT,
+    -- The run that holds the conversation right now: one at a time.
+    active_run_id   TEXT,
     created_at      TEXT    NOT NULL,
     PRIMARY KEY (tenant_id, conversation_id)
 );
@@ -38,4 +40,46 @@ CREATE TABLE IF NOT EXISTS outbox (
     control_version INTEGER NOT NULL,
     created_at      TEXT    NOT NULL,
     FOREIGN KEY (tenant_id, conversation_id) REFERENCES conversations (tenant_id, conversation_id)
+);
+
+-- A write the model proposed, waiting for (or holding) the exact confirmation of its values.
+-- `arguments` and `fingerprint` may be NULL for a pending action recorded without its values.
+CREATE TABLE IF NOT EXISTS pending_actions (
+    tenant_id       TEXT    NOT NULL,
+    operation_id    TEXT    NOT NULL,
+    conversation_id TEXT    NOT NULL,
+    tool            TEXT    NOT NULL,
+    arguments       TEXT,
+    fingerprint     TEXT,
+    control_version INTEGER NOT NULL,
+    status          TEXT    NOT NULL
+                    CHECK (status IN ('PENDING', 'CONFIRMED', 'SUSPENDED', 'CONSUMED', 'CANCELLED')),
+    updated_at      TEXT    NOT NULL,
+    PRIMARY KEY (tenant_id, operation_id),
+    FOREIGN KEY (tenant_id, conversation_id) REFERENCES conversations (tenant_id, conversation_id)
+);
+
+-- The idempotency ledger: one row per write command, whatever happens to it.
+CREATE TABLE IF NOT EXISTS operations (
+    tenant_id    TEXT NOT NULL,
+    operation_id TEXT NOT NULL,
+    tool         TEXT NOT NULL,
+    fingerprint  TEXT NOT NULL,
+    status       TEXT NOT NULL CHECK (status IN ('STARTED', 'COMMITTED', 'UNCERTAIN', 'FAILED')),
+    result       TEXT,
+    run_id       TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, operation_id)
+);
+
+-- One row per command the runner accepted. A repeated run_id replays the stored result.
+CREATE TABLE IF NOT EXISTS runs (
+    tenant_id       TEXT NOT NULL,
+    run_id          TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    request_digest  TEXT NOT NULL,
+    status          TEXT NOT NULL CHECK (status IN ('RUNNING', 'FINISHED', 'FAILED')),
+    result          TEXT,
+    started_at      TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, run_id)
 );

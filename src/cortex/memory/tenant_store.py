@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from cortex.identity import AuthContext
+from cortex.memory.ledger import TenantLedger
+from cortex.memory.runs import RunJournal
 from merchant_assistant.control.states import State
 
 if TYPE_CHECKING:
@@ -47,6 +49,8 @@ class TenantStore:
     def __init__(self, database: Database, auth: AuthContext) -> None:
         self._db = database
         self.tenant_id = auth.tenant_id
+        self.ledger = TenantLedger(database, auth)
+        self.runs = RunJournal(database, auth)
 
     def open_conversation(self, conversation_id: str) -> ConversationState:
         """The conversation of this company with that id; created in AUTO the first time."""

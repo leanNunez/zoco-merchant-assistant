@@ -32,6 +32,17 @@ class Database:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(schema)
 
+    def recover(self) -> None:
+        """After a restart, nothing is running: free the conversations, mark the interrupted
+        runs as failed, and mark every write that was in flight as uncertain, so it is
+        reconciled by its id before anything else touches it. It reads no company data."""
+        with self.transaction() as tx:
+            tx.execute(
+                "UPDATE conversations SET active_run_id = NULL WHERE active_run_id IS NOT NULL"
+            )
+            tx.execute("UPDATE runs SET status = 'FAILED' WHERE status = 'RUNNING'")
+            tx.execute("UPDATE operations SET status = 'UNCERTAIN' WHERE status = 'STARTED'")
+
     def for_tenant(self, auth: AuthContext) -> TenantStore:
         return TenantStore(self, auth)
 
