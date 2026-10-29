@@ -246,10 +246,12 @@ class _Run:
 
     def _record_result(self, result: ToolResult) -> None:
         if result.ok:
-            self._trace("tool_executed", tool=result.tool)
+            self._trace("tool_executed", tool=result.tool, data_tenant=result.source_tenant)
         else:
             code = result.error.get("code") if result.error else None
-            self._trace("tool_error", tool=result.tool, reason=code)
+            self._trace(
+                "tool_error", tool=result.tool, reason=code, data_tenant=result.source_tenant
+            )
         self._remember_tool_message(result.envelope())
 
     def _remember_tool_message(self, envelope: dict[str, object]) -> None:

@@ -11,6 +11,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from zoneinfo import ZoneInfo
 
 from cortex.config import ConfigError, HarnessConfig, load_harness_config
@@ -34,6 +35,8 @@ BUSINESS_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
 class HarnessData:
     config: HarnessConfig
     directory: PrincipalDirectory
+    # The principal the kit uses for each company when a scenario does not name one.
+    test_principals: Mapping[str, str]
     sales: SalesBook
     catalog: Catalog
 
@@ -44,19 +47,26 @@ def load_harness_data(kit_dir: Path) -> HarnessData:
         raise ConfigError("the kit's finish reasons differ from the harness's")
 
     companies = _read_json(kit_dir / "fixtures" / "tenants_ventas.json")
-    directory = PrincipalDirectory(
+    records = [
         PrincipalRecord(
             tenant_id=str(tenant["tenant_id"]),
             principal_id=str(tenant["test_principal"]),
             permissions=_strings(tenant["permissions"]),
         )
         for tenant in _rows(companies, "tenants")
-    )
+    ]
+    directory = PrincipalDirectory(records)
     sales = SalesBook.from_fixture(_rows(companies, "sales"))
 
     catalog = zoco_catalog()
     catalog.verify_against(_rows(_read_json(kit_dir / "tools_config.json"), "tools"))
-    return HarnessData(config=config, directory=directory, sales=sales, catalog=catalog)
+    return HarnessData(
+        config=config,
+        directory=directory,
+        test_principals=MappingProxyType({r.tenant_id: r.principal_id for r in records}),
+        sales=sales,
+        catalog=catalog,
+    )
 
 
 def zoco_tool_binder(data: HarnessData) -> ToolBinder:

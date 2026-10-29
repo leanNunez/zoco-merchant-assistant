@@ -45,11 +45,12 @@ class SalesBook:
         return cls(days)
 
     def for_tenant(self, auth: AuthContext) -> SalesAdapter:
-        return SalesAdapter(self._days.get(auth.tenant_id, MappingProxyType({})))
+        return SalesAdapter(auth.tenant_id, self._days.get(auth.tenant_id, MappingProxyType({})))
 
 
 class SalesAdapter:
-    def __init__(self, days: Mapping[date, DailySales]) -> None:
+    def __init__(self, tenant_id: str, days: Mapping[date, DailySales]) -> None:
+        self.tenant_id = tenant_id
         self._days = days
 
     def __call__(self, arguments: BaseModel) -> Mapping[str, object]:

@@ -19,6 +19,11 @@ from merchant_assistant.shared.errors import DomainError
 
 
 class ToolAdapter(Protocol):
+    """The code that reaches one tool's data. It is bound to one company and says which."""
+
+    @property
+    def tenant_id(self) -> str: ...
+
     def __call__(self, arguments: BaseModel) -> Mapping[str, object]: ...
 
 
@@ -30,6 +35,8 @@ ToolBinder = Callable[[AuthContext], Mapping[str, ToolAdapter]]
 class ToolResult:
     tool: str
     ok: bool
+    # Whose data this is. Kept out of the envelope: it is evidence for the trace, not for the model.
+    source_tenant: str
     data: Mapping[str, object] | None = None
     error: Mapping[str, str] | None = None
 
@@ -45,9 +52,10 @@ class ToolResult:
 
 def execute(approved: Approved, adapters: Mapping[str, ToolAdapter]) -> ToolResult:
     name = approved.spec.name
+    adapter = adapters[name]
     try:
-        data = adapters[name](approved.arguments)
+        data = adapter(approved.arguments)
     except DomainError as failure:
         # Only the public view crosses: a stable code and a safe message, never internals.
-        return ToolResult(tool=name, ok=False, error=failure.public())
-    return ToolResult(tool=name, ok=True, data=data)
+        return ToolResult(name, ok=False, source_tenant=adapter.tenant_id, error=failure.public())
+    return ToolResult(name, ok=True, source_tenant=adapter.tenant_id, data=data)

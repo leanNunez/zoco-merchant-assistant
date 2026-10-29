@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from pydantic import BaseModel
 
 from cortex.identity import AuthContext
+from cortex.kit_adapter.audit import Audit
 from cortex.memory.tenant_store import TenantStore
 from cortex.runner.agent_runner import RunResult
 from cortex.tools.gateway import ToolAdapter, ToolBinder
@@ -31,15 +32,26 @@ class CallCounter:
         return bind
 
     def _counting(self, name: str, adapter: ToolAdapter) -> ToolAdapter:
-        def call(arguments: BaseModel) -> Mapping[str, object]:
-            self.calls[name] = self.calls.get(name, 0) + 1
-            return adapter(arguments)
+        return _Counted(self.calls, name, adapter)
 
-        return call
+
+class _Counted:
+    def __init__(self, calls: dict[str, int], name: str, adapter: ToolAdapter) -> None:
+        self._calls, self._name, self._adapter = calls, name, adapter
+        self.tenant_id = adapter.tenant_id
+
+    def __call__(self, arguments: BaseModel) -> Mapping[str, object]:
+        self._calls[self._name] = self._calls.get(self._name, 0) + 1
+        return self._adapter(arguments)
 
 
 def build_output(
-    result: RunResult, *, store: TenantStore, counter: CallCounter
+    result: RunResult,
+    *,
+    store: TenantStore,
+    counter: CallCounter,
+    audit: Audit,
+    contexts_separated: bool | None,
 ) -> dict[str, object]:
     executed = _tools_of(result, "tool_executed")
     rejected = _tools_of(result, "tool_rejected")
@@ -50,6 +62,11 @@ def build_output(
         "conversation_mode": conversation.mode.value if conversation else None,
         "control_version": conversation.control_version if conversation else None,
     }
+    # Every tool result is tagged with the company its data came from.
+    foreign_data = any(
+        event.attributes.get("data_tenant") not in (None, result.tenant_id)
+        for event in result.events
+    )
     observables: dict[str, object] = {
         "executed_tools": executed,
         "rejected_tools": rejected,
@@ -60,11 +77,11 @@ def build_output(
         "max_steps": result.max_steps,
         "customer_messages_sent": sent,
         "claims_created": 0,
-        # Measured by later blocks of work: tenancy, writes, restart, takeover and follow-ups.
+        # Measured by later blocks of work: writes, restart, takeover and follow-ups.
+        "cross_tenant_data_exposed": foreign_data,
+        "cross_tenant_effects": audit.rows_written_outside(result.tenant_id, result.run_id),
+        "contexts_separated": contexts_separated,
         "unique_claims_created": None,
-        "cross_tenant_data_exposed": None,
-        "cross_tenant_effects": None,
-        "contexts_separated": None,
         "state_after_restart": None,
         "pending_action_retained": None,
         "delivered_ai_messages_after_takeover": None,
