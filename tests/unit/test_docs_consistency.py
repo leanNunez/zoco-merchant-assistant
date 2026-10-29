@@ -30,9 +30,10 @@ ROOT = Path(__file__).resolve().parents[2]
 README = ROOT / "PRUEBA_1.md"
 HARNESS_README = ROOT / "README.md"
 REVISION = ROOT / "REVISION_CONSIGNA.md"
+DESIGN = ROOT / "DESIGN_DECISIONS.md"
 SPEC_REVIEW = ROOT / "SPEC_REVIEW.md"
 ADRS = tuple(sorted((ROOT / "design" / "adr").glob("*.md")))
-DOCUMENTS = (README, HARNESS_README, REVISION, SPEC_REVIEW, *ADRS)
+DOCUMENTS = (README, HARNESS_README, REVISION, DESIGN, SPEC_REVIEW, *ADRS)
 CONVERSATIONS = ROOT / "evaluation" / "results" / "conversations"
 RETRIEVAL = ROOT / "evaluation" / "results" / "retrieval"
 

@@ -16,6 +16,7 @@ El comando que lo prueba todo, sin claves ni internet: `make eval`.
 | Cómo se aíslan las empresas | `src/cortex/memory/tenant_store.py` |
 | Cómo se comprueba que todo funciona | `evaluation/harness/checker.py` |
 | Qué dice la consigna, qué es trampa y qué decidí | [REVISION_CONSIGNA.md](REVISION_CONSIGNA.md) |
+| Por qué está hecho así, y el caso de Zoco Canchas | [DESIGN_DECISIONS.md](DESIGN_DECISIONS.md) |
 
 ## Instalación y uso
 
