@@ -26,10 +26,12 @@ from merchant_assistant import bootstrap
 from merchant_assistant.shared.config import Settings
 
 ROOT = Path(__file__).resolve().parents[2]
-README = ROOT / "README.md"
+# The first delivery's documentation. It moved from README.md when the harness got its own.
+README = ROOT / "PRUEBA_1.md"
+HARNESS_README = ROOT / "README.md"
 SPEC_REVIEW = ROOT / "SPEC_REVIEW.md"
 ADRS = tuple(sorted((ROOT / "design" / "adr").glob("*.md")))
-DOCUMENTS = (README, SPEC_REVIEW, *ADRS)
+DOCUMENTS = (README, HARNESS_README, SPEC_REVIEW, *ADRS)
 CONVERSATIONS = ROOT / "evaluation" / "results" / "conversations"
 RETRIEVAL = ROOT / "evaluation" / "results" / "retrieval"
 
@@ -228,15 +230,21 @@ def _makefile_targets() -> dict[str, bool]:
     return targets
 
 
+def _mentioned_make_targets() -> set[str]:
+    """Every `make <target>` that either README mentions."""
+    text = read(README) + read(HARNESS_README)
+    return set(re.findall(r"\bmake ([a-z][a-z-]*)", text))
+
+
 def test_every_make_target_the_readme_mentions_exists() -> None:
-    mentioned = set(re.findall(r"\bmake ([a-z][a-z-]*)", read(README)))
+    mentioned = _mentioned_make_targets()
     missing = sorted(mentioned - set(_makefile_targets()))
 
     assert not missing, f"the README mentions `make` targets that the Makefile lacks: {missing}"
 
 
 def test_every_documented_make_target_is_in_the_readme() -> None:
-    mentioned = set(re.findall(r"\bmake ([a-z][a-z-]*)", read(README)))
+    mentioned = _mentioned_make_targets()
     documented = {name for name, has_help in _makefile_targets().items() if has_help}
 
     assert not documented - mentioned, (
