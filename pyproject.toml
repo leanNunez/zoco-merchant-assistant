@@ -56,7 +56,7 @@ ban-relative-imports = "all"
 python_version = "3.11"
 strict = true
 warn_unreachable = true
-files = ["src", "tests", "evaluation", "scripts"]
+files = ["src", "tests", "evaluation", "scripts", "evaluation_adapter.py"]
 plugins = ["pydantic.mypy"]
 
 [tool.pydantic-mypy]
@@ -232,12 +232,26 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "Harness layers: wiring > runner and chat > tools > memory and traces > identity and config"
+name = "Harness layers: kit adapter > wiring > runner and chat > tools > memory and traces > identity and config"
 type = "layers"
 layers = [
-    "cortex.bootstrap | cortex.kit_adapter",
+    "cortex.kit_adapter",
+    "cortex.bootstrap",
     "cortex.runner | cortex.chat",
     "cortex.tools",
     "cortex.memory | cortex.observability",
     "cortex.identity | cortex.config",
 ]
+
+[[tool.importlinter.contracts]]
+name = "The harness decisions are pure: no database, no threads, no provider"
+type = "forbidden"
+source_modules = [
+    "cortex.identity",
+    "cortex.config",
+    "cortex.runner.finish",
+    "cortex.runner.budget",
+    "cortex.tools.catalog",
+    "cortex.tools.policy",
+]
+forbidden_modules = ["cortex.memory", "sqlite3", "threading", "openai"]
