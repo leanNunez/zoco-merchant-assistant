@@ -1,7 +1,8 @@
 import pytest
 
 from cortex.config import RunLimits
-from cortex.runner.budget import Budget, ManualTicker
+from cortex.runner.budget import Budget
+from cortex.timekeeping import ManualTicker
 
 LIMITS = RunLimits(
     max_steps=2,

@@ -14,7 +14,9 @@ from typing import Protocol, runtime_checkable
 from pydantic import BaseModel
 
 from cortex.identity import AuthContext
+from cortex.tools.failures import FailureKind, ToolFailure
 from cortex.tools.policy import Approved
+from cortex.tools.retry import Retrier
 from merchant_assistant.shared.errors import DomainError
 
 
@@ -58,14 +60,31 @@ class ToolResult:
 
 
 def execute(
-    approved: Approved, adapters: Mapping[str, ToolAdapter], *, conversation_id: str
+    approved: Approved,
+    adapters: Mapping[str, ToolAdapter],
+    *,
+    conversation_id: str,
+    retrier: Retrier | None = None,
 ) -> ToolResult:
-    """Run a READ tool. Writes go through `cortex.tools.writes`, never through here."""
+    """Run a READ tool, retrying transient failures. Writes go through `cortex.tools.writes`."""
     name = approved.spec.name
     adapter = adapters[name]
+
+    def attempt() -> Mapping[str, object]:
+        return adapter(approved.arguments, conversation_id=conversation_id)
+
     try:
-        data = adapter(approved.arguments, conversation_id=conversation_id)
+        data = retrier.call(attempt) if retrier is not None else attempt()
     except DomainError as failure:
-        # Only the public view crosses: a stable code and a safe message, never internals.
-        return ToolResult(name, ok=False, source_tenant=adapter.tenant_id, error=failure.public())
+        return ToolResult(name, ok=False, source_tenant=adapter.tenant_id, error=_view(failure))
     return ToolResult(name, ok=True, source_tenant=adapter.tenant_id, data=data)
+
+
+def _view(failure: DomainError) -> dict[str, str]:
+    """Only the public view crosses: a stable code and a safe message, never internals."""
+    view = failure.public()
+    if isinstance(failure, ToolFailure):
+        view["kind"] = failure.kind.value
+        view["retryable"] = str(failure.kind is FailureKind.TRANSIENT).lower()
+        view["attempts"] = str(failure.attempts)
+    return view

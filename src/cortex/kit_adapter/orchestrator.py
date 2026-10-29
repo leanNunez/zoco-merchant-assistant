@@ -33,10 +33,11 @@ from cortex.kit_adapter.scenario import Scenario, UnsupportedScenario, load_scen
 from cortex.memory.database import Database
 from cortex.memory.ledger import PendingAction, PendingStatus
 from cortex.runner.agent_runner import RunRequest, RunResult
-from cortex.runner.budget import ManualTicker
 from cortex.runner.model import ModelPort
 from cortex.runner.scripted_model import ScriptedModel
+from cortex.timekeeping import ManualTicker
 from cortex.tools.adapters.claims import ClaimsDesk
+from cortex.tools.adapters.faults import FaultKind, FaultPlan
 from cortex.tools.confirmation import canonical_arguments, fingerprint
 from cortex.tools.policy import Approved, PolicyContext, review
 from merchant_assistant.agent.domain.messages import ToolCall
@@ -89,10 +90,11 @@ def run_scenario(
 ) -> dict[str, object]:
     data = load_harness_data(kit_dir)
     setup = read_preconditions(scenario.preconditions, data.config.limits)
-    if scenario.faults or scenario.incoming_event is not None:
-        raise UnsupportedScenario("faults and incoming events are not supported yet")
+    if scenario.incoming_event is not None:
+        raise UnsupportedScenario("incoming events are not supported yet")
+    faults = read_faults(scenario.faults, data.catalog.names)
 
-    world = _World(data, workdir, now)
+    world = _World(data, workdir, now, faults, setup.limits)
     run_id = f"run-{scenario.conversation_id}"
     try:
         auth = data.directory.authenticate(scenario.tenant_id, scenario.principal_id)
@@ -131,13 +133,35 @@ def read_preconditions(preconditions: Mapping[str, object], limits: RunLimits) -
     return setup
 
 
-def _max_steps(setup: Setup, value: object) -> Setup:
-    if type(value) is not int:
-        raise UnsupportedScenario("max_steps must be an integer")
-    try:
-        return replace(setup, limits=setup.limits.with_max_steps(value))
-    except ConfigError as invalid:
-        raise UnsupportedScenario(invalid.detail) from None
+def _limit(name: str) -> Callable[[Setup, object], Setup]:
+    """A precondition that changes one of the run's limits for this scenario."""
+
+    def handler(setup: Setup, value: object) -> Setup:
+        if type(value) is not int:
+            raise UnsupportedScenario(f"{name} must be an integer")
+        try:
+            return replace(setup, limits=setup.limits.with_limit(name, value))
+        except ConfigError as invalid:
+            raise UnsupportedScenario(invalid.detail) from None
+
+    return handler
+
+
+def read_faults(
+    raw: Mapping[str, object], tools: tuple[str, ...]
+) -> dict[str, tuple[FaultKind, ...]]:
+    """The kit's `faults`: for each tool, what each of its calls does."""
+    faults: dict[str, tuple[FaultKind, ...]] = {}
+    for tool, kinds in raw.items():
+        if tool not in tools:
+            raise UnsupportedScenario(f"faults name an unknown tool: {tool!r}")
+        if not isinstance(kinds, list) or not kinds:
+            raise UnsupportedScenario(f"the faults of {tool} must be a non-empty list")
+        try:
+            faults[tool] = tuple(FaultKind(str(kind)) for kind in kinds)
+        except ValueError:
+            raise UnsupportedScenario(f"unknown fault kind in {tool}: {kinds!r}") from None
+    return faults
 
 
 def _interleaved_conversations(setup: Setup, value: object) -> Setup:
@@ -170,7 +194,11 @@ def _confirmed_actions(setup: Setup, value: object) -> Setup:
 
 _PRECONDITIONS: Mapping[str, Callable[[Setup, object], Setup]] = MappingProxyType(
     {
-        "max_steps": _max_steps,
+        "max_steps": _limit("max_steps"),
+        "total_timeout_ms": _limit("total_timeout_ms"),
+        "tool_timeout_ms": _limit("tool_timeout_ms"),
+        "max_read_retries": _limit("max_read_retries"),
+        "context_window_messages": _limit("context_window_messages"),
         "interleaved_conversations": _interleaved_conversations,
         "confirmed_actions": _confirmed_actions,
     }
@@ -183,9 +211,19 @@ _PRECONDITIONS: Mapping[str, Callable[[Setup, object], Setup]] = MappingProxyTyp
 class _World:
     """The harness of one scenario: one database, one clock, one call counter."""
 
-    def __init__(self, data: HarnessData, workdir: Path, now: datetime) -> None:
+    def __init__(
+        self,
+        data: HarnessData,
+        workdir: Path,
+        now: datetime,
+        faults: Mapping[str, tuple[FaultKind, ...]],
+        limits: RunLimits,
+    ) -> None:
         self.data = data
         self.clock = FixedClock(now)
+        # One clock for the whole scenario: simulated timeouts and waits move it.
+        self.ticker = ManualTicker()
+        self.faults = FaultPlan(faults, ticker=self.ticker, timeout_cost_ms=limits.tool_timeout_ms)
         self.database = Database(workdir / "cortex.db", self.clock)
         self.database.initialize()
         self.claims = ClaimsDesk(workdir / "claims", self.clock)
@@ -205,9 +243,11 @@ class _World:
             data=self.data,
             database=self.database,
             model=model,
-            bind_tools=self.counter.wrap(zoco_tool_binder(self.data, self.claims)),
+            bind_tools=self.counter.wrap(
+                self.faults.wrap(zoco_tool_binder(self.data, self.claims))
+            ),
             clock=self.clock,
-            ticker=ManualTicker(),
+            ticker=self.ticker,
         )
         return runner.run(RunRequest(run_id, conversation_id, message, auth, limits))
 

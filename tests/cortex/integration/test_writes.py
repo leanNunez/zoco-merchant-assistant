@@ -17,9 +17,9 @@ from cortex.kit_adapter.orchestrator import run_scenario_file
 from cortex.memory.database import Database
 from cortex.memory.ledger import OperationStatus, PendingStatus
 from cortex.runner.agent_runner import RunRequest, RunResult
-from cortex.runner.budget import ManualTicker
 from cortex.runner.finish import FinishDetail
 from cortex.runner.scripted_model import ScriptedModel
+from cortex.timekeeping import ManualTicker
 from cortex.tools.adapters.claims import ClaimsDesk
 from cortex.tools.failures import PermanentFailure, UncertainOutcome
 from cortex.tools.gateway import ToolAdapter, WriteAdapter

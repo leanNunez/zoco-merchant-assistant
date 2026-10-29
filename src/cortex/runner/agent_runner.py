@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import tzinfo
 from types import MappingProxyType
@@ -29,7 +30,7 @@ from cortex.memory.ledger import PendingAction, PendingStatus
 from cortex.memory.runs import Admission
 from cortex.memory.tenant_store import ConversationState, TenantStore, check_external_id
 from cortex.observability.tracer import TraceEvent, Tracer
-from cortex.runner.budget import Budget, Ticker
+from cortex.runner.budget import Budget
 from cortex.runner.finish import REASON_OF, FinishDetail, FinishReason
 from cortex.runner.model import (
     FinalAnswer,
@@ -41,7 +42,9 @@ from cortex.runner.model import (
     PromptMessage,
     ScriptExhausted,
 )
+from cortex.timekeeping import Ticker
 from cortex.tools.catalog import Catalog, ToolKind
+from cortex.tools.failures import ToolFailure
 from cortex.tools.gateway import ToolAdapter, ToolBinder, ToolResult, WriteAdapter, execute
 from cortex.tools.policy import (
     Approved,
@@ -51,6 +54,8 @@ from cortex.tools.policy import (
     display_name,
     review,
 )
+from cortex.tools.retry import Retrier, jitter_for
+from cortex.tools.timeouts import time_limited
 from cortex.tools.writes import (
     Done,
     Failed,
@@ -153,7 +158,13 @@ class _Run:
         self.request = request
         self.budget = Budget(request.limits, runner.ticker)
         self.store: TenantStore = runner.database.for_tenant(request.auth)
-        self.adapters: dict[str, ToolAdapter] = dict(runner.bind_tools(request.auth))
+        # Tool attempts run in worker threads so that each one can be abandoned at its time limit.
+        self.executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix=request.run_id)
+        self.adapters: dict[str, ToolAdapter] = {
+            name: time_limited(adapter, self.executor, self.budget.attempt_timeout_ms)
+            for name, adapter in runner.bind_tools(request.auth).items()
+        }
+        self.jitter = jitter_for(request.run_id)
         # The tools offered in this run: the catalog's, limited to those bound to this company.
         self.catalog = runner.catalog.restricted_to(self.adapters)
         self.tracer = Tracer(
@@ -188,6 +199,9 @@ class _Run:
             # log only; the result carries a code.
             _LOG.exception("run %s failed unexpectedly", request.run_id)
             result = self._finish(FinishDetail.INTERNAL_ERROR)
+        finally:
+            # A call abandoned at its time limit may still be running; nothing waits for it.
+            self.executor.shutdown(wait=False, cancel_futures=True)
         self.store.runs.finish(request.run_id, request.conversation_id, result.to_json())
         return result
 
@@ -292,9 +306,26 @@ class _Run:
             return FinishDetail.OPERATOR_TOOK_OVER
         if verdict.spec.kind is ToolKind.WRITE:
             return self._write(verdict)
-        result = execute(verdict, self.adapters, conversation_id=self.request.conversation_id)
+        result = execute(
+            verdict,
+            self.adapters,
+            conversation_id=self.request.conversation_id,
+            retrier=self._retrier(verdict.spec.name),
+        )
         self._record_result(result)
         return None
+
+    def _retrier(self, tool: str) -> Retrier:
+        def note(retry_number: int, failure: ToolFailure) -> None:
+            self._trace("tool_retry", tool=tool, attempt=retry_number + 1, reason=failure.code)
+
+        return Retrier(
+            max_retries=self.request.limits.max_read_retries,
+            remaining_ms=self.budget.remaining_ms,
+            sleep=self.runner.ticker.sleep,
+            jitter=self.jitter,
+            on_retry=note,
+        )
 
     # ------------------------------------------------------------------ writes
 

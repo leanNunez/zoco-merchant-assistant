@@ -23,6 +23,8 @@ class FailureKind(StrEnum):
 
 class ToolFailure(DomainError):  # noqa: N818 - the base of the three failure kinds
     kind: ClassVar[FailureKind] = FailureKind.PERMANENT
+    # How many attempts were made before giving up. Set by the retry policy; 1 means no retry.
+    attempts: int = 1
 
 
 class TransientFailure(ToolFailure):

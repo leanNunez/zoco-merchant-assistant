@@ -18,15 +18,20 @@ from cortex.config import ConfigError, HarnessConfig, load_harness_config
 from cortex.identity import AuthContext, PrincipalDirectory, PrincipalRecord
 from cortex.memory.database import Database
 from cortex.runner.agent_runner import AgentRunner
-from cortex.runner.budget import Ticker
 from cortex.runner.finish import FinishReason
 from cortex.runner.model import ModelPort
+from cortex.timekeeping import Ticker
 from cortex.tools.adapters.claims import ClaimsDesk
+from cortex.tools.adapters.docs import DocsLibrary
 from cortex.tools.adapters.sales import SalesBook
 from cortex.tools.catalog import Catalog
 from cortex.tools.gateway import ToolAdapter, ToolBinder
 from cortex.tools.zoco_catalog import zoco_catalog
-from merchant_assistant.agent.domain.tools import CONSULTAR_VENTAS, CREAR_RECLAMO
+from merchant_assistant.agent.domain.tools import (
+    BUSCAR_DOCUMENTACION,
+    CONSULTAR_VENTAS,
+    CREAR_RECLAMO,
+)
 from merchant_assistant.shared.clock import Clock
 
 BUSINESS_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
@@ -39,10 +44,16 @@ class HarnessData:
     # The principal the kit uses for each company when a scenario does not name one.
     test_principals: Mapping[str, str]
     sales: SalesBook
+    docs: DocsLibrary
     catalog: Catalog
 
 
-def load_harness_data(kit_dir: Path) -> HarnessData:
+def default_corpora(root: Path) -> Mapping[str, Path]:
+    """Comercio A keeps the documents of the first delivery; Comercio B has none."""
+    return MappingProxyType({"comercio_a": root / "docs"})
+
+
+def load_harness_data(kit_dir: Path, corpora: Mapping[str, Path] | None = None) -> HarnessData:
     config = load_harness_config(_read_json(kit_dir / "harness_config.json"))
     if config.allowed_finish_reasons != {reason.value for reason in FinishReason}:
         raise ConfigError("the kit's finish reasons differ from the harness's")
@@ -66,6 +77,7 @@ def load_harness_data(kit_dir: Path) -> HarnessData:
         directory=directory,
         test_principals=MappingProxyType({r.tenant_id: r.principal_id for r in records}),
         sales=sales,
+        docs=DocsLibrary(default_corpora(kit_dir.parent) if corpora is None else corpora),
         catalog=catalog,
     )
 
@@ -75,6 +87,7 @@ def zoco_tool_binder(data: HarnessData, claims: ClaimsDesk) -> ToolBinder:
 
     def bind(auth: AuthContext) -> Mapping[str, ToolAdapter]:
         return {
+            BUSCAR_DOCUMENTACION: data.docs.for_tenant(auth),
             CONSULTAR_VENTAS: data.sales.for_tenant(auth),
             CREAR_RECLAMO: claims.for_tenant(auth),
         }

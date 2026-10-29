@@ -64,7 +64,13 @@ class RunLimits:
             raise ConfigError("tool_timeout_ms cannot exceed total_timeout_ms")
 
     def with_max_steps(self, max_steps: int) -> RunLimits:
-        return replace(self, max_steps=max_steps)
+        return self.with_limit("max_steps", max_steps)
+
+    def with_limit(self, name: str, value: int) -> RunLimits:
+        """The same limits with one changed. Unknown names and out-of-range values are refused."""
+        if name not in _BOUNDS:
+            raise ConfigError(f"unknown limit {name!r}")
+        return replace(self, **{name: value})
 
 
 @dataclass(frozen=True, slots=True)

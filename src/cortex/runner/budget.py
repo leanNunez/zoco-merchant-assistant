@@ -1,43 +1,14 @@
 """How much a run may still do: steps and total time (brief section 2).
 
-A step is one model call. Time is measured with an injected monotonic ticker, so a test or an
-evaluation can make time pass without sleeping, and a wall-clock change cannot cut a run short.
+A step is one model call. Time comes from an injected `Ticker` (see `cortex.timekeeping`).
 """
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
-from typing import Protocol
 
 from cortex.config import RunLimits
-
-
-class Ticker(Protocol):
-    def seconds(self) -> float:
-        """A monotonic reading, in seconds. Only differences between readings mean anything."""
-        ...
-
-
-@dataclass(frozen=True)
-class SystemTicker:
-    def seconds(self) -> float:
-        return time.monotonic()
-
-
-@dataclass
-class ManualTicker:
-    """Time that moves only when told to. Used by tests and by the evaluation's simulated faults."""
-
-    now: float = 0.0
-
-    def seconds(self) -> float:
-        return self.now
-
-    def advance(self, seconds: float) -> None:
-        if seconds < 0:
-            raise ValueError("time does not go backwards")
-        self.now += seconds
+from cortex.timekeeping import Ticker
 
 
 @dataclass

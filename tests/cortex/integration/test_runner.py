@@ -9,9 +9,9 @@ import pytest
 from cortex.bootstrap import HarnessData, build_runner, zoco_tool_binder
 from cortex.memory.database import Database
 from cortex.runner.agent_runner import RunRequest
-from cortex.runner.budget import ManualTicker
 from cortex.runner.finish import FinishReason
 from cortex.runner.scripted_model import ScriptedModel
+from cortex.timekeeping import ManualTicker
 from cortex.tools.adapters.claims import ClaimsDesk
 from merchant_assistant.shared.clock import FixedClock
 
