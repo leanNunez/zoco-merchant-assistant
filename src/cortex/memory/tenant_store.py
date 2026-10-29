@@ -1,0 +1,139 @@
+"""Everything the harness stores for one company (brief section 4).
+
+A `TenantStore` is built from an `AuthContext` and no method takes a company id: every query
+filters by the company of that context. Reaching another company's rows is impossible by
+construction, not by discipline.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal
+
+from cortex.identity import AuthContext
+from merchant_assistant.control.states import State
+
+if TYPE_CHECKING:
+    from cortex.memory.database import Database
+
+# Conversation and run ids come from Zoco Chat or the caller: a closed alphabet keeps them inert.
+EXTERNAL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", re.ASCII)
+
+MessageRole = Literal["user", "assistant", "tool"]
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationState:
+    conversation_id: str
+    mode: State
+    control_version: int
+    responsible: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class StoredMessage:
+    role: MessageRole
+    content: str
+
+
+def check_external_id(value: str) -> str:
+    if EXTERNAL_ID.fullmatch(value) is None:
+        raise ValueError(f"not a valid id: {value[:40]!r}")
+    return value
+
+
+class TenantStore:
+    def __init__(self, database: Database, auth: AuthContext) -> None:
+        self._db = database
+        self.tenant_id = auth.tenant_id
+
+    def open_conversation(self, conversation_id: str) -> ConversationState:
+        """The conversation of this company with that id; created in AUTO the first time."""
+        check_external_id(conversation_id)
+        with self._db.transaction() as tx:
+            tx.execute(
+                "INSERT OR IGNORE INTO conversations (tenant_id, conversation_id, created_at) "
+                "VALUES (?, ?, ?)",
+                (self.tenant_id, conversation_id, self._db.now()),
+            )
+        state = self.conversation(conversation_id)
+        if state is None:
+            raise RuntimeError("a conversation vanished right after being opened")
+        return state
+
+    def conversation(self, conversation_id: str) -> ConversationState | None:
+        with self._db.reading() as db:
+            row = db.execute(
+                "SELECT mode, control_version, responsible FROM conversations "
+                "WHERE tenant_id = ? AND conversation_id = ?",
+                (self.tenant_id, conversation_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return ConversationState(conversation_id, State(row[0]), row[1], row[2])
+
+    def append_message(
+        self, conversation_id: str, run_id: str, role: MessageRole, content: str
+    ) -> None:
+        with self._db.transaction() as tx:
+            tx.execute(
+                "INSERT INTO messages (tenant_id, conversation_id, run_id, role, content, "
+                "created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (self.tenant_id, conversation_id, run_id, role, content, self._db.now()),
+            )
+
+    def recent_messages(self, conversation_id: str, limit: int) -> tuple[StoredMessage, ...]:
+        """The last `limit` messages, oldest first: the bounded history the model receives."""
+        with self._db.reading() as db:
+            rows = db.execute(
+                "SELECT role, content FROM messages WHERE tenant_id = ? AND conversation_id = ? "
+                "ORDER BY message_id DESC LIMIT ?",
+                (self.tenant_id, conversation_id, limit),
+            ).fetchall()
+        return tuple(StoredMessage(role, content) for role, content in reversed(rows))
+
+    def deliver_if_current(
+        self, conversation_id: str, run_id: str, text: str, expected_version: int
+    ) -> bool:
+        """Send `text` only if the agent still controls the conversation at that version.
+
+        The check and the write happen in one write transaction, so an operator's takeover
+        either lands before (the reply is suppressed) or after (it was already sent).
+        """
+        with self._db.transaction() as tx:
+            row = tx.execute(
+                "SELECT mode, control_version FROM conversations "
+                "WHERE tenant_id = ? AND conversation_id = ?",
+                (self.tenant_id, conversation_id),
+            ).fetchone()
+            current = row is not None and row[0] == State.AUTO and row[1] == expected_version
+            tx.execute(
+                "INSERT INTO outbox (tenant_id, conversation_id, run_id, content, status, "
+                "control_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    self.tenant_id,
+                    conversation_id,
+                    run_id,
+                    text,
+                    "SENT" if current else "SUPPRESSED",
+                    expected_version,
+                    self._db.now(),
+                ),
+            )
+            if current:
+                tx.execute(
+                    "INSERT INTO messages (tenant_id, conversation_id, run_id, role, content, "
+                    "created_at) VALUES (?, ?, ?, 'assistant', ?, ?)",
+                    (self.tenant_id, conversation_id, run_id, text, self._db.now()),
+                )
+        return current
+
+    def sent_count(self, run_id: str) -> int:
+        with self._db.reading() as db:
+            row = db.execute(
+                "SELECT COUNT(*) FROM outbox "
+                "WHERE tenant_id = ? AND run_id = ? AND status = 'SENT'",
+                (self.tenant_id, run_id),
+            ).fetchone()
+        return int(row[0])
