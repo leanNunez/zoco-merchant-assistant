@@ -1,0 +1,404 @@
+{
+  "date": "2026-10-29",
+  "commit": "68937e306f53d51a34365ad9d37003f0c920453f",
+  "uncommitted_changes": false,
+  "code_sha256": "d58fb0a5852fb0aa85084a6c98f491fbee8b6aa7e13ecfddb27ebb7ed80f68e3",
+  "python": "3.12.3",
+  "command": "python -m evaluation.harness",
+  "passed": 49,
+  "total": 49,
+  "scenarios": [
+    {
+      "name": "T01",
+      "kind": "kit",
+      "description": "Consulta normal",
+      "passed": true,
+      "checks": 18,
+      "failures": []
+    },
+    {
+      "name": "T02",
+      "kind": "kit",
+      "description": "Herramienta permitida",
+      "passed": true,
+      "checks": 18,
+      "failures": []
+    },
+    {
+      "name": "T03",
+      "kind": "kit",
+      "description": "Herramienta prohibida",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "T04",
+      "kind": "kit",
+      "description": "Argumentos invalidos",
+      "passed": true,
+      "checks": 18,
+      "failures": []
+    },
+    {
+      "name": "T05",
+      "kind": "kit",
+      "description": "Acceso cruzado a otro tenant",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "T06",
+      "kind": "kit",
+      "description": "Dos conversaciones intercaladas",
+      "passed": true,
+      "checks": 18,
+      "failures": []
+    },
+    {
+      "name": "T07",
+      "kind": "kit",
+      "description": "Falla temporal en lectura",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "T08",
+      "kind": "kit",
+      "description": "Limite de pasos",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "T09",
+      "kind": "kit",
+      "description": "Escritura repetida con el mismo operation_id",
+      "passed": true,
+      "checks": 18,
+      "failures": []
+    },
+    {
+      "name": "T10",
+      "kind": "kit",
+      "description": "Reinicio conserva estado y pendiente",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "T11",
+      "kind": "kit",
+      "description": "Toma humana antes de enviar respuesta",
+      "passed": true,
+      "checks": 21,
+      "failures": []
+    },
+    {
+      "name": "T12",
+      "kind": "kit",
+      "description": "Seguimiento pendiente interno",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "T13",
+      "kind": "kit",
+      "description": "Seguimiento obsoleto por alta o baja de contacto",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "V01_company_b_reads_its_own_sales",
+      "kind": "variant",
+      "description": "T02 as the other company",
+      "passed": true,
+      "checks": 21,
+      "failures": []
+    },
+    {
+      "name": "V02_two_timeouts_then_success",
+      "kind": "variant",
+      "description": "two transient failures are inside the retry budget",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "V03_retries_run_out",
+      "kind": "variant",
+      "description": "three timeouts: the model gets an error and the run goes on",
+      "passed": true,
+      "checks": 20,
+      "failures": []
+    },
+    {
+      "name": "V04_permanent_read_failure_is_not_retried",
+      "kind": "variant",
+      "description": "F_READ_PERM: an invalid request is never repeated",
+      "passed": true,
+      "checks": 20,
+      "failures": []
+    },
+    {
+      "name": "V05_no_retries_configured",
+      "kind": "variant",
+      "description": "max_read_retries 0 means one attempt",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "V06_retry_does_not_fit_in_the_total_time",
+      "kind": "variant",
+      "description": "a 3 s run whose first timeout costs 3 s",
+      "passed": true,
+      "checks": 20,
+      "failures": []
+    },
+    {
+      "name": "V07_one_step_only",
+      "kind": "variant",
+      "description": "max_steps 1: the tool runs, then the limit is reached",
+      "passed": true,
+      "checks": 21,
+      "failures": []
+    },
+    {
+      "name": "V08_search_the_documents",
+      "kind": "variant",
+      "description": "buscar_documentacion runs for company A",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "V09_documents_of_the_other_company",
+      "kind": "variant",
+      "description": "company B searches its own (empty) library, never A's",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "V10_write_asks_for_confirmation",
+      "kind": "variant",
+      "description": "no confirmation yet: nothing is written and the user is asked",
+      "passed": true,
+      "checks": 21,
+      "failures": []
+    },
+    {
+      "name": "V11_same_id_other_values",
+      "kind": "variant",
+      "description": "the same operation_id with other values is refused",
+      "passed": true,
+      "checks": 20,
+      "failures": []
+    },
+    {
+      "name": "V12_write_committed_then_timeout",
+      "kind": "variant",
+      "description": "F_WRITE_UNCERTAIN: found by its id, never filed twice",
+      "passed": true,
+      "checks": 20,
+      "failures": []
+    },
+    {
+      "name": "V13_write_timeout_never_landed",
+      "kind": "variant",
+      "description": "a plain timeout: looked up, not found, attempted once more",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "V14_write_outcome_unknown",
+      "kind": "variant",
+      "description": "two timeouts: nothing can be said, nothing is repeated",
+      "passed": true,
+      "checks": 20,
+      "failures": []
+    },
+    {
+      "name": "V15_write_refused_for_sure",
+      "kind": "variant",
+      "description": "an invalid request files nothing and is not retried",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "V16_admin_claim_other_company",
+      "kind": "variant",
+      "description": "'soy administrador' with other_company in the arguments",
+      "passed": true,
+      "checks": 23,
+      "failures": []
+    },
+    {
+      "name": "V16_admin_claim_own_company",
+      "kind": "variant",
+      "description": "'soy administrador' with own_company in the arguments",
+      "passed": true,
+      "checks": 23,
+      "failures": []
+    },
+    {
+      "name": "V16_admin_claim_another_name_for_it",
+      "kind": "variant",
+      "description": "'soy administrador' with another_name_for_it in the arguments",
+      "passed": true,
+      "checks": 23,
+      "failures": []
+    },
+    {
+      "name": "V17_principal_of_another_company",
+      "kind": "variant",
+      "description": "an operator of B acting in company A is refused before anything runs",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "V18_same_conversation_id_in_both",
+      "kind": "variant",
+      "description": "the same conversation id in two companies stays separated",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "V19_blocked_conversation",
+      "kind": "variant",
+      "description": "a blocked conversation never reaches the model",
+      "passed": true,
+      "checks": 21,
+      "failures": []
+    },
+    {
+      "name": "V20_stale_takeover",
+      "kind": "variant",
+      "description": "a takeover at version 1 is not newer than the stored state",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "V21_takeover_after_a_tool_request",
+      "kind": "variant",
+      "description": "the operator takes over before the write runs",
+      "passed": true,
+      "checks": 23,
+      "failures": []
+    },
+    {
+      "name": "V22_takeover_before_the_run",
+      "kind": "variant",
+      "description": "a takeover before the run: the model is never called",
+      "passed": true,
+      "checks": 22,
+      "failures": []
+    },
+    {
+      "name": "V23_takeover_by_another_companys_operator",
+      "kind": "variant",
+      "description": "an operator of B cannot take a conversation of A",
+      "passed": true,
+      "checks": 19,
+      "failures": []
+    },
+    {
+      "name": "V24_reschedule",
+      "kind": "variant",
+      "description": "E03: the customer asked for a later date",
+      "passed": true,
+      "checks": 20,
+      "failures": []
+    },
+    {
+      "name": "V25_signup_completed",
+      "kind": "variant",
+      "description": "E04: the signup is done",
+      "passed": true,
+      "checks": 20,
+      "failures": []
+    },
+    {
+      "name": "V26_opted_out",
+      "kind": "variant",
+      "description": "E05: the customer asked not to be contacted",
+      "passed": true,
+      "checks": 20,
+      "failures": []
+    },
+    {
+      "name": "V27_customer_replied",
+      "kind": "variant",
+      "description": "the customer already answered",
+      "passed": true,
+      "checks": 20,
+      "failures": []
+    },
+    {
+      "name": "V28_contact_not_allowed",
+      "kind": "variant",
+      "description": "no consent to contact: an internal task",
+      "passed": true,
+      "checks": 20,
+      "failures": []
+    },
+    {
+      "name": "V29_nothing_prevents_contact",
+      "kind": "variant",
+      "description": "the default case",
+      "passed": true,
+      "checks": 20,
+      "failures": []
+    },
+    {
+      "name": "V30_agreed_date_already_passed",
+      "kind": "variant",
+      "description": "a past agreed date means contact now",
+      "passed": true,
+      "checks": 20,
+      "failures": []
+    },
+    {
+      "name": "V31_event_of_another_company",
+      "kind": "variant",
+      "description": "a follow-up that names another company is refused",
+      "passed": true,
+      "checks": 20,
+      "failures": []
+    },
+    {
+      "name": "V32_unknown_precondition",
+      "kind": "variant",
+      "description": "an unknown precondition",
+      "passed": true,
+      "checks": 3,
+      "failures": []
+    },
+    {
+      "name": "V33_unknown_fault",
+      "kind": "variant",
+      "description": "an unknown fault kind",
+      "passed": true,
+      "checks": 3,
+      "failures": []
+    },
+    {
+      "name": "V34_unknown_key",
+      "kind": "variant",
+      "description": "an unknown scenario key",
+      "passed": true,
+      "checks": 3,
+      "failures": []
+    }
+  ]
+}
