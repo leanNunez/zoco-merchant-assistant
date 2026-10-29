@@ -87,7 +87,7 @@ branch = true
 # checks erodes (it did in a previous project), so CI runs `lint-imports`.
 
 [tool.importlinter]
-root_packages = ["merchant_assistant", "cortex"]
+root_packages = ["merchant_assistant", "cortex", "evaluation"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
@@ -259,3 +259,9 @@ source_modules = [
     "cortex.tools.failures",
 ]
 forbidden_modules = ["cortex.memory", "sqlite3", "threading", "openai"]
+
+[[tool.importlinter.contracts]]
+name = "The independent checker judges from files and output alone: it never imports the system"
+type = "forbidden"
+source_modules = ["evaluation.harness.checker"]
+forbidden_modules = ["cortex", "merchant_assistant"]

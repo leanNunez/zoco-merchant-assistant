@@ -1,7 +1,7 @@
 # One command per step. `make check` is what CI runs, so green here means green there.
 
 .DEFAULT_GOAL := help
-.PHONY: help setup format lint typecheck arch test diagram index eval-retrieval eval-agent eval-agent-live eval-agent-heldout dataset db chat check
+.PHONY: help setup format lint typecheck arch test diagram index eval eval-retrieval eval-agent eval-agent-live eval-agent-heldout dataset db chat check
 
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -38,6 +38,11 @@ test: ## Unit and integration tests, in the local timezone and in UTC
 
 diagram: ## Regenerate the state diagram
 	uv run python -m merchant_assistant.control.diagram > design/state-diagram.md
+
+# The harness of the second delivery: 13 kit scenarios plus our variants, each run through
+# evaluation_adapter.py and checked against the real SQLite files. Writes a dated report.
+eval: ## Evaluate the harness (13 kit scenarios + variants) and write the dated results
+	uv run python -m evaluation.harness
 
 index: ## Embed the corpus, the kit and the calibration queries (uses the cache)
 	uv run python -m evaluation.retrieval index

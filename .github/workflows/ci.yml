@@ -31,3 +31,4 @@ jobs:
       # --locked fails if uv.lock is stale; CI runs exactly what a developer runs.
       - run: uv sync --locked
       - run: make check
+      - run: make eval
