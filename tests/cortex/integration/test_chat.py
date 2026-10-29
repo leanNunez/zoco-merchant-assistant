@@ -3,6 +3,7 @@
 import json
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -214,8 +215,6 @@ def test_the_rescheduling_depends_on_the_fixed_clock_not_on_the_day_it_runs(tmp_
     data = json.loads((EXAMPLES / "T12.json").read_text(encoding="utf-8"))
     data.update(conversation_id=e03["conversation_id"], incoming_event=e03)
     path.write_text(json.dumps(data), encoding="utf-8")
-    from datetime import UTC, datetime
-
     later = run_scenario_file(path, kit_dir=KIT, now=datetime(2026, 11, 10, 12, tzinfo=UTC))
 
     assert run_scenario_file(path, kit_dir=KIT)["decision"] == "REPROGRAMAR"
@@ -287,3 +286,26 @@ def test_three_separate_processes_file_one_claim(tmp_path: Path) -> None:
     assert "confirmation_received" in confirmed["types"]
     assert "tool_deduplicated" in repeated["types"]
     assert Audit(tmp_path / "cortex.db", tmp_path / "claims").claims("comercio_a") == (1, 1)
+
+
+@pytest.mark.parametrize(
+    "now",
+    [
+        datetime(2026, 10, 28, 12, tzinfo=UTC),  # a working morning in Buenos Aires
+        datetime(2026, 10, 28, 3, tzinfo=UTC),  # the middle of the night
+        datetime(2026, 10, 31, 15, tzinfo=UTC),  # a Saturday
+    ],
+)
+def test_the_takeover_scenarios_do_not_depend_on_the_time_of_day(
+    tmp_path: Path, now: datetime
+) -> None:
+    """The first delivery's state machine only allowed a takeover in attention hours and sent the
+    conversation back to the agent when they ended; the harness applies a takeover whenever it
+    is reported."""
+    for scenario in ("T10", "T11"):
+        path = tmp_path / f"{scenario}.json"
+        path.write_text((EXAMPLES / f"{scenario}.json").read_text(encoding="utf-8"))
+        output = run_scenario_file(path, kit_dir=KIT, now=now)
+
+        assert output["finish_reason"] == "NEEDS_HUMAN", scenario
+        assert output["customer_messages_sent"] == 0, scenario

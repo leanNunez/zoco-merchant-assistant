@@ -28,7 +28,12 @@ from cortex.identity import AuthContext
 from cortex.memory.database import Database
 from cortex.memory.ledger import PendingAction, PendingStatus
 from cortex.memory.runs import Admission
-from cortex.memory.tenant_store import ConversationState, TenantStore, check_external_id
+from cortex.memory.tenant_store import (
+    ConversationState,
+    StoredMessage,
+    TenantStore,
+    check_external_id,
+)
 from cortex.observability.redaction import TraceRedactor
 from cortex.observability.tracer import TraceEvent, Tracer
 from cortex.runner.budget import Budget
@@ -275,8 +280,10 @@ class _Run:
         return turn
 
     def _prompt(self) -> Prompt:
-        history = self.store.recent_messages(
-            self.request.conversation_id, self.request.limits.context_window_messages
+        history = _starting_at_a_user_message(
+            self.store.recent_messages(
+                self.request.conversation_id, self.request.limits.context_window_messages
+            )
         )
         conversation = self._conversation()
         return Prompt(
@@ -508,3 +515,13 @@ class _Run:
 
     def _trace(self, type_: str, **attributes: str | int | bool | None) -> None:
         self.tracer.emit(type_, step=self.budget.steps_taken, **attributes)
+
+
+def _starting_at_a_user_message(history: tuple[StoredMessage, ...]) -> tuple[StoredMessage, ...]:
+    """The window never starts in the middle of a turn: a tool result without the request that
+    produced it, or an answer without its question, would only confuse the model. If the window
+    holds no user message at all, it is kept as it is."""
+    for index, message in enumerate(history):
+        if message.role == "user":
+            return history[index:]
+    return history
