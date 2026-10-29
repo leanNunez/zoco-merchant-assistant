@@ -29,9 +29,10 @@ ROOT = Path(__file__).resolve().parents[2]
 # The first delivery's documentation. It moved from README.md when the harness got its own.
 README = ROOT / "PRUEBA_1.md"
 HARNESS_README = ROOT / "README.md"
+REVISION = ROOT / "REVISION_CONSIGNA.md"
 SPEC_REVIEW = ROOT / "SPEC_REVIEW.md"
 ADRS = tuple(sorted((ROOT / "design" / "adr").glob("*.md")))
-DOCUMENTS = (README, HARNESS_README, SPEC_REVIEW, *ADRS)
+DOCUMENTS = (README, HARNESS_README, REVISION, SPEC_REVIEW, *ADRS)
 CONVERSATIONS = ROOT / "evaluation" / "results" / "conversations"
 RETRIEVAL = ROOT / "evaluation" / "results" / "retrieval"
 
