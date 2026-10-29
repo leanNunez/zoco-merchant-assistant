@@ -53,7 +53,8 @@ class SalesAdapter:
         self.tenant_id = tenant_id
         self._days = days
 
-    def __call__(self, arguments: BaseModel) -> Mapping[str, object]:
+    def __call__(self, arguments: BaseModel, *, conversation_id: str) -> Mapping[str, object]:
+        del conversation_id  # the sales of a day do not depend on the conversation
         if not isinstance(arguments, ConsultarVentasArgs):
             raise TypeError("consultar_ventas received arguments of another tool")
         day = parse_iso_day(arguments.fecha)

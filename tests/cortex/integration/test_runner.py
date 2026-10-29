@@ -12,6 +12,7 @@ from cortex.runner.agent_runner import RunRequest
 from cortex.runner.budget import ManualTicker
 from cortex.runner.finish import FinishReason
 from cortex.runner.scripted_model import ScriptedModel
+from cortex.tools.adapters.claims import ClaimsDesk
 from merchant_assistant.shared.clock import FixedClock
 
 pytestmark = pytest.mark.integration
@@ -30,7 +31,7 @@ def test_the_model_sees_its_own_company_data_as_untrusted_tool_results(
         data=harness_data,
         database=database,
         model=model,
-        bind_tools=zoco_tool_binder(harness_data),
+        bind_tools=zoco_tool_binder(harness_data, ClaimsDesk(tmp_path / "claims", clock)),
         clock=clock,
         ticker=ManualTicker(),
     )
@@ -46,4 +47,8 @@ def test_the_model_sees_its_own_company_data_as_untrusted_tool_results(
     assert second_prompt.messages[0].content == "¿Cuánto vendí el 15?"
     assert envelope["untrusted_data"] is True
     assert envelope["data"]["cantidad"] == 8  # comercio_b's figure; comercio_a had 15
-    assert second_prompt.state == {"conversation_mode": "AUTO", "control_version": 0}
+    assert second_prompt.state == {
+        "conversation_mode": "AUTO",
+        "control_version": 0,
+        "pending_actions": [],
+    }

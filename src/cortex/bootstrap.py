@@ -21,11 +21,12 @@ from cortex.runner.agent_runner import AgentRunner
 from cortex.runner.budget import Ticker
 from cortex.runner.finish import FinishReason
 from cortex.runner.model import ModelPort
+from cortex.tools.adapters.claims import ClaimsDesk
 from cortex.tools.adapters.sales import SalesBook
 from cortex.tools.catalog import Catalog
 from cortex.tools.gateway import ToolAdapter, ToolBinder
 from cortex.tools.zoco_catalog import zoco_catalog
-from merchant_assistant.agent.domain.tools import CONSULTAR_VENTAS
+from merchant_assistant.agent.domain.tools import CONSULTAR_VENTAS, CREAR_RECLAMO
 from merchant_assistant.shared.clock import Clock
 
 BUSINESS_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
@@ -69,9 +70,14 @@ def load_harness_data(kit_dir: Path) -> HarnessData:
     )
 
 
-def zoco_tool_binder(data: HarnessData) -> ToolBinder:
+def zoco_tool_binder(data: HarnessData, claims: ClaimsDesk) -> ToolBinder:
+    """The adapters of one company: its sales and its claims file, nothing else."""
+
     def bind(auth: AuthContext) -> Mapping[str, ToolAdapter]:
-        return {CONSULTAR_VENTAS: data.sales.for_tenant(auth)}
+        return {
+            CONSULTAR_VENTAS: data.sales.for_tenant(auth),
+            CREAR_RECLAMO: claims.for_tenant(auth),
+        }
 
     return bind
 

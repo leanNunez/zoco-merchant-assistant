@@ -18,18 +18,30 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
 
-from cortex.bootstrap import HarnessData, build_runner, load_harness_data, zoco_tool_binder
+from cortex.bootstrap import (
+    BUSINESS_TIMEZONE,
+    HarnessData,
+    build_runner,
+    load_harness_data,
+    zoco_tool_binder,
+)
 from cortex.config import ConfigError, RunLimits
 from cortex.identity import AuthContext, AuthenticationFailed
 from cortex.kit_adapter.audit import Audit
 from cortex.kit_adapter.observables import CallCounter, build_output
 from cortex.kit_adapter.scenario import Scenario, UnsupportedScenario, load_scenario
 from cortex.memory.database import Database
+from cortex.memory.ledger import PendingAction, PendingStatus
 from cortex.runner.agent_runner import RunRequest, RunResult
 from cortex.runner.budget import ManualTicker
 from cortex.runner.model import ModelPort
 from cortex.runner.scripted_model import ScriptedModel
-from merchant_assistant.shared.clock import FixedClock
+from cortex.tools.adapters.claims import ClaimsDesk
+from cortex.tools.confirmation import canonical_arguments, fingerprint
+from cortex.tools.policy import Approved, PolicyContext, review
+from merchant_assistant.agent.domain.messages import ToolCall
+from merchant_assistant.control.states import State
+from merchant_assistant.shared.clock import FixedClock, business_today
 
 # The instant of the contract's example. Fixed, so a decision that depends on "today" does not
 # change with the day the evaluation is run; `--now` overrides it.
@@ -54,6 +66,8 @@ class Setup:
 
     limits: RunLimits
     interleaved: tuple[InterleavedMessage, ...] = field(default_factory=tuple)
+    # Writes the user already confirmed before the scenario starts: (tool, arguments).
+    confirmed_actions: tuple[tuple[str, Mapping[str, object]], ...] = field(default_factory=tuple)
 
 
 def run_scenario_file(
@@ -86,6 +100,7 @@ def run_scenario(
         return _unauthenticated(scenario, run_id, setup.limits)
 
     separated = world.interleave(setup) if setup.interleaved else None
+    world.seed_confirmed(auth, scenario.conversation_id, setup.confirmed_actions)
     result = world.run(
         auth,
         run_id,
@@ -140,10 +155,24 @@ def _interleaved_conversations(setup: Setup, value: object) -> Setup:
     return replace(setup, interleaved=tuple(entries))
 
 
+def _confirmed_actions(setup: Setup, value: object) -> Setup:
+    if not isinstance(value, list):
+        raise UnsupportedScenario("confirmed_actions must be a list")
+    actions = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {"tool", "args"}:
+            raise UnsupportedScenario("each confirmed action needs exactly tool and args")
+        if not isinstance(item["tool"], str) or not isinstance(item["args"], dict):
+            raise UnsupportedScenario("a confirmed action is a tool name and an args object")
+        actions.append((item["tool"], item["args"]))
+    return replace(setup, confirmed_actions=tuple(actions))
+
+
 _PRECONDITIONS: Mapping[str, Callable[[Setup, object], Setup]] = MappingProxyType(
     {
         "max_steps": _max_steps,
         "interleaved_conversations": _interleaved_conversations,
+        "confirmed_actions": _confirmed_actions,
     }
 )
 
@@ -159,7 +188,8 @@ class _World:
         self.clock = FixedClock(now)
         self.database = Database(workdir / "cortex.db", self.clock)
         self.database.initialize()
-        self.audit = Audit(self.database.path)
+        self.claims = ClaimsDesk(workdir / "claims", self.clock)
+        self.audit = Audit(self.database.path, self.claims.directory)
         self.counter = CallCounter()
 
     def run(
@@ -175,11 +205,41 @@ class _World:
             data=self.data,
             database=self.database,
             model=model,
-            bind_tools=self.counter.wrap(zoco_tool_binder(self.data)),
+            bind_tools=self.counter.wrap(zoco_tool_binder(self.data, self.claims)),
             clock=self.clock,
             ticker=ManualTicker(),
         )
         return runner.run(RunRequest(run_id, conversation_id, message, auth, limits))
+
+    def seed_confirmed(
+        self,
+        auth: AuthContext,
+        conversation_id: str,
+        actions: tuple[tuple[str, Mapping[str, object]], ...],
+    ) -> None:
+        """Record writes the user confirmed earlier, through the same checks as any request."""
+        if not actions:
+            return
+        store = self.database.for_tenant(auth)
+        conversation = store.open_conversation(conversation_id)
+        context = PolicyContext(auth, State.AUTO, business_today(self.clock, BUSINESS_TIMEZONE))
+        for tool, arguments in actions:
+            verdict = review(
+                ToolCall("seed", tool, json.dumps(arguments)), self.data.catalog, context
+            )
+            if not isinstance(verdict, Approved):
+                raise UnsupportedScenario(f"a confirmed action does not pass the checks: {tool}")
+            store.ledger.record_pending(
+                PendingAction(
+                    operation_id=str(getattr(verdict.arguments, "operation_id", "")),
+                    conversation_id=conversation_id,
+                    tool=tool,
+                    arguments=canonical_arguments(verdict.arguments),
+                    fingerprint=fingerprint(tool, verdict.arguments),
+                    control_version=conversation.control_version,
+                    status=PendingStatus.CONFIRMED,
+                )
+            )
 
     def interleave(self, setup: Setup) -> bool:
         """Run the interleaved conversations turn by turn and check they never mixed.

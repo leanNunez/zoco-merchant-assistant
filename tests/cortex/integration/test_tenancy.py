@@ -17,7 +17,9 @@ from cortex.bootstrap import HarnessData
 from cortex.identity import AuthContext
 from cortex.kit_adapter import orchestrator
 from cortex.kit_adapter.orchestrator import run_scenario_file
+from cortex.memory.database import Database
 from cortex.memory.tenant_store import StoredMessage, TenantStore
+from cortex.tools.adapters.claims import ClaimsDesk
 from cortex.tools.gateway import ToolAdapter
 
 pytestmark = pytest.mark.integration
@@ -128,10 +130,15 @@ def test_a_history_that_ignores_the_company_is_detected(monkeypatch: pytest.Monk
 
 
 def test_tools_bound_to_the_wrong_company_are_detected(monkeypatch: pytest.MonkeyPatch) -> None:
-    def wrong_binder(data: HarnessData) -> Callable[[AuthContext], Mapping[str, ToolAdapter]]:
+    def wrong_binder(
+        data: HarnessData, claims: ClaimsDesk
+    ) -> Callable[[AuthContext], Mapping[str, ToolAdapter]]:
         def bind(auth: AuthContext) -> Mapping[str, ToolAdapter]:
             other = data.directory.authenticate("comercio_b", "operador_b")
-            return {"consultar_ventas": data.sales.for_tenant(other)}
+            return {
+                "consultar_ventas": data.sales.for_tenant(other),
+                "crear_reclamo": claims.for_tenant(other),
+            }
 
         return bind
 
@@ -140,13 +147,15 @@ def test_tools_bound_to_the_wrong_company_are_detected(monkeypatch: pytest.Monke
     assert _run(EXAMPLES / "T02.json")["cross_tenant_data_exposed"] is True
 
 
-def test_writes_under_another_company_are_detected(monkeypatch: pytest.MonkeyPatch) -> None:
-    original = TenantStore.__init__
+def test_writes_under_another_company_are_detected(
+    monkeypatch: pytest.MonkeyPatch, harness_data: HarnessData
+) -> None:
+    original = Database.for_tenant
+    other = harness_data.directory.authenticate("comercio_b", "operador_b")
 
-    def misbound(self: TenantStore, database: Any, auth: AuthContext) -> None:
-        original(self, database, auth)
-        self.tenant_id = "comercio_b"
+    def misbound(self: Database, auth: AuthContext) -> TenantStore:
+        return original(self, other)
 
-    monkeypatch.setattr(TenantStore, "__init__", misbound)
+    monkeypatch.setattr(Database, "for_tenant", misbound)
 
     assert _run(EXAMPLES / "T01.json")["cross_tenant_effects"] > 0

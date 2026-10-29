@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
@@ -24,7 +24,14 @@ class ToolAdapter(Protocol):
     @property
     def tenant_id(self) -> str: ...
 
-    def __call__(self, arguments: BaseModel) -> Mapping[str, object]: ...
+    def __call__(self, arguments: BaseModel, *, conversation_id: str) -> Mapping[str, object]: ...
+
+
+@runtime_checkable
+class WriteAdapter(ToolAdapter, Protocol):
+    """A tool with an effect. It must be able to tell whether a command was applied."""
+
+    def lookup(self, operation_id: str) -> Mapping[str, object] | None: ...
 
 
 # Builds the adapters of one company. Called once per run with the authenticated context.
@@ -50,11 +57,14 @@ class ToolResult:
         }
 
 
-def execute(approved: Approved, adapters: Mapping[str, ToolAdapter]) -> ToolResult:
+def execute(
+    approved: Approved, adapters: Mapping[str, ToolAdapter], *, conversation_id: str
+) -> ToolResult:
+    """Run a READ tool. Writes go through `cortex.tools.writes`, never through here."""
     name = approved.spec.name
     adapter = adapters[name]
     try:
-        data = adapter(approved.arguments)
+        data = adapter(approved.arguments, conversation_id=conversation_id)
     except DomainError as failure:
         # Only the public view crosses: a stable code and a safe message, never internals.
         return ToolResult(name, ok=False, source_tenant=adapter.tenant_id, error=failure.public())

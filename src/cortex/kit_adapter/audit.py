@@ -13,8 +13,9 @@ from pathlib import Path
 
 
 class Audit:
-    def __init__(self, database_path: Path) -> None:
-        self._uri = f"{database_path.resolve().as_uri()}?mode=ro"
+    def __init__(self, database_path: Path, claims_directory: Path) -> None:
+        self._uri = _read_only(database_path)
+        self._claims = claims_directory
 
     def rows_written_outside(self, tenant_id: str, run_id: str) -> int:
         """Rows this run wrote under any company other than its own."""
@@ -25,6 +26,25 @@ class Audit:
                 (run_id, tenant_id),
             )
         return total
+
+    def claims(self, tenant_id: str) -> tuple[int, int]:
+        """(claims, distinct idempotency keys) in a company's claims file."""
+        path = self._claims / f"{tenant_id}.db"
+        if not path.exists():
+            return (0, 0)
+        with closing(sqlite3.connect(_read_only(path), uri=True)) as db:
+            row = db.execute(
+                "SELECT COUNT(*), COUNT(DISTINCT idempotency_key) FROM complaints"
+            ).fetchone()
+        return (int(row[0]), int(row[1]))
+
+    def claims_outside(self, tenant_id: str) -> int:
+        """Claims filed under any company other than this one."""
+        return sum(
+            self.claims(path.stem)[0]
+            for path in sorted(self._claims.glob("*.db"))
+            if path.stem != tenant_id
+        )
 
     def messages(self, tenant_id: str, conversation_id: str) -> set[str]:
         with self._connect() as db:
@@ -41,3 +61,7 @@ class Audit:
     def _connect(self) -> closing[sqlite3.Connection]:
         # `closing`: a sqlite3 connection used as a context manager commits, it does not close.
         return closing(sqlite3.connect(self._uri, uri=True))
+
+
+def _read_only(path: Path) -> str:
+    return f"{path.resolve().as_uri()}?mode=ro"

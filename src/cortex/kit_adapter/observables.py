@@ -15,7 +15,7 @@ from cortex.identity import AuthContext
 from cortex.kit_adapter.audit import Audit
 from cortex.memory.tenant_store import TenantStore
 from cortex.runner.agent_runner import RunResult
-from cortex.tools.gateway import ToolAdapter, ToolBinder
+from cortex.tools.gateway import ToolAdapter, ToolBinder, WriteAdapter
 
 
 class CallCounter:
@@ -32,6 +32,8 @@ class CallCounter:
         return bind
 
     def _counting(self, name: str, adapter: ToolAdapter) -> ToolAdapter:
+        if isinstance(adapter, WriteAdapter):
+            return _CountedWrite(self.calls, name, adapter)
         return _Counted(self.calls, name, adapter)
 
 
@@ -40,9 +42,21 @@ class _Counted:
         self._calls, self._name, self._adapter = calls, name, adapter
         self.tenant_id = adapter.tenant_id
 
-    def __call__(self, arguments: BaseModel) -> Mapping[str, object]:
+    def __call__(self, arguments: BaseModel, *, conversation_id: str) -> Mapping[str, object]:
         self._calls[self._name] = self._calls.get(self._name, 0) + 1
-        return self._adapter(arguments)
+        return self._adapter(arguments, conversation_id=conversation_id)
+
+
+class _CountedWrite(_Counted):
+    """A write adapter keeps its lookup; a lookup is an external call too."""
+
+    def __init__(self, calls: dict[str, int], name: str, adapter: WriteAdapter) -> None:
+        super().__init__(calls, name, adapter)
+        self._writer = adapter
+
+    def lookup(self, operation_id: str) -> Mapping[str, object] | None:
+        self._calls[self._name] = self._calls.get(self._name, 0) + 1
+        return self._writer.lookup(operation_id)
 
 
 def build_output(
@@ -57,7 +71,8 @@ def build_output(
     rejected = _tools_of(result, "tool_rejected")
     sent = store.sent_count(result.run_id)
     conversation = store.conversation(result.conversation_id)
-    effects = {"claims_created": 0, "customer_messages_sent": sent}
+    claims, distinct_claims = audit.claims(result.tenant_id)
+    effects = {"claims_created": claims, "customer_messages_sent": sent}
     state = {
         "conversation_mode": conversation.mode.value if conversation else None,
         "control_version": conversation.control_version if conversation else None,
@@ -76,12 +91,15 @@ def build_output(
         "retry_count": sum(1 for event in result.events if event.type == "tool_retry"),
         "max_steps": result.max_steps,
         "customer_messages_sent": sent,
-        "claims_created": 0,
-        # Measured by later blocks of work: writes, restart, takeover and follow-ups.
+        "claims_created": claims,
+        "unique_claims_created": distinct_claims,
+        # Measured by later blocks of work: restart, takeover and follow-ups.
         "cross_tenant_data_exposed": foreign_data,
-        "cross_tenant_effects": audit.rows_written_outside(result.tenant_id, result.run_id),
+        "cross_tenant_effects": (
+            audit.rows_written_outside(result.tenant_id, result.run_id)
+            + audit.claims_outside(result.tenant_id)
+        ),
         "contexts_separated": contexts_separated,
-        "unique_claims_created": None,
         "state_after_restart": None,
         "pending_action_retained": None,
         "delivered_ai_messages_after_takeover": None,

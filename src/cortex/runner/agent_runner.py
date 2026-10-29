@@ -14,6 +14,7 @@ over at any moment:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from collections.abc import Mapping
@@ -24,6 +25,8 @@ from types import MappingProxyType
 from cortex.config import RunLimits
 from cortex.identity import AuthContext
 from cortex.memory.database import Database
+from cortex.memory.ledger import PendingAction, PendingStatus
+from cortex.memory.runs import Admission
 from cortex.memory.tenant_store import ConversationState, TenantStore, check_external_id
 from cortex.observability.tracer import TraceEvent, Tracer
 from cortex.runner.budget import Budget, Ticker
@@ -38,10 +41,27 @@ from cortex.runner.model import (
     PromptMessage,
     ScriptExhausted,
 )
-from cortex.tools.catalog import Catalog
-from cortex.tools.gateway import ToolAdapter, ToolBinder, ToolResult, execute
-from cortex.tools.policy import PolicyContext, Rejected, display_name, review
+from cortex.tools.catalog import Catalog, ToolKind
+from cortex.tools.gateway import ToolAdapter, ToolBinder, ToolResult, WriteAdapter, execute
+from cortex.tools.policy import (
+    Approved,
+    PolicyContext,
+    Rejected,
+    RejectionCode,
+    display_name,
+    review,
+)
+from cortex.tools.writes import (
+    Done,
+    Failed,
+    NeedsConfirmation,
+    Refused,
+    WriteContext,
+    WriteOutcome,
+    write,
+)
 from merchant_assistant.agent.domain.messages import ToolCall
+from merchant_assistant.agent.domain.replies import ReplyKind, classify_reply
 from merchant_assistant.control.states import State
 from merchant_assistant.shared.clock import Clock, business_today
 
@@ -78,6 +98,35 @@ class RunResult:
     step_count: int
     max_steps: int
     events: tuple[TraceEvent, ...]
+
+    def to_json(self) -> str:
+        return json.dumps(
+            {
+                "run_id": self.run_id,
+                "tenant_id": self.tenant_id,
+                "conversation_id": self.conversation_id,
+                "finish_detail": self.finish_detail.value,
+                "step_count": self.step_count,
+                "max_steps": self.max_steps,
+                "events": [event.as_dict() for event in self.events],
+            },
+            ensure_ascii=False,
+        )
+
+    @classmethod
+    def from_json(cls, text: str) -> RunResult:
+        data = json.loads(text)
+        detail = FinishDetail(data["finish_detail"])
+        return cls(
+            run_id=data["run_id"],
+            tenant_id=data["tenant_id"],
+            conversation_id=data["conversation_id"],
+            finish_reason=REASON_OF[detail],
+            finish_detail=detail,
+            step_count=data["step_count"],
+            max_steps=data["max_steps"],
+            events=tuple(TraceEvent.from_dict(event) for event in data["events"]),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,18 +168,31 @@ class _Run:
     # ------------------------------------------------------------------ the loop
 
     def execute(self) -> RunResult:
+        """Admit the command once, run it, and store its result for any repetition."""
+        request = self.request
+        self._trace("run_started")
+        conversation = self.store.open_conversation(request.conversation_id)
+        digest = hashlib.sha256(request.message.encode("utf-8")).hexdigest()
+        admission = self.store.runs.admit(request.run_id, request.conversation_id, digest)
+        if admission.admission is Admission.REPLAY and admission.stored_result is not None:
+            # The same command already ran: answer with its result, execute nothing.
+            return RunResult.from_json(admission.stored_result)
+        if admission.admission is Admission.CONFLICT:
+            return self._finish(FinishDetail.RUN_ID_CONFLICT)
+        if admission.admission is not Admission.ADMITTED:
+            return self._finish(FinishDetail.CONVERSATION_BUSY)
         try:
-            return self._loop()
+            result = self._loop(conversation)
         except Exception:
             # A bug must not leave the run without an explicit ending. The traceback goes to the
             # log only; the result carries a code.
-            _LOG.exception("run %s failed unexpectedly", self.request.run_id)
-            return self._finish(FinishDetail.INTERNAL_ERROR)
+            _LOG.exception("run %s failed unexpectedly", request.run_id)
+            result = self._finish(FinishDetail.INTERNAL_ERROR)
+        self.store.runs.finish(request.run_id, request.conversation_id, result.to_json())
+        return result
 
-    def _loop(self) -> RunResult:
+    def _loop(self, conversation: ConversationState) -> RunResult:
         conversation_id = self.request.conversation_id
-        self._trace("run_started")
-        conversation = self.store.open_conversation(conversation_id)
         self.store.append_message(
             conversation_id, self.request.run_id, "user", self.request.message
         )
@@ -142,6 +204,9 @@ class _Run:
             )
         self.base_version = conversation.control_version
 
+        stop = self._answer_pending_confirmation()
+        if stop is not None:
+            return self._finish(stop)
         while True:
             stop = self._checkpoint_before_model()
             if stop is not None:
@@ -200,6 +265,10 @@ class _Run:
             state={
                 "conversation_mode": conversation.mode.value,
                 "control_version": conversation.control_version,
+                "pending_actions": [
+                    _describe(action)
+                    for action in self.store.ledger.open_actions(self.request.conversation_id)
+                ],
             },
             tools=self.catalog.names,
         )
@@ -221,9 +290,97 @@ class _Run:
             return self._reject(verdict)
         if self._control_changed():
             return FinishDetail.OPERATOR_TOOK_OVER
-        result = execute(verdict, self.adapters)
+        if verdict.spec.kind is ToolKind.WRITE:
+            return self._write(verdict)
+        result = execute(verdict, self.adapters, conversation_id=self.request.conversation_id)
         self._record_result(result)
         return None
+
+    # ------------------------------------------------------------------ writes
+
+    def _answer_pending_confirmation(self) -> FinishDetail | None:
+        """The user's reply to a confirmation question is read by code, before the model.
+
+        A clear "sí" confirms the exact values at the current control version and runs the
+        write; anything else cancels it, so a later "sí" can never confirm something stale.
+        """
+        waiting = [
+            action
+            for action in self.store.ledger.open_actions(self.request.conversation_id)
+            if action.status is PendingStatus.PENDING and action.arguments is not None
+        ]
+        if not waiting:
+            return None
+        latest, older = waiting[-1], waiting[:-1]
+        for action in older:
+            self._cancel(action)
+        if classify_reply(self.request.message) is not ReplyKind.AFFIRMATIVE:
+            self._cancel(latest)
+            return None
+        self.store.ledger.record_pending(
+            PendingAction(
+                operation_id=latest.operation_id,
+                conversation_id=latest.conversation_id,
+                tool=latest.tool,
+                arguments=latest.arguments,
+                fingerprint=latest.fingerprint,
+                control_version=self.base_version,
+                status=PendingStatus.CONFIRMED,
+            )
+        )
+        self._trace("confirmation_received", tool=latest.tool, operation_id=latest.operation_id)
+        # The confirmed values go through the same verification as any request.
+        call = ToolCall(f"confirmed-{latest.operation_id}", latest.tool, latest.arguments or "{}")
+        return self._use_tool(call)
+
+    def _cancel(self, action: PendingAction) -> None:
+        self.store.ledger.move_pending(
+            action.operation_id,
+            from_status=PendingStatus.PENDING,
+            to_status=PendingStatus.CANCELLED,
+        )
+        self._trace("confirmation_cancelled", tool=action.tool, operation_id=action.operation_id)
+
+    def _write(self, approved: Approved) -> FinishDetail | None:
+        adapter = self.adapters[approved.spec.name]
+        if not isinstance(adapter, WriteAdapter):
+            raise TypeError(f"{approved.spec.name} is a write tool without a lookup")
+        outcome = write(
+            approved,
+            adapter,
+            WriteContext(
+                ledger=self.store.ledger,
+                conversation_id=self.request.conversation_id,
+                control_version=self.base_version,
+                run_id=self.request.run_id,
+            ),
+        )
+        return self._apply_write_outcome(approved, outcome)
+
+    def _apply_write_outcome(
+        self, approved: Approved, outcome: WriteOutcome
+    ) -> FinishDetail | None:
+        name = approved.spec.name
+        if isinstance(outcome, Done):
+            if outcome.how == "executed":
+                self._record_result(outcome.result)
+            else:
+                event = "tool_deduplicated" if outcome.how == "deduplicated" else "write_reconciled"
+                self._trace(event, tool=name, data_tenant=outcome.result.source_tenant)
+                self._remember_tool_message(outcome.result.envelope())
+            return None
+        if isinstance(outcome, NeedsConfirmation):
+            self._trace("tool_confirmation_required", tool=name, operation_id=outcome.operation_id)
+            if self._deliver_text(outcome.question):
+                return FinishDetail.AWAITING_CONFIRMATION
+            return FinishDetail.OPERATOR_TOOK_OVER
+        if isinstance(outcome, Refused):
+            return self._reject(Rejected(name, RejectionCode(outcome.code), outcome.detail))
+        if isinstance(outcome, Failed):
+            self._record_result(outcome.result)
+            return None
+        self._trace("write_uncertain", tool=name, operation_id=outcome.operation_id)
+        return FinishDetail.WRITE_OUTCOME_UNKNOWN
 
     def _reject(self, rejection: Rejected) -> FinishDetail | None:
         self._trace(
@@ -300,3 +457,13 @@ class _Run:
 
     def _trace(self, type_: str, **attributes: str | int | bool | None) -> None:
         self.tracer.emit(type_, step=self.budget.steps_taken, **attributes)
+
+
+def _describe(action: PendingAction) -> dict[str, object]:
+    """A pending action as the model sees it: exact values, never a summary."""
+    return {
+        "tool": action.tool,
+        "operation_id": action.operation_id,
+        "status": action.status.value,
+        "arguments": json.loads(action.arguments) if action.arguments else None,
+    }

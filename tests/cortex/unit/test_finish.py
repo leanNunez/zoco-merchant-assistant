@@ -19,6 +19,8 @@ def test_refusals_for_safety_block_and_hand_offs_need_a_human() -> None:
 
     assert blocked == {
         FinishDetail.AUTH_INVALID,
+        FinishDetail.CONVERSATION_BUSY,
+        FinishDetail.RUN_ID_CONFLICT,
         FinishDetail.CONVERSATION_BLOCKED,
         FinishDetail.SCOPE_VIOLATION,
     }

@@ -28,6 +28,12 @@ class TraceEvent:
     elapsed_ms: int
     attributes: Mapping[str, Scalar] = field(default_factory=dict)
 
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Scalar]) -> TraceEvent:
+        fields = {name: data[name] for name in _BASE_FIELDS}
+        attributes = {name: value for name, value in data.items() if name not in _BASE_FIELDS}
+        return cls(**fields, attributes=attributes)  # type: ignore[arg-type]
+
     def as_dict(self) -> dict[str, object]:
         return {
             "seq": self.seq,
@@ -40,6 +46,18 @@ class TraceEvent:
             "elapsed_ms": self.elapsed_ms,
             **self.attributes,
         }
+
+
+_BASE_FIELDS = (
+    "seq",
+    "type",
+    "run_id",
+    "tenant_id",
+    "conversation_id",
+    "step",
+    "timestamp",
+    "elapsed_ms",
+)
 
 
 class Tracer:
