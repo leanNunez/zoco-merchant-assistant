@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from cortex.memory.tenant_store import EXTERNAL_ID
+
 DROPPED_KEYS = frozenset({"id", "description", "expected"})
 KNOWN_KEYS = frozenset(
     {
@@ -58,13 +60,20 @@ def load_scenario(raw: Mapping[str, object]) -> Scenario:
     return Scenario(
         tenant_id=_text(data, "tenant_id"),
         principal_id=_text(data, "principal_id"),
-        conversation_id=_text(data, "conversation_id"),
+        conversation_id=conversation_id(_text(data, "conversation_id")),
         message=_text(data, "message") if "message" in data else DEFAULT_MESSAGE,
         model_script=tuple(script),
         preconditions=_object(data, "preconditions"),
         faults=_object(data, "faults"),
         incoming_event=incoming,
     )
+
+
+def conversation_id(value: str) -> str:
+    """A conversation id in the closed alphabet the harness accepts, or an unsupported scenario."""
+    if EXTERNAL_ID.fullmatch(value) is None:
+        raise UnsupportedScenario(f"not a valid conversation id: {value[:40]!r}")
+    return value
 
 
 def _text(data: Mapping[str, object], key: str) -> str:

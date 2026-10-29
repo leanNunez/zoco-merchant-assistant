@@ -72,6 +72,11 @@ class ChatEvents:
     ) -> FollowupDecision:
         store = self.database.for_tenant(auth)
         conversation = store.open_conversation(conversation_id)
+        previous = store.chat.decision_of(run_id)
+        if previous is not None:
+            # The same event, handled again: answer with what was decided, change nothing.
+            tracer.emit("followup_replayed", step=0, decision=previous[0])
+            return FollowupDecision(Decision(previous[0]), previous[1])
         decision = decide(
             facts,
             today=business_today(self.clock, self.business_tz),

@@ -35,7 +35,8 @@ def is_confirmed(pending: PendingAction | None, fingerprint_: str, control_versi
 
 
 def confirmation_question(tool: str, arguments: BaseModel) -> str:
-    values = "\n".join(f"- {name}: {value}" for name, value in arguments.model_dump().items())
+    # Each value between «» on its own line: the user sees where every value starts and ends.
+    values = "\n".join(f"- {name}: «{value}»" for name, value in arguments.model_dump().items())
     return (
         f"Para ejecutar {tool} necesito tu confirmación de estos datos exactos:\n{values}\n"
         "Respondé «sí» para confirmar o «no» para cancelar."

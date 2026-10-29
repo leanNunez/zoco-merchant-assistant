@@ -12,7 +12,7 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 
 from cortex.config import ConfigError, RunLimits
-from cortex.kit_adapter.scenario import UnsupportedScenario
+from cortex.kit_adapter.scenario import UnsupportedScenario, conversation_id
 from cortex.tools.adapters.faults import FaultKind
 from merchant_assistant.agent.domain.tools import CREAR_RECLAMO
 from merchant_assistant.control.states import State
@@ -129,6 +129,7 @@ def _interleaved_conversations(setup: Setup, value: object) -> Setup:
             )
         if not all(isinstance(text, str) and text for text in item.values()):
             raise UnsupportedScenario("interleaved conversation fields must be non-empty strings")
+        conversation_id(item["conversation_id"])
         entries.append(InterleavedMessage(**item))
     return replace(setup, interleaved=tuple(entries))
 

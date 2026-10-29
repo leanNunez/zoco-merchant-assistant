@@ -23,7 +23,9 @@ class TraceStore:
         with self._db.transaction() as tx:
             tx.execute(
                 "INSERT INTO trace_events (tenant_id, run_id, seq, conversation_id, type, step, "
-                "timestamp, elapsed_ms, attributes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "timestamp, elapsed_ms, attributes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                # A replayed run never rewrites the trace of the original one.
+                "ON CONFLICT (tenant_id, run_id, seq) DO NOTHING",
                 (
                     self.tenant_id,
                     event.run_id,

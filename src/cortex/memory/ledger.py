@@ -9,6 +9,7 @@ restart because they live in SQLite, not in memory.
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -28,6 +29,15 @@ class PendingStatus(StrEnum):
 
 
 OPEN_STATUSES = (PendingStatus.PENDING, PendingStatus.CONFIRMED, PendingStatus.SUSPENDED)
+
+
+class StartResult(StrEnum):
+    """Why a command could, or could not, be claimed for execution."""
+
+    STARTED = "STARTED"
+    CONTROL_CHANGED = "CONTROL_CHANGED"  # a person took the conversation, or its version moved
+    NOT_CONFIRMED = "NOT_CONFIRMED"  # no valid confirmation of these exact values right now
+    IN_PROGRESS = "IN_PROGRESS"  # someone else holds it, or it is already done
 
 
 class OperationStatus(StrEnum):
@@ -80,7 +90,8 @@ class TenantLedger:
     # ------------------------------------------------------------------ pending actions
 
     def record_pending(self, action: PendingAction) -> None:
-        """Store a pending action, replacing whatever was pending under the same id."""
+        """Store a pending action as given. Only for state reported by a trusted system of record
+        (the evaluation's preconditions); a run uses `propose`, which checks the control."""
         with self._db.transaction() as tx:
             tx.execute(
                 "INSERT INTO pending_actions (tenant_id, operation_id, conversation_id, tool, "
@@ -103,6 +114,51 @@ class TenantLedger:
                     self._db.now(),
                 ),
             )
+
+    def propose(self, action: PendingAction) -> bool:
+        """Record a write waiting for confirmation, only if the agent still controls the
+        conversation at the action's version. False: a person took over, nothing is recorded."""
+        with self._db.transaction() as tx:
+            if not _in_control(tx, self.tenant_id, action.conversation_id, action.control_version):
+                return False
+            tx.execute(
+                "INSERT INTO pending_actions (tenant_id, operation_id, conversation_id, tool, "
+                "arguments, fingerprint, control_version, status, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?) "
+                "ON CONFLICT (tenant_id, operation_id) DO UPDATE SET "
+                "conversation_id = excluded.conversation_id, tool = excluded.tool, "
+                "arguments = excluded.arguments, fingerprint = excluded.fingerprint, "
+                "control_version = excluded.control_version, status = 'PENDING', "
+                "updated_at = excluded.updated_at "
+                "WHERE pending_actions.status != 'CONSUMED'",
+                (
+                    self.tenant_id,
+                    action.operation_id,
+                    action.conversation_id,
+                    action.tool,
+                    action.arguments,
+                    action.fingerprint,
+                    action.control_version,
+                    self._db.now(),
+                ),
+            )
+        return True
+
+    def confirm_pending(
+        self, operation_id: str, conversation_id: str, control_version: int
+    ) -> bool:
+        """The user's "sí": confirm the action asked at this very control version, and only if
+        the agent still controls the conversation. The version is compared, never re-stamped."""
+        with self._db.transaction() as tx:
+            if not _in_control(tx, self.tenant_id, conversation_id, control_version):
+                return False
+            changed = tx.execute(
+                "UPDATE pending_actions SET status = 'CONFIRMED', updated_at = ? "
+                "WHERE tenant_id = ? AND operation_id = ? AND conversation_id = ? "
+                "AND status = 'PENDING' AND control_version = ?",
+                (self._db.now(), self.tenant_id, operation_id, conversation_id, control_version),
+            ).rowcount
+        return changed == 1
 
     def move_pending(
         self, operation_id: str, *, from_status: PendingStatus, to_status: PendingStatus
@@ -149,23 +205,66 @@ class TenantLedger:
             return None
         return Operation(row[0], row[1], row[2], OperationStatus(row[3]), row[4], row[5])
 
-    def start_operation(self, operation_id: str, tool: str, fingerprint: str, run_id: str) -> bool:
-        """Claim the command before calling the outside world. False if someone else holds it.
+    def start_operation(
+        self,
+        operation_id: str,
+        tool: str,
+        fingerprint: str,
+        run_id: str,
+        *,
+        conversation_id: str,
+        control_version: int,
+    ) -> StartResult:
+        """Claim the command right before calling the outside world.
 
-        A command that failed for sure (nothing applied) may be started again; any other
-        existing row means the command is in flight, uncertain or done.
+        One write transaction checks everything that must still be true, so nothing can change
+        between the check and the claim: the agent controls the conversation at that version, the
+        exact values are confirmed there, and nobody else holds the command. A command that
+        failed for sure, or whose uncertain outcome was looked up and found not applied, may be
+        claimed again; a running or committed one may not.
         """
         with self._db.transaction() as tx:
-            inserted = tx.execute(
+            if not _in_control(tx, self.tenant_id, conversation_id, control_version):
+                return StartResult.CONTROL_CHANGED
+            confirmed = tx.execute(
+                "SELECT 1 FROM pending_actions WHERE tenant_id = ? AND operation_id = ? "
+                "AND conversation_id = ? AND status = 'CONFIRMED' AND fingerprint = ? "
+                "AND control_version = ?",
+                (self.tenant_id, operation_id, conversation_id, fingerprint, control_version),
+            ).fetchone()
+            if confirmed is None:
+                return StartResult.NOT_CONFIRMED
+            claimed = tx.execute(
                 "INSERT INTO operations (tenant_id, operation_id, tool, fingerprint, status, "
                 "run_id, updated_at) VALUES (?, ?, ?, ?, 'STARTED', ?, ?) "
                 "ON CONFLICT (tenant_id, operation_id) DO UPDATE SET status = 'STARTED', "
                 "run_id = excluded.run_id, updated_at = excluded.updated_at "
-                "WHERE operations.status = 'FAILED' "
+                "WHERE operations.status IN ('FAILED', 'UNCERTAIN') "
                 "AND operations.fingerprint = excluded.fingerprint",
                 (self.tenant_id, operation_id, tool, fingerprint, run_id, self._db.now()),
             ).rowcount
-        return inserted == 1
+        return StartResult.STARTED if claimed == 1 else StartResult.IN_PROGRESS
+
+    def owner_has_finished(self, operation_id: str) -> bool:
+        """True when a STARTED command belongs to a run that is known to be over: its owner can
+        no longer settle it, so it is as uncertain as a crash. An unknown owner counts as alive."""
+        with self._db.reading() as db:
+            row = db.execute(
+                "SELECT r.status FROM operations o JOIN runs r "
+                "ON r.tenant_id = o.tenant_id AND r.run_id = o.run_id "
+                "WHERE o.tenant_id = ? AND o.operation_id = ? AND o.status = 'STARTED'",
+                (self.tenant_id, operation_id),
+            ).fetchone()
+        return row is not None and row[0] != "RUNNING"
+
+    def abandon_started(self, operation_id: str) -> None:
+        """A STARTED command nobody will settle becomes UNCERTAIN, to be looked up by its id."""
+        with self._db.transaction() as tx:
+            tx.execute(
+                "UPDATE operations SET status = 'UNCERTAIN', updated_at = ? "
+                "WHERE tenant_id = ? AND operation_id = ? AND status = 'STARTED'",
+                (self._db.now(), self.tenant_id, operation_id),
+            )
 
     def settle_operation(
         self,
@@ -189,13 +288,23 @@ class TenantLedger:
                     "created_at) VALUES (?, ?, 'effect', ?, ?)",
                     (self.tenant_id, effect_in, operation_id, self._db.now()),
                 )
+                # Executed: whatever was still open about it (even suspended) is now done.
+                tx.execute(
+                    "UPDATE pending_actions SET status = 'CONSUMED', updated_at = ? "
+                    "WHERE tenant_id = ? AND operation_id = ? "
+                    "AND status IN ('PENDING', 'CONFIRMED', 'SUSPENDED')",
+                    (self._db.now(), self.tenant_id, operation_id),
+                )
 
-    def uncertain_operations(self) -> tuple[str, ...]:
+    def uncertain_operations(self, conversation_id: str) -> tuple[str, ...]:
+        """The commands of this conversation whose outcome is still unknown."""
         with self._db.reading() as db:
             rows = db.execute(
-                "SELECT operation_id FROM operations WHERE tenant_id = ? AND status = 'UNCERTAIN' "
-                "ORDER BY operation_id",
-                (self.tenant_id,),
+                "SELECT o.operation_id FROM operations o JOIN pending_actions p "
+                "ON p.tenant_id = o.tenant_id AND p.operation_id = o.operation_id "
+                "WHERE o.tenant_id = ? AND p.conversation_id = ? "
+                "AND o.status IN ('UNCERTAIN', 'STARTED') ORDER BY o.operation_id",
+                (self.tenant_id, conversation_id),
             ).fetchall()
         return tuple(row[0] for row in rows)
 
@@ -205,3 +314,15 @@ def _pending(row: tuple[str, str, str, str | None, str | None, int, str]) -> Pen
     return PendingAction(
         operation_id, conversation_id, tool, arguments, fingerprint, version, PendingStatus(status)
     )
+
+
+def _in_control(
+    tx: sqlite3.Connection, tenant_id: str, conversation_id: str, control_version: int
+) -> bool:
+    """The agent still controls the conversation, at exactly this version."""
+    row = tx.execute(
+        "SELECT mode, control_version FROM conversations "
+        "WHERE tenant_id = ? AND conversation_id = ?",
+        (tenant_id, conversation_id),
+    ).fetchone()
+    return row is not None and row[0] == "AUTO" and row[1] == control_version

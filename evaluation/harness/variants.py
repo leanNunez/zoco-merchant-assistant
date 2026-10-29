@@ -454,6 +454,11 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
             {"faults": {"consultar_ventas": ["MELTDOWN"]}},
         ),
         ("V34_unknown_key", "an unknown scenario key", {"surprise": True}),
+        (
+            "V35_invalid_conversation_id",
+            "a conversation id outside the allowed alphabet",
+            {"conversation_id": "conv/../x"},
+        ),
     ):
         scenario = _derive(t02, description, {"finish_reason": "COMPLETED"})
         scenario.update(changes)

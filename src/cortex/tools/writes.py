@@ -2,13 +2,15 @@
 
 1. The ledger is checked first, by `(company, operation_id)`. A committed command with the same
    values is answered from the ledger without calling the tool again; the same id with other
-   values is refused; an uncertain command is reconciled before anything else.
-2. The exact values must have been confirmed at the current control version. Otherwise the
-   action is stored as pending and the user is asked.
-3. The command is claimed in the ledger (STARTED) before the outside world is called, so two
-   runs cannot execute it at the same time.
-4. Any failure that is not a certain refusal makes the outcome uncertain. Then the command is
-   looked up by its id; if it was not applied, it is attempted once more with the same key,
+   values is refused. A command whose outcome is uncertain is only looked up: if it was applied,
+   it is recorded; if not, it starts over and needs a valid confirmation like any first attempt.
+2. The exact values must be confirmed at the current control version. Otherwise the action is
+   proposed (only while the agent still controls the conversation) and the user is asked.
+3. The command is claimed in the ledger (STARTED) in one transaction that also checks the
+   control and the confirmation, so a takeover or a cancellation cannot slip in between the
+   check and the call, and two runs cannot execute it at the same time.
+4. Any failure that is not a certain refusal makes the outcome uncertain: the command is looked
+   up by its id and, if it was not applied, claimed and attempted once more with the same key,
    which the claims store's UNIQUE constraint makes harmless.
 """
 
@@ -19,7 +21,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-from cortex.memory.ledger import OperationStatus, PendingAction, PendingStatus, TenantLedger
+from cortex.memory.ledger import (
+    OperationStatus,
+    PendingAction,
+    PendingStatus,
+    StartResult,
+    TenantLedger,
+)
 from cortex.tools.confirmation import (
     canonical_arguments,
     confirmation_question,
@@ -60,8 +68,15 @@ class NeedsConfirmation:
 
 @dataclass(frozen=True, slots=True)
 class Refused:
-    code: Literal["operation_id_conflict", "operation_in_progress"]
+    code: Literal["operation_id_conflict", "operation_in_progress", "confirmation_missing"]
     detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class ControlChanged:
+    """A person took the conversation (or its version moved) before the write could run."""
+
+    operation_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +89,7 @@ class Unresolved:
     operation_id: str
 
 
-WriteOutcome = Done | NeedsConfirmation | Refused | Failed | Unresolved
+WriteOutcome = Done | NeedsConfirmation | Refused | Failed | Unresolved | ControlChanged
 
 
 def write(approved: Approved, adapter: WriteAdapter, context: WriteContext) -> WriteOutcome:
@@ -90,17 +105,23 @@ def write(approved: Approved, adapter: WriteAdapter, context: WriteContext) -> W
         if existing.status is OperationStatus.COMMITTED:
             stored = json.loads(existing.result) if existing.result else {}
             return Done(_ok(name, adapter, stored), "deduplicated")
-        if existing.status is OperationStatus.UNCERTAIN:
-            return _reconcile(approved, adapter, context, operation_id)
-        if existing.status is OperationStatus.STARTED:
+        if existing.status is OperationStatus.STARTED and ledger.owner_has_finished(operation_id):
+            # Its run ended without settling it (a crash in the middle): its outcome is unknown.
+            ledger.abandon_started(operation_id)
+            existing = ledger.operation(operation_id)
+        if existing is not None and existing.status is OperationStatus.STARTED:
             return Refused("operation_in_progress", "another run is executing this command")
-        # FAILED: refused for sure, nothing was applied; it may be confirmed and tried again.
+        if existing is not None and existing.status is OperationStatus.UNCERTAIN:
+            found = _look_up(approved, adapter, context, operation_id)
+            if found is not None:
+                return found
+            # It was not applied. Trying it again is a new attempt: it needs a valid confirmation.
 
     pending = ledger.pending_action(operation_id)
     if pending is not None and pending.conversation_id != context.conversation_id:
         return Refused("operation_id_conflict", "the id belongs to another conversation")
     if not is_confirmed(pending, values, context.control_version):
-        ledger.record_pending(
+        proposed = ledger.propose(
             PendingAction(
                 operation_id=operation_id,
                 conversation_id=context.conversation_id,
@@ -111,22 +132,40 @@ def write(approved: Approved, adapter: WriteAdapter, context: WriteContext) -> W
                 status=PendingStatus.PENDING,
             )
         )
+        if not proposed:
+            return ControlChanged(operation_id)
         return NeedsConfirmation(operation_id, confirmation_question(name, arguments))
-
-    if not ledger.start_operation(operation_id, name, values, context.run_id):
-        return Refused("operation_in_progress", "another run is executing this command")
-    return _attempt(approved, adapter, context, operation_id, retry_if_uncertain=True)
+    return _execute(approved, adapter, context, operation_id, values, may_retry=True)
 
 
-def _attempt(
+def _execute(
     approved: Approved,
     adapter: WriteAdapter,
     context: WriteContext,
     operation_id: str,
+    values: str,
     *,
-    retry_if_uncertain: bool,
+    may_retry: bool,
 ) -> WriteOutcome:
+    """Claim the command (checking control and confirmation in the same transaction), call the
+    outside world, and settle what happened."""
     name = approved.spec.name
+    started = context.ledger.start_operation(
+        operation_id,
+        name,
+        values,
+        context.run_id,
+        conversation_id=context.conversation_id,
+        control_version=context.control_version,
+    )
+    if started is StartResult.CONTROL_CHANGED:
+        return ControlChanged(operation_id)
+    if started is StartResult.NOT_CONFIRMED:
+        return Refused(
+            "confirmation_missing", "the confirmation of these values is no longer valid"
+        )
+    if started is StartResult.IN_PROGRESS:
+        return Refused("operation_in_progress", "another run is executing this command")
     try:
         data = adapter(approved.arguments, conversation_id=context.conversation_id)
     except DomainError as failure:
@@ -142,15 +181,28 @@ def _attempt(
             )
         context.ledger.settle_operation(operation_id, OperationStatus.UNCERTAIN)
         context.trace("write_attempt_failed", tool=name, reason=failure.code)
-        if not retry_if_uncertain:
+        if not may_retry:
             return Unresolved(operation_id)
-        return _reconcile(approved, adapter, context, operation_id)
+        found = _look_up(approved, adapter, context, operation_id)
+        if found is not None:
+            return found
+        # Not applied: one more attempt with the same key, claimed and checked again. If the
+        # first attempt commits late, the store's UNIQUE key turns this one into a read of it.
+        retried = _execute(approved, adapter, context, operation_id, values, may_retry=False)
+        return Done(retried.result, "reconciled") if isinstance(retried, Done) else retried
+    except Exception:
+        # Anything unexpected after the claim: the effect may have happened. It must not stay
+        # STARTED (that would block the command); UNCERTAIN gets it looked up next time.
+        context.ledger.settle_operation(operation_id, OperationStatus.UNCERTAIN)
+        raise
     return _commit(name, adapter, context, operation_id, data, "executed")
 
 
-def _reconcile(
+def _look_up(
     approved: Approved, adapter: WriteAdapter, context: WriteContext, operation_id: str
-) -> WriteOutcome:
+) -> WriteOutcome | None:
+    """Was the command applied? `Done` if it was, `Unresolved` if nobody can tell, `None` if not.
+    A lookup never applies anything, so it needs no confirmation."""
     name = approved.spec.name
     try:
         found = adapter.lookup(operation_id)
@@ -158,14 +210,9 @@ def _reconcile(
         context.trace("write_lookup", tool=name, found=None)  # it could not even be checked
         return Unresolved(operation_id)
     context.trace("write_lookup", tool=name, found=found is not None)
-    if found is not None:
-        return _commit(approved.spec.name, adapter, context, operation_id, found, "reconciled")
-    # Not applied: one more attempt with the same key. If the first attempt commits late, the
-    # store's UNIQUE key turns this one into a read of that claim.
-    outcome = _attempt(approved, adapter, context, operation_id, retry_if_uncertain=False)
-    if isinstance(outcome, Done):
-        return Done(outcome.result, "reconciled")
-    return outcome
+    if found is None:
+        return None
+    return _commit(name, adapter, context, operation_id, found, "reconciled")
 
 
 def _commit(
@@ -176,14 +223,12 @@ def _commit(
     data: Mapping[str, object],
     how: Literal["executed", "reconciled"],
 ) -> Done:
+    # Recorded with the effect, and the pending action (even a suspended one) is consumed.
     context.ledger.settle_operation(
         operation_id,
         OperationStatus.COMMITTED,
         json.dumps(dict(data), ensure_ascii=False),
         effect_in=context.conversation_id,
-    )
-    context.ledger.move_pending(
-        operation_id, from_status=PendingStatus.CONFIRMED, to_status=PendingStatus.CONSUMED
     )
     return Done(_ok(name, adapter, data), how)
 

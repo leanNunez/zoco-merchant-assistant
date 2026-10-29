@@ -40,6 +40,7 @@ class FinishDetail(StrEnum):
     SCRIPT_EXHAUSTED = "script_exhausted"
     INVALID_MODEL_OUTPUT = "invalid_model_output"
     INTERNAL_ERROR = "internal_error"
+    RUN_INTERRUPTED = "run_interrupted"
 
 
 REASON_OF: Mapping[FinishDetail, FinishReason] = MappingProxyType(
@@ -61,5 +62,6 @@ REASON_OF: Mapping[FinishDetail, FinishReason] = MappingProxyType(
         FinishDetail.SCRIPT_EXHAUSTED: FinishReason.FAILED,
         FinishDetail.INVALID_MODEL_OUTPUT: FinishReason.FAILED,
         FinishDetail.INTERNAL_ERROR: FinishReason.FAILED,
+        FinishDetail.RUN_INTERRUPTED: FinishReason.FAILED,
     }
 )

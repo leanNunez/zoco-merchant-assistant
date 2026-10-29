@@ -61,6 +61,7 @@ class RejectionCode(StrEnum):
     # Raised by the write path, after the policy, when the ledger refuses the command.
     OPERATION_ID_CONFLICT = "operation_id_conflict"
     OPERATION_IN_PROGRESS = "operation_in_progress"
+    CONFIRMATION_MISSING = "confirmation_missing"
 
 
 @dataclass(frozen=True, slots=True)

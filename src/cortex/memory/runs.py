@@ -22,6 +22,9 @@ class Admission(StrEnum):
     REPLAY = "REPLAY"  # the same command already finished: here is its result
     BUSY = "BUSY"  # the conversation is held by another run, or this one is still running
     CONFLICT = "CONFLICT"  # the run_id was used for a different request
+    # The same command was interrupted by a crash. It is not run again under the same id: it may
+    # already have delivered a reply. Retrying it is a new command, with a new run_id.
+    INTERRUPTED = "INTERRUPTED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +53,7 @@ class RunJournal:
                     return AdmissionResult(Admission.REPLAY, row[3])
                 if row[2] == "RUNNING":
                     return AdmissionResult(Admission.BUSY)
+                return AdmissionResult(Admission.INTERRUPTED)
             leased = tx.execute(
                 "UPDATE conversations SET active_run_id = ? "
                 "WHERE tenant_id = ? AND conversation_id = ? AND active_run_id IS NULL",
@@ -57,11 +61,9 @@ class RunJournal:
             ).rowcount
             if leased != 1:
                 return AdmissionResult(Admission.BUSY)
-            # A crashed run (FAILED by the startup recovery) may be admitted again.
             tx.execute(
                 "INSERT INTO runs (tenant_id, run_id, conversation_id, request_digest, status, "
-                "started_at) VALUES (?, ?, ?, ?, 'RUNNING', ?) "
-                "ON CONFLICT (tenant_id, run_id) DO UPDATE SET status = 'RUNNING'",
+                "started_at) VALUES (?, ?, ?, ?, 'RUNNING', ?)",
                 (self.tenant_id, run_id, conversation_id, digest, self._db.now()),
             )
         return AdmissionResult(Admission.ADMITTED)

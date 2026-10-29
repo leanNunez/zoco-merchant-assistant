@@ -63,6 +63,7 @@ from cortex.tools.policy import (
 from cortex.tools.retry import Retrier, jitter_for
 from cortex.tools.timeouts import time_limited
 from cortex.tools.writes import (
+    ControlChanged,
     Done,
     Failed,
     NeedsConfirmation,
@@ -198,6 +199,8 @@ class _Run:
             return RunResult.from_json(admission.stored_result)
         if admission.admission is Admission.CONFLICT:
             return self._finish(FinishDetail.RUN_ID_CONFLICT)
+        if admission.admission is Admission.INTERRUPTED:
+            return self._finish(FinishDetail.RUN_INTERRUPTED)
         if admission.admission is not Admission.ADMITTED:
             return self._finish(FinishDetail.CONVERSATION_BUSY)
         # Only an admitted run writes its trace: a replay or a refusal must not collide with it.
@@ -349,8 +352,10 @@ class _Run:
     def _answer_pending_confirmation(self) -> FinishDetail | None:
         """The user's reply to a confirmation question is read by code, before the model.
 
-        A clear "sí" confirms the exact values at the current control version and runs the
-        write; anything else cancels it, so a later "sí" can never confirm something stale.
+        A clear "sí" confirms the exact values, and only if they were asked under the current
+        control version (a question asked before a takeover is stale) and the agent still
+        controls the conversation. Anything else cancels it, so a later "sí" can never confirm
+        something stale.
         """
         waiting = [
             action
@@ -365,17 +370,14 @@ class _Run:
         if classify_reply(self.request.message) is not ReplyKind.AFFIRMATIVE:
             self._cancel(latest)
             return None
-        self.store.ledger.record_pending(
-            PendingAction(
-                operation_id=latest.operation_id,
-                conversation_id=latest.conversation_id,
-                tool=latest.tool,
-                arguments=latest.arguments,
-                fingerprint=latest.fingerprint,
-                control_version=self.base_version,
-                status=PendingStatus.CONFIRMED,
-            )
+        confirmed = self.store.ledger.confirm_pending(
+            latest.operation_id, self.request.conversation_id, self.base_version
         )
+        if not confirmed:
+            self._cancel(
+                latest
+            )  # asked under another control version: the user must be asked again
+            return None
         self._trace("confirmation_received", tool=latest.tool, operation_id=latest.operation_id)
         # The confirmed values go through the same verification as any request.
         call = ToolCall(f"confirmed-{latest.operation_id}", latest.tool, latest.arguments or "{}")
@@ -428,6 +430,10 @@ class _Run:
         if isinstance(outcome, Failed):
             self._record_result(outcome.result)
             return None
+        if isinstance(outcome, ControlChanged):
+            # Caught inside the write's own transaction: a takeover between the checkpoints.
+            self._trace("checkpoint_failed", mode="changed")
+            return FinishDetail.OPERATOR_TOOK_OVER
         self._trace("write_uncertain", tool=name, operation_id=outcome.operation_id)
         return FinishDetail.WRITE_OUTCOME_UNKNOWN
 

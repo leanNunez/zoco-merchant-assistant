@@ -29,7 +29,9 @@ def continuity_card(store: TenantStore, conversation_id: str) -> dict[str, objec
         "pending_actions": scrub_tree(
             [action.view() for action in store.ledger.open_actions(conversation_id)]
         ),
-        "uncertain_operations": list(store.ledger.uncertain_operations()),
+        "uncertain_operations": scrub_tree(
+            list(store.ledger.uncertain_operations(conversation_id))
+        ),
         "commitments": [
             {"kind": c.kind, "responsible": c.responsible, "due_date": c.due_date}
             for c in store.chat.open_commitments(conversation_id)

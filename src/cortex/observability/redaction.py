@@ -83,6 +83,7 @@ ALLOWED_ATTRIBUTES: Mapping[str, frozenset[str]] = MappingProxyType(
         "reply_suppressed": _allowed("chars"),
         "final_answer": _allowed("chars"),
         "followup_decided": _allowed("decision", "reasons"),
+        "followup_replayed": _allowed("decision"),
         "chat_event_rejected": _allowed("reason"),
         "run_finished": _allowed(
             "finish_reason",

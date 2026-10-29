@@ -389,17 +389,29 @@ def test_a_certain_refusal_is_not_retried(tmp_path: Path, harness_data: HarnessD
 
 
 def test_the_startup_recovery_marks_in_flight_work(rig: Rig) -> None:
-    ledger = rig.database.for_tenant(rig.auth).ledger
-    rig.database.for_tenant(rig.auth).open_conversation("conv_1")
-    assert ledger.start_operation("op_9", "crear_reclamo", "f", "run-9")
-    assert (
-        rig.database.for_tenant(rig.auth).runs.admit("run-9", "conv_1", "d").admission == "ADMITTED"
+    rig.run("Quiero reclamar", [ASK], "run-1")
+    store = rig.database.for_tenant(rig.auth)
+    assert store.ledger.confirm_pending("op_claim_001", "conv_1", 0)
+    pending = store.ledger.pending_action("op_claim_001")
+    assert pending is not None
+    assert pending.fingerprint is not None
+    assert store.runs.admit("run-9", "conv_1", "d").admission == "ADMITTED"
+    started = store.ledger.start_operation(
+        "op_claim_001",
+        "crear_reclamo",
+        pending.fingerprint,
+        "run-9",
+        conversation_id="conv_1",
+        control_version=0,
     )
+    assert started == "STARTED"
 
-    rig.restart()
+    rig.restart()  # the process died with run-9 running and the write in flight
 
-    operation = ledger.operation("op_9")
+    store = rig.database.for_tenant(rig.auth)
+    operation = store.ledger.operation("op_claim_001")
     assert operation is not None
     assert operation.status is OperationStatus.UNCERTAIN
-    retry = rig.database.for_tenant(rig.auth).runs.admit("run-9", "conv_1", "d")
-    assert retry.admission == "ADMITTED"  # the lease was freed and the crashed run may run again
+    # The same command is not run again: it may already have answered before the crash.
+    assert store.runs.admit("run-9", "conv_1", "d").admission == "INTERRUPTED"
+    assert store.runs.admit("run-10", "conv_1", "d").admission == "ADMITTED"  # the lease was freed

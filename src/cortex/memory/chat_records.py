@@ -143,6 +143,18 @@ class ChatRecords:
                     ),
                 )
 
+    def decision_of(self, run_id: str) -> tuple[str, tuple[str, ...]] | None:
+        """The decision already taken for this run, if the same event was handled before."""
+        with self._db.reading() as db:
+            row = db.execute(
+                "SELECT decision, reasons FROM followup_decisions "
+                "WHERE tenant_id = ? AND run_id = ?",
+                (self.tenant_id, run_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return str(row[0]), tuple(reason for reason in str(row[1]).split(",") if reason)
+
     def open_commitments(self, conversation_id: str) -> tuple[Commitment, ...]:
         with self._db.reading() as db:
             rows = db.execute(
