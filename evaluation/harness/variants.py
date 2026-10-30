@@ -10,13 +10,23 @@ row of the follow-up table. Each variant is a kit scenario with some keys change
 from __future__ import annotations
 
 import copy
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 Scenario = dict[str, Any]
 
 CLAIM = {"motivo": "demora", "descripcion": "No recibi comprobante", "operation_id": "op_claim_001"}
+CHAT_EVENTS = Path(__file__).resolve().parents[2] / "kit" / "fixtures" / "chat_events.json"
+
+
+def _kit_event(event_id: str) -> dict[str, Any]:
+    """A Zoco Chat event of the kit, exactly as the fixture gives it."""
+    events = json.loads(CHAT_EVENTS.read_text(encoding="utf-8"))["events"]
+    found: dict[str, Any] = next(event for event in events if event["id"] == event_id)
+    return found
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,7 +220,8 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
                 "finish_reason": "NEEDS_HUMAN",
                 "finish_detail": "awaiting_confirmation",
                 "unique_claims_created": 0,
-                "customer_messages_sent": 1,
+                "ai_replies_delivered": 1,  # the question answers the user's message
+                "customer_messages_sent": 0,
             },
             preconditions=no_confirmation,
             model_script=write_once,
@@ -351,6 +362,7 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
                 "finish_reason": "BLOCKED",
                 "finish_detail": "conversation_blocked",
                 "step_count": 0,
+                "ai_replies_delivered": 0,
                 "customer_messages_sent": 0,
             },
             preconditions={"initial_state": "BLOCKED"},
@@ -360,8 +372,24 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
         "V20_stale_takeover",
         _derive(
             t11,
-            "a takeover at version 1 is not newer than the stored state",
-            {"finish_reason": "COMPLETED", "customer_messages_sent": 1},
+            "a takeover at version 1 is older than the stored version 2",
+            {"finish_reason": "COMPLETED", "ai_replies_delivered": 1, "customer_messages_sent": 0},
+            preconditions={"current_version": 2},
+            incoming_event={**t11["incoming_event"], "version": 1},
+        ),
+    )
+    add(
+        "V49_takeover_at_the_stored_version",
+        _derive(
+            t11,
+            "a takeover at the stored version while the agent answers: the person wins",
+            {
+                "finish_reason": "NEEDS_HUMAN",
+                "finish_detail": "operator_took_over",
+                "delivered_ai_messages_after_takeover": 0,
+                "ai_replies_delivered": 0,
+                "customer_messages_sent": 0,
+            },
             incoming_event={**t11["incoming_event"], "version": 1},
         ),
     )
@@ -371,10 +399,13 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
             t11,
             "the operator takes over before the write runs",
             {
+                "finish_reason": "NEEDS_HUMAN",
                 "finish_detail": "operator_took_over",
                 "unique_claims_created": 0,
                 "tool_effects_after_takeover": 0,
                 "executed_tools": [],
+                "rejected_tools": [],
+                "external_calls_to_rejected_tool": 0,
             },
             preconditions={"confirmed_actions": [{"tool": "crear_reclamo", "args": CLAIM}]},
             model_script=[{"tool": "crear_reclamo", "args": CLAIM}, {"final": "Listo"}],
@@ -386,7 +417,12 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
         _derive(
             t11,
             "a takeover before the run: the model is never called",
-            {"finish_detail": "human_in_control", "step_count": 0, "customer_messages_sent": 0},
+            {
+                "finish_detail": "human_in_control",
+                "step_count": 0,
+                "customer_messages_sent": 0,
+                "ai_replies_delivered": 0,
+            },
             incoming_event={"type": "operator_took_over", "version": 2},
         ),
     )
@@ -395,7 +431,7 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
         _derive(
             t11,
             "an operator of B cannot take a conversation of A",
-            {"finish_reason": "COMPLETED", "customer_messages_sent": 1},
+            {"finish_reason": "COMPLETED", "ai_replies_delivered": 1, "customer_messages_sent": 0},
             incoming_event={**t11["incoming_event"], "actor": "operador_b"},
         ),
     )
@@ -403,10 +439,10 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
     # The kit's other names for the same facts, given alone.
     aliases = _derive(
         t11,
-        "conversation_mode and control_version: a takeover at version 2 is not newer than 2",
-        {"finish_reason": "COMPLETED", "customer_messages_sent": 1},
+        "conversation_mode and control_version: a takeover at version 2 is older than 3",
+        {"finish_reason": "COMPLETED", "ai_replies_delivered": 1, "customer_messages_sent": 0},
     )
-    aliases["preconditions"] = {"conversation_mode": "AUTO", "control_version": 2}
+    aliases["preconditions"] = {"conversation_mode": "AUTO", "control_version": 3}
     add("V41_other_names_of_the_control_state", aliases)
     add(
         "V42_other_name_of_the_takeover_event",
@@ -417,6 +453,7 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
                 "finish_reason": "NEEDS_HUMAN",
                 "finish_detail": "operator_took_over",
                 "delivered_ai_messages_after_takeover": 0,
+                "ai_replies_delivered": 0,
                 "customer_messages_sent": 0,
             },
             incoming_event={**t11["incoming_event"], "type": "operator_takeover"},
@@ -495,6 +532,38 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
             },
             "CONTACTAR",
         ),
+        (
+            "V44_unknown_opportunity_status",
+            "a status that is neither open nor closed never leads to contact",
+            {
+                "type": "followup_due",
+                "pending_on": "CUSTOMER",
+                "contact_allowed": True,
+                "opportunity_status": "EXPIRED",
+            },
+            "TAREA_INTERNA",
+        ),
+        (
+            "V45_later_date_without_consent",
+            "no consent wins over a later agreed date: nothing is rescheduled",
+            {
+                "type": "followup_due",
+                "pending_on": "CUSTOMER",
+                "agreed_contact_date": "2026-11-06",
+                "contact_allowed": False,
+            },
+            "TAREA_INTERNA",
+        ),
+        (
+            "V46_later_date_with_unknown_consent",
+            "unknown consent wins over a later agreed date",
+            {
+                "type": "followup_due",
+                "pending_on": "CUSTOMER",
+                "agreed_contact_date": "2026-11-06",
+            },
+            "TAREA_INTERNA",
+        ),
     ]
     for name, description, event, decision in followups:
         add(
@@ -502,7 +571,33 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
             _derive(
                 t12,
                 description,
-                {"decision": decision, "customer_messages_sent": 0, "step_count": 0},
+                {
+                    "decision": decision,
+                    "customer_messages_sent": 0,
+                    "ai_replies_delivered": 0,
+                    "step_count": 0,
+                },
+                incoming_event=event,
+            ),
+        )
+    for name, event_id, decision in (
+        ("V47_kit_event_e02_pasted_verbatim", "E02", "TAREA_INTERNA"),
+        ("V48_kit_event_e03_pasted_verbatim", "E03", "REPROGRAMAR"),
+    ):
+        event = _kit_event(event_id)
+        add(
+            name,
+            _derive(
+                t12,
+                f"{event_id} as the kit gives it: it acts on the conversation it names",
+                {
+                    "finish_reason": "COMPLETED",
+                    "decision": decision,
+                    "conversation_id": event["conversation_id"],
+                    "ai_replies_delivered": 0,
+                    "customer_messages_sent": 0,
+                    "step_count": 0,
+                },
                 incoming_event=event,
             ),
         )
@@ -511,7 +606,12 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
         _derive(
             t12,
             "a follow-up that names another company is refused",
-            {"finish_reason": "BLOCKED", "decision": None, "customer_messages_sent": 0},
+            {
+                "finish_reason": "BLOCKED",
+                "decision": None,
+                "customer_messages_sent": 0,
+                "ai_replies_delivered": 0,
+            },
             incoming_event={
                 "type": "followup_due",
                 "pending_on": "ZOCO",

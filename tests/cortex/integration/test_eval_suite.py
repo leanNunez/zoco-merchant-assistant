@@ -108,9 +108,41 @@ def test_a_real_run_passes_every_check_against_its_files(tmp_path: Path) -> None
 
 def test_an_adapter_that_reports_a_message_that_was_not_sent_is_caught(tmp_path: Path) -> None:
     scenario, output, world = _real_run(tmp_path, "T01")
-    output["customer_messages_sent"] = 0
+    output["ai_replies_delivered"] = 0
+    output["customer_messages_sent"] = 1
 
-    assert "files.customer_messages_sent" in _failed(scenario, output, world)
+    failed = _failed(scenario, output, world)
+
+    assert {"files.ai_replies_delivered", "files.customer_messages_sent"} <= failed
+
+
+def _send_from_the_follow_up(world: Path, kind: str, reply_to: int | None) -> None:
+    """A row the adapter did not report: run-conv_t12 sent the customer a message."""
+    with sqlite3.connect(world / "cortex.db") as db:
+        db.execute(
+            "INSERT INTO outbox (tenant_id, conversation_id, run_id, content, status, kind, "
+            "reply_to, control_version, created_at) "
+            "VALUES ('comercio_a', 'conv_t12', 'run-conv_t12', 'OK', 'SENT', ?, ?, 0, 'now')",
+            (kind, reply_to),
+        )
+
+
+@pytest.mark.parametrize(
+    ("kind", "reply_to"),
+    # A "reply" to a message that is not an inbound message of the same run is not a reply.
+    [("proactive", None), ("reply", 999)],
+    ids=["proactive", "reply_to_nothing_of_the_run"],
+)
+def test_a_follow_up_message_the_output_hides_is_caught(
+    tmp_path: Path, kind: str, reply_to: int | None
+) -> None:
+    scenario, output, world = _real_run(tmp_path, "T12")
+    assert _failed(scenario, output, world) == set()
+    _send_from_the_follow_up(world, kind, reply_to)
+
+    failed = _failed(scenario, output, world)
+
+    assert "files.customer_messages_sent" in failed
 
 
 def test_an_extra_claim_in_the_files_is_caught_even_if_the_output_says_one(tmp_path: Path) -> None:

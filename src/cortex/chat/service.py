@@ -1,9 +1,8 @@
 """Applies Zoco Chat events to a conversation (brief section 6).
 
 A takeover is a fact Zoco Chat reports: the person already has the conversation. It is applied
-when its version is newer than the stored one, with no attention-hours guard (the first
-delivery's state machine required open hours, which would make the outcome depend on the time of
-day). A follow-up is decided by code from the event and the stored control state.
+unless it is provably old or repeated (see `ChatRecords.apply_takeover`), with no attention-hours
+guard. A follow-up is decided by code from the event and the stored control state.
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ from datetime import tzinfo
 from cortex.chat.events import FollowupFacts, Takeover
 from cortex.chat.followup import Decision, FollowupDecision, decide
 from cortex.identity import AuthContext, PrincipalDirectory
-from cortex.memory.chat_records import Commitment
+from cortex.memory.chat_records import Commitment, TakeoverOutcome
 from cortex.memory.database import Database
 from cortex.observability.redaction import TraceRedactor
 from cortex.observability.tracer import Tracer
@@ -28,9 +27,19 @@ class RunIdConflict(Exception):  # noqa: N818 - named after the situation
 
 @dataclass(frozen=True, slots=True)
 class TakeoverResult:
-    applied: bool  # False: the event was not newer than the stored state, so it changed nothing
+    outcome: TakeoverOutcome
     version: int
     responsible: str
+
+    @property
+    def applied(self) -> bool:
+        """False: the event was stale or repeated, so it changed nothing."""
+        return self.outcome.applied
+
+    @property
+    def conflict(self) -> bool:
+        """The same version while the agent had the chat: applied anyway, at a new version."""
+        return self.outcome is TakeoverOutcome.CONFLICT
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,8 +57,8 @@ class ChatEvents:
         responsible = event.actor or auth.principal_id
         store = self.database.for_tenant(auth)
         store.open_conversation(conversation_id)
-        applied = store.chat.apply_takeover(conversation_id, event.version, responsible)
-        return TakeoverResult(applied, event.version, responsible)
+        outcome = store.chat.apply_takeover(conversation_id, event.version, responsible)
+        return TakeoverResult(outcome, event.version, responsible)
 
     def tracer(self, auth: AuthContext, conversation_id: str, run_id: str) -> Tracer:
         """A tracer for an event handled outside a run, written through to the company's traces."""

@@ -33,7 +33,9 @@ def test_the_model_sees_its_own_company_data_as_untrusted_tool_results(
         data=harness_data,
         database=database,
         model=model,
-        bind_tools=zoco_tool_binder(harness_data, ClaimsDesk(tmp_path / "claims", clock)),
+        bind_tools=zoco_tool_binder(
+            harness_data, ClaimsDesk(tmp_path / "claims", clock), clock=clock
+        ),
         clock=clock,
         ticker=ManualTicker(),
     )
@@ -101,7 +103,9 @@ def test_the_history_sent_to_the_model_is_bounded_but_critical_state_is_not_summ
         data=harness_data,
         database=database,
         model=model,
-        bind_tools=zoco_tool_binder(harness_data, ClaimsDesk(tmp_path / "claims", clock)),
+        bind_tools=zoco_tool_binder(
+            harness_data, ClaimsDesk(tmp_path / "claims", clock), clock=clock
+        ),
         clock=clock,
         ticker=ManualTicker(),
     )

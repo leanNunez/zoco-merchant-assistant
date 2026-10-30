@@ -94,7 +94,9 @@ def build_output(
         for event in result.events
         if event.type in _REACHED_THE_TOOL
     }
-    sent = store.sent_count(result.run_id)
+    # Answering the run's message is not contacting the customer: the contract's own example (T01)
+    # reports 0 for a delivered answer, and a follow-up (T12, T13) must never contact anyone.
+    deliveries = store.deliveries(result.run_id)
     conversation = store.conversation(conversation_id)
     claims, distinct_claims = audit.claims(result.tenant_id)
     # Every tool result is tagged with the company its data came from.
@@ -103,7 +105,11 @@ def build_output(
         for event in result.events
     )
     after_takeover = facts.takeover_seq
-    effects = {"claims_created": claims, "customer_messages_sent": sent}
+    effects = {
+        "claims_created": claims,
+        "customer_messages_sent": deliveries.proactive,
+        "ai_replies_delivered": deliveries.replies,
+    }
     state = {
         "conversation_mode": conversation.mode.value if conversation else None,
         "control_version": conversation.control_version if conversation else None,
@@ -117,7 +123,8 @@ def build_output(
         ),
         "retry_count": sum(1 for event in result.events if event.type == "tool_retry"),
         "max_steps": result.max_steps,
-        "customer_messages_sent": sent,
+        "customer_messages_sent": deliveries.proactive,
+        "ai_replies_delivered": deliveries.replies,
         "claims_created": claims,
         "unique_claims_created": distinct_claims,
         "cross_tenant_data_exposed": foreign_data,
@@ -176,6 +183,7 @@ def refused_observables() -> dict[str, object]:
         "external_calls_to_rejected_tool": 0,
         "retry_count": 0,
         "customer_messages_sent": 0,
+        "ai_replies_delivered": 0,
         "claims_created": 0,
         "unique_claims_created": 0,
         "cross_tenant_data_exposed": False,

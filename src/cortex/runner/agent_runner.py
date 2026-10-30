@@ -8,7 +8,7 @@ The loop checks the control of the conversation at three points, because an oper
 over at any moment:
 
 - A, before every model call (a control change wins over the deadline, which wins over steps);
-- B, before executing a tool;
+- B, before verifying and executing a tool;
 - C, at delivery, where the check and the send happen in one transaction.
 """
 
@@ -193,6 +193,8 @@ class _Run:
             redactor=runner.redactor,
         )
         self.base_version = 0
+        # The message this run answers: every delivery of the run is a reply to it.
+        self.inbound_message_id: int | None = None
 
     # ------------------------------------------------------------------ the loop
 
@@ -236,7 +238,7 @@ class _Run:
             # not taken, and nobody asks the model.
             self._trace("checkpoint_failed", mode=conversation.mode.value)
             return self._finish(FinishDetail.STALE_VERSION)
-        self.store.append_message(
+        self.inbound_message_id = self.store.append_message(
             conversation_id, self.request.run_id, "user", self.request.message
         )
         if conversation.mode is not State.AUTO:
@@ -326,6 +328,10 @@ class _Run:
 
     def _use_tool(self, call: ToolCall) -> FinishDetail | None:
         self._trace("tool_requested", tool=display_name(call.name))
+        # Checkpoint B comes before the policy: after a takeover the mode no longer offers the
+        # tool, and the run must end as a change of control, not as a rejected tool.
+        if self._control_changed():
+            return FinishDetail.OPERATOR_TOOK_OVER
         verdict = review(
             call,
             self.catalog,
@@ -337,8 +343,6 @@ class _Run:
         )
         if isinstance(verdict, Rejected):
             return self._reject(verdict)
-        if self._control_changed():
-            return FinishDetail.OPERATOR_TOOK_OVER
         if verdict.spec.kind is ToolKind.WRITE:
             return self._write(verdict)
         result = execute(
@@ -520,7 +524,11 @@ class _Run:
 
     def _deliver_text(self, text: str) -> bool:
         delivered = self.store.deliver_if_current(
-            self.request.conversation_id, self.request.run_id, text, self.base_version
+            self.request.conversation_id,
+            self.request.run_id,
+            text,
+            self.base_version,
+            reply_to=self.inbound_message_id,
         )
         self._trace("final_answer" if delivered else "reply_suppressed", chars=len(text))
         return delivered

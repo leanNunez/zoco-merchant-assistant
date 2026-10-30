@@ -4,9 +4,11 @@
   control version.
 - `followup_due`: a follow-up of an opportunity is due and needs a decision.
 
-The company and the conversation an event names must be the trusted ones of the call: an event
-for another company is refused, never applied. Keys that start with `expected` (the kit's
-fixtures carry them) are dropped unread; any other unknown key is refused.
+The company an event names must be the trusted one of the call: an event for another company is
+refused, never applied. A conversation it names is the one it is about: when the company is the
+same, the caller acts on that conversation (`named_conversation`), and reading the event with any
+other conversation is refused. Keys that start with `expected` (the kit's fixtures carry them)
+are dropped unread; any other unknown key is refused.
 """
 
 from __future__ import annotations
@@ -81,6 +83,17 @@ def event_type(raw: Mapping[str, object]) -> str:
     if kind not in (TAKEOVER, FOLLOWUP):
         raise InvalidEvent(f"unsupported event type {kind!r}")
     return str(kind)
+
+
+def named_conversation(raw: Mapping[str, object], *, tenant_id: str) -> str | None:
+    """The conversation the event names, if it names one and the company is the trusted one.
+
+    An event of another company names nothing the caller may act on: it stays out of scope.
+    """
+    conversation = raw.get("conversation_id")
+    if raw.get("tenant_id", tenant_id) != tenant_id or not isinstance(conversation, str):
+        return None
+    return conversation
 
 
 def read_takeover(raw: Mapping[str, object], *, tenant_id: str, conversation_id: str) -> Takeover:

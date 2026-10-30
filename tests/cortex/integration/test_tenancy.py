@@ -163,7 +163,7 @@ def test_a_contact_lookup_that_ignores_the_company_is_detected(
 
 def test_tools_bound_to_the_wrong_company_are_detected(monkeypatch: pytest.MonkeyPatch) -> None:
     def wrong_binder(
-        data: HarnessData, claims: ClaimsDesk
+        data: HarnessData, claims: ClaimsDesk, *, clock: object
     ) -> Callable[[AuthContext], Mapping[str, ToolAdapter]]:
         def bind(auth: AuthContext) -> Mapping[str, ToolAdapter]:
             other = data.directory.authenticate("comercio_b", "operador_b")

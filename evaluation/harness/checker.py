@@ -82,13 +82,37 @@ class RealState:
             return 0
         return sum(self.claims(path.stem)[0] for path in folder.glob("*.db") if path.stem != tenant)
 
-    def sent(self, tenant: str, run_id: str) -> int:
-        rows = self._query(
-            "SELECT COUNT(*) FROM outbox WHERE tenant_id = ? AND run_id = ? AND status = 'SENT'",
+    def sent(self, tenant: str, run_id: str) -> tuple[int, int]:
+        """(replies, contacts) the run sent. A reply must answer an inbound message of the same
+        conversation and run, in a run that handled no follow-up; anything else sent, however
+        it is labelled, is the system contacting the customer."""
+        sent = self._query(
+            "SELECT conversation_id, kind, reply_to FROM outbox "
+            "WHERE tenant_id = ? AND run_id = ? AND status = 'SENT'",
             tenant,
             run_id,
         )
-        return int(rows[0][0])
+        inbound = set(
+            self._query(
+                "SELECT conversation_id, message_id FROM messages "
+                "WHERE tenant_id = ? AND run_id = ? AND role = 'user'",
+                tenant,
+                run_id,
+            )
+        )
+        event_run = bool(
+            self._query(
+                "SELECT 1 FROM followup_decisions WHERE tenant_id = ? AND run_id = ?",
+                tenant,
+                run_id,
+            )
+        )
+        replies = sum(
+            1
+            for conversation, kind, reply_to in sent
+            if kind == "reply" and (conversation, reply_to) in inbound and not event_run
+        )
+        return replies, len(sent) - replies
 
     def rows_outside(self, tenant: str, run_id: str) -> int:
         total = 0
@@ -169,10 +193,12 @@ EXPECTED_RULES: Mapping[str, Callable[[object, Mapping[str, object]], Check]] = 
         "tool_effects_after_takeover",
         "decision",
         "customer_messages_sent",
+        "ai_replies_delivered",
         "finish_detail",
         "claims_created",
         "step_count",
         "run_id",
+        "conversation_id",
     )
 }
 
@@ -307,11 +333,17 @@ def _against_files(output: Mapping[str, object], real: RealState) -> list[Check]
         str(output[k]) for k in ("tenant_id", "conversation_id", "run_id")
     )
     claims, distinct = real.claims(tenant)
+    replies, contacts = real.sent(tenant, run_id)
+    effects = output.get("effects")
+    effects = effects if isinstance(effects, dict) else {}
     checks = [
-        _equal(
-            "files.customer_messages_sent",
-            real.sent(tenant, run_id),
-            output.get("customer_messages_sent"),
+        *(
+            _equal(f"files.{where}{key}", wanted, source.get(key))
+            for key, wanted in (
+                ("customer_messages_sent", contacts),
+                ("ai_replies_delivered", replies),
+            )
+            for where, source in (("", output), ("effects.", effects))
         ),
         _equal("files.claims_created", claims, output.get("claims_created")),
         _equal("files.unique_claims_created", distinct, output.get("unique_claims_created")),

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from types import MappingProxyType
 from zoneinfo import ZoneInfo
@@ -34,7 +35,7 @@ from merchant_assistant.agent.domain.tools import (
     CONSULTAR_VENTAS,
     CREAR_RECLAMO,
 )
-from merchant_assistant.shared.clock import Clock
+from merchant_assistant.shared.clock import Clock, business_today
 
 BUSINESS_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
 
@@ -98,12 +99,16 @@ def load_harness_data(kit_dir: Path, corpora: Mapping[str, Path] | None = None) 
     )
 
 
-def zoco_tool_binder(data: HarnessData, claims: ClaimsDesk) -> ToolBinder:
-    """The adapters of one company: its sales and its claims file, nothing else."""
+def zoco_tool_binder(data: HarnessData, claims: ClaimsDesk, *, clock: Clock) -> ToolBinder:
+    """The adapters of one company: its documents, its sales and its claims file, nothing else.
+    `clock` gives the business date a document's validity is judged on."""
+
+    def today() -> date:
+        return business_today(clock, BUSINESS_TIMEZONE)
 
     def bind(auth: AuthContext) -> Mapping[str, ToolAdapter]:
         return {
-            BUSCAR_DOCUMENTACION: data.docs.for_tenant(auth),
+            BUSCAR_DOCUMENTACION: data.docs.for_tenant(auth, today=today),
             CONSULTAR_VENTAS: data.sales.for_tenant(auth),
             CREAR_RECLAMO: claims.for_tenant(auth),
         }

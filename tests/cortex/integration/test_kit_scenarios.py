@@ -36,7 +36,10 @@ def test_t01_a_plain_answer_completes_in_one_step() -> None:
     output = _run("T01")
 
     assert (output["finish_reason"], output["step_count"]) == ("COMPLETED", 1)
-    assert output["effects"]["customer_messages_sent"] == 1
+    # The contract's own example is T01: answering the user is not contacting the customer.
+    assert output["effects"]["customer_messages_sent"] == 0
+    assert output["effects"]["ai_replies_delivered"] == 1
+    assert (output["customer_messages_sent"], output["ai_replies_delivered"]) == (0, 1)
 
 
 def test_t02_an_allowed_tool_runs_once_and_the_answer_is_delivered() -> None:
@@ -88,7 +91,9 @@ def test_the_contract_fields_are_always_present() -> None:
 
     for field in ("run_id", "tenant_id", "conversation_id", "finish_reason", "step_count"):
         assert field in output
-    assert {"claims_created", "customer_messages_sent"} <= set(output["effects"])
+    assert {"claims_created", "customer_messages_sent", "ai_replies_delivered"} <= set(
+        output["effects"]
+    )
     assert "conversation_mode" in output["state"]
     assert all({"type", "timestamp"} <= set(event) for event in output["events"])
 

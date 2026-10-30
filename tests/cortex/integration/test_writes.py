@@ -116,7 +116,9 @@ def test_without_a_confirmation_nothing_is_written_and_the_user_is_asked(tmp_pat
         "awaiting_confirmation",
     )
     assert output["claims_created"] == 0
-    assert output["effects"]["customer_messages_sent"] == 1
+    # The question answers the user's message: a reply, not a contact.
+    assert output["effects"]["ai_replies_delivered"] == 1
+    assert output["effects"]["customer_messages_sent"] == 0
 
 
 # --------------------------------------------------------------------------- confirmation

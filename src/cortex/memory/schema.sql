@@ -29,7 +29,9 @@ CREATE INDEX IF NOT EXISTS messages_by_conversation
     ON messages (tenant_id, conversation_id, message_id);
 
 -- What the harness tried to send to the customer. SUPPRESSED means a reply was generated but
--- the control of the conversation changed before it could be delivered.
+-- the control of the conversation changed before it could be delivered. A `reply` answers the
+-- inbound message `reply_to` of the same run; a `proactive` message is sent on the system's own
+-- initiative (a follow-up contact, an event), with nothing to answer.
 CREATE TABLE IF NOT EXISTS outbox (
     outbox_id       INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant_id       TEXT    NOT NULL,
@@ -37,8 +39,11 @@ CREATE TABLE IF NOT EXISTS outbox (
     run_id          TEXT    NOT NULL,
     content         TEXT    NOT NULL,
     status          TEXT    NOT NULL CHECK (status IN ('SENT', 'SUPPRESSED')),
+    kind            TEXT    NOT NULL CHECK (kind IN ('reply', 'proactive')),
+    reply_to        INTEGER REFERENCES messages (message_id),
     control_version INTEGER NOT NULL,
     created_at      TEXT    NOT NULL,
+    CHECK ((kind = 'reply') = (reply_to IS NOT NULL)),
     FOREIGN KEY (tenant_id, conversation_id) REFERENCES conversations (tenant_id, conversation_id)
 );
 

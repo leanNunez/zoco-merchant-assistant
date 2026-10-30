@@ -24,7 +24,7 @@ GOOD: dict[str, Any] = {
     "finish_detail": "answered",
     "step_count": 1,
     "events": [{"seq": 1, "type": "final_answer", "timestamp": STAMP}],
-    "effects": {"claims_created": 0, "customer_messages_sent": 1},
+    "effects": {"claims_created": 0, "customer_messages_sent": 0, "ai_replies_delivered": 1},
     "state": {"conversation_mode": "AUTO"},
     "executed_tools": [],
     "rejected_tools": [],
@@ -33,7 +33,8 @@ GOOD: dict[str, Any] = {
     "cross_tenant_effects": 0,
     "delivered_ai_messages_after_takeover": None,
     "tool_effects_after_takeover": None,
-    "customer_messages_sent": 1,
+    "customer_messages_sent": 0,
+    "ai_replies_delivered": 1,
 }
 
 

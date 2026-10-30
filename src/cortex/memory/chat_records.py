@@ -3,12 +3,24 @@
 The control of the conversation changes here when an operator takes over: one write
 transaction checks the version, hands the conversation to the person, and suspends every pending
 write, so none of them can run while somebody else is in control.
+
+A takeover fails closed. Ignoring one by mistake lets the agent talk over a person, while
+applying one by mistake only hands a chat to a person, so only a report that is provably old or
+repeated is ignored:
+
+| reported version         | stored mode    | outcome                                          |
+|--------------------------|----------------|--------------------------------------------------|
+| lower than the stored    | any            | STALE: ignored                                   |
+| equal to the stored      | not AUTO       | DUPLICATE: ignored, a person already has it      |
+| equal to the stored      | AUTO           | CONFLICT: applied at the stored version plus one |
+| higher than the stored   | any            | APPLIED at the reported version                  |
 """
 
 from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 from cortex.identity import AuthContext
@@ -18,6 +30,17 @@ if TYPE_CHECKING:
     from cortex.memory.database import Database
 
 JournalKind = Literal["takeover", "delivery", "effect"]
+
+
+class TakeoverOutcome(StrEnum):
+    APPLIED = "applied"
+    CONFLICT = "conflict"  # the same version while the agent had it: applied, at a new version
+    STALE = "stale"
+    DUPLICATE = "duplicate"
+
+    @property
+    def applied(self) -> bool:
+        return self in (TakeoverOutcome.APPLIED, TakeoverOutcome.CONFLICT)
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,8 +76,10 @@ class ChatRecords:
                 (mode, version, self.tenant_id, conversation_id),
             )
 
-    def apply_takeover(self, conversation_id: str, version: int, responsible: str) -> bool:
-        """Hand the conversation to a person. False when the event is not newer than the state.
+    def apply_takeover(
+        self, conversation_id: str, version: int, responsible: str
+    ) -> TakeoverOutcome:
+        """Hand the conversation to a person, unless the report is provably old or repeated.
 
         A blocked conversation stays blocked (only a supervisor unblocks it), but it still
         records the newer version and who is now responsible.
@@ -65,13 +90,20 @@ class ChatRecords:
                 "WHERE tenant_id = ? AND conversation_id = ?",
                 (self.tenant_id, conversation_id),
             ).fetchone()
-            if row is None or version <= row[1]:
-                return False
-            mode = State.BLOCKED if row[0] == State.BLOCKED else State.HUMAN
+            if row is None:
+                raise LookupError("a takeover for a conversation that was never opened")
+            stored_mode, stored_version = State(row[0]), int(row[1])
+            outcome = _takeover_outcome(version, stored_mode, stored_version)
+            if not outcome.applied:
+                return outcome
+            # A conflict moves the version past the stored one: every checkpoint and the
+            # delivery's compare-and-set compare against it, so they all notice the change.
+            new_version = stored_version + 1 if outcome is TakeoverOutcome.CONFLICT else version
+            mode = State.BLOCKED if stored_mode is State.BLOCKED else State.HUMAN
             tx.execute(
                 "UPDATE conversations SET mode = ?, control_version = ?, responsible = ? "
                 "WHERE tenant_id = ? AND conversation_id = ?",
-                (mode, version, responsible, self.tenant_id, conversation_id),
+                (mode, new_version, responsible, self.tenant_id, conversation_id),
             )
             tx.execute(
                 "UPDATE pending_actions SET status = 'SUSPENDED', updated_at = ? "
@@ -79,8 +111,9 @@ class ChatRecords:
                 "AND status IN ('PENDING', 'CONFIRMED')",
                 (self._db.now(), self.tenant_id, conversation_id),
             )
-            self._journal(tx, conversation_id, "takeover", f"v{version}")
-        return True
+            marker = ":conflict" if outcome is TakeoverOutcome.CONFLICT else ""
+            self._journal(tx, conversation_id, "takeover", f"v{new_version}{marker}")
+        return outcome
 
     # ------------------------------------------------------------------ journal
 
@@ -191,3 +224,11 @@ class ChatRecords:
                 (self.tenant_id, conversation_id),
             ).fetchall()
         return tuple(Commitment(kind, responsible, due) for kind, responsible, due in rows)
+
+
+def _takeover_outcome(version: int, stored_mode: State, stored_version: int) -> TakeoverOutcome:
+    if version < stored_version:
+        return TakeoverOutcome.STALE
+    if version > stored_version:
+        return TakeoverOutcome.APPLIED
+    return TakeoverOutcome.CONFLICT if stored_mode is State.AUTO else TakeoverOutcome.DUPLICATE

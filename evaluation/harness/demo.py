@@ -24,6 +24,7 @@ HIGHLIGHTS = (
     "executed_tools",
     "rejected_tools",
     "claims_created",
+    "ai_replies_delivered",
     "customer_messages_sent",
     "tool_effects_after_takeover",
     "decision",

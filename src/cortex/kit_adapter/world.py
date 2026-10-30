@@ -117,7 +117,7 @@ class World:
             database=self.database,
             model=model,
             bind_tools=self.counter.wrap(
-                self.faults.wrap(zoco_tool_binder(self.data, self.claims))
+                self.faults.wrap(zoco_tool_binder(self.data, self.claims, clock=self.clock))
             ),
             clock=self.clock,
             ticker=self.ticker,

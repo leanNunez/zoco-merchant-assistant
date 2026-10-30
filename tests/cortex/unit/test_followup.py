@@ -78,7 +78,51 @@ def test_cancelling_wins_over_what_zoco_owes() -> None:
 
 
 def test_unknown_consent_never_allows_contact() -> None:
-    assert _decide({"pending_on": "CUSTOMER"}) == (Decision.TAREA_INTERNA, ("CONTACT_NOT_ALLOWED",))
+    assert _decide({"pending_on": "CUSTOMER"}) == (Decision.TAREA_INTERNA, ("CONSENT_UNKNOWN",))
+
+
+@pytest.mark.parametrize("status", ["EXPIRED", "SIGNED_UP", "PAUSED"])
+def test_an_unknown_opportunity_status_never_allows_contact(status: str) -> None:
+    facts = {"opportunity_status": status, "contact_allowed": True, "pending_on": "CUSTOMER"}
+
+    assert _decide(facts) == (Decision.TAREA_INTERNA, ("UNKNOWN_OPPORTUNITY_STATUS",))
+
+
+@pytest.mark.parametrize(
+    ("consent", "reason"), [(False, "CONTACT_NOT_ALLOWED"), (None, "CONSENT_UNKNOWN")]
+)
+def test_a_later_agreed_date_without_consent_is_an_internal_task(
+    consent: bool | None, reason: str
+) -> None:
+    facts = {"agreed_contact_date": date(2026, 11, 6), "contact_allowed": consent}
+
+    assert _decide(facts) == (Decision.TAREA_INTERNA, (reason,))
+
+
+def test_what_zoco_owes_wins_over_an_unknown_status() -> None:
+    facts = {"pending_on": "ZOCO", "opportunity_status": "EXPIRED", "contact_allowed": True}
+
+    assert _decide(facts) == (Decision.TAREA_INTERNA, ("ZOCO_OWES_ACTION",))
+
+
+def test_an_unknown_status_wins_over_missing_consent() -> None:
+    assert _decide({"opportunity_status": "EXPIRED"}) == (
+        Decision.TAREA_INTERNA,
+        ("UNKNOWN_OPPORTUNITY_STATUS",),
+    )
+
+
+@pytest.mark.parametrize("status", ["COMPLETED", "WON", "CLOSED", "LOST", "CANCELLED"])
+def test_a_closed_status_cancels_even_when_zoco_owes_something(status: str) -> None:
+    facts = {"opportunity_status": status, "pending_on": "ZOCO", "contact_allowed": True}
+
+    assert _decide(facts) == (Decision.CANCELAR, ("OPPORTUNITY_CLOSED",))
+
+
+def test_a_later_date_with_consent_is_rescheduled_even_with_a_person_in_control() -> None:
+    facts = {"agreed_contact_date": date(2026, 11, 6), "contact_allowed": True}
+
+    assert _decide(facts, human=True) == (Decision.REPROGRAMAR, ("CUSTOMER_REQUESTED_LATER",))
 
 
 def test_a_person_in_control_turns_a_contact_into_an_internal_task() -> None:

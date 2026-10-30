@@ -26,6 +26,7 @@ from cortex.kit_adapter.orchestrator import run_scenario_file
 from cortex.kit_adapter.scenario import UnsupportedScenario
 from cortex.memory.database import Database
 from cortex.memory.ledger import OperationStatus, PendingStatus
+from cortex.memory.tenant_store import Deliveries
 from cortex.observability.redaction import TraceRedactor
 from cortex.runner import agent_runner
 from cortex.runner.agent_runner import RunRequest, RunResult
@@ -129,7 +130,7 @@ class _Rig:
         )
 
     def takeover(self, version: int, conversation: str = "conv_1") -> None:
-        assert self.store.chat.apply_takeover(conversation, version, "operador_a")
+        assert self.store.chat.apply_takeover(conversation, version, "operador_a").applied
 
     def hand_back(self, version: int, conversation: str = "conv_1") -> None:
         self.store.chat.set_control(conversation, State.AUTO, version)
@@ -333,7 +334,7 @@ def test_w3_a_run_interrupted_by_a_crash_is_not_run_again_under_the_same_id(
 
     assert result.finish_detail is FinishDetail.RUN_INTERRUPTED
     assert len(rig.store.recent_messages("conv_1", 50)) == before
-    assert rig.store.sent_count("run-9") == 0
+    assert rig.store.deliveries("run-9") == Deliveries(0, 0)
 
 
 # --------------------------------------------------------------------------- W4

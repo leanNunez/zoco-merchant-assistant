@@ -4,6 +4,7 @@ from cortex.chat.events import (
     EventOutOfScope,
     InvalidEvent,
     event_type,
+    named_conversation,
     read_followup,
     read_takeover,
 )
@@ -69,3 +70,22 @@ def test_only_the_two_known_events_are_accepted() -> None:
 
 def test_the_kits_other_name_for_a_takeover_is_the_same_event() -> None:
     assert event_type({"type": "operator_takeover"}) == event_type({"type": "operator_took_over"})
+
+
+@pytest.mark.parametrize(
+    ("raw", "named"),
+    [
+        ({"type": "followup_due", "conversation_id": "conv_9"}, "conv_9"),
+        (
+            {"type": "followup_due", "tenant_id": "comercio_a", "conversation_id": "conv_9"},
+            "conv_9",
+        ),
+        ({"type": "followup_due", "tenant_id": "comercio_b", "conversation_id": "conv_9"}, None),
+        ({"type": "followup_due", "tenant_id": "comercio_a"}, None),
+        ({"type": "followup_due", "conversation_id": 9}, None),
+    ],
+)
+def test_an_event_names_a_conversation_only_inside_the_trusted_company(
+    raw: dict[str, object], named: str | None
+) -> None:
+    assert named_conversation(raw, tenant_id="comercio_a") == named

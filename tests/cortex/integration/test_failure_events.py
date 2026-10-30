@@ -135,7 +135,9 @@ def _runner(tmp_path: Path, harness_data: HarnessData, script: list[dict[str, An
         data=harness_data,
         database=database,
         model=ScriptedModel(script),
-        bind_tools=zoco_tool_binder(harness_data, ClaimsDesk(tmp_path / "claims", clock)),
+        bind_tools=zoco_tool_binder(
+            harness_data, ClaimsDesk(tmp_path / "claims", clock), clock=clock
+        ),
         clock=clock,
         ticker=ManualTicker(),
     )

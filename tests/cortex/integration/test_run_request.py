@@ -11,6 +11,7 @@ import pytest
 from cortex.bootstrap import HarnessData, build_runner, zoco_tool_binder
 from cortex.kit_adapter.observables import CallCounter
 from cortex.memory.database import Database
+from cortex.memory.tenant_store import Deliveries
 from cortex.runner.agent_runner import RunRequest, RunResult
 from cortex.runner.finish import FinishDetail, FinishReason
 from cortex.runner.scripted_model import ScriptedModel
@@ -38,7 +39,9 @@ class _Rig:
             database=self.database,
             model=self.model,
             bind_tools=self.counter.wrap(
-                zoco_tool_binder(self.harness_data, ClaimsDesk(self.database.path.parent, clock))
+                zoco_tool_binder(
+                    self.harness_data, ClaimsDesk(self.database.path.parent, clock), clock=clock
+                )
             ),
             clock=clock,
             ticker=ManualTicker(),
@@ -120,7 +123,7 @@ def test_a_run_that_expects_another_control_version_is_blocked_before_the_model(
         FinishDetail.STALE_VERSION,
     )
     assert rig.model.prompts == []  # nobody asked the model
-    assert store.sent_count("run-1") == 0
+    assert store.deliveries("run-1") == Deliveries(0, 0)
     assert _types(result)[-2:] == ["tool_rejected", "run_finished"]
     assert result.events[-2].attributes["reason"] == "stale_version"
 

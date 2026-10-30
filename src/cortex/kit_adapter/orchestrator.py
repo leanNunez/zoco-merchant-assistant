@@ -24,6 +24,7 @@ from cortex.chat.events import (
     EventOutOfScope,
     InvalidEvent,
     event_type,
+    named_conversation,
     read_followup,
     read_takeover,
 )
@@ -33,7 +34,13 @@ from cortex.config import RunLimits
 from cortex.identity import AuthContext, AuthenticationFailed
 from cortex.kit_adapter.observables import ScenarioFacts, build_output, refused_observables
 from cortex.kit_adapter.preconditions import Setup, read_faults, read_preconditions
-from cortex.kit_adapter.scenario import Scenario, UnsupportedScenario, load_scenario, run_id_for
+from cortex.kit_adapter.scenario import (
+    Scenario,
+    UnsupportedScenario,
+    load_scenario,
+    run_id_for,
+)
+from cortex.kit_adapter.scenario import conversation_id as checked_conversation_id
 from cortex.kit_adapter.world import TakeoverDuringRun, World
 from cortex.runner.agent_runner import RunResult
 from cortex.runner.finish import REASON_OF, FinishDetail, FinishReason, missing_failure_event
@@ -66,21 +73,21 @@ def run_scenario_file(
 def run_scenario(
     scenario: Scenario, *, kit_dir: Path, workdir: Path, now: datetime
 ) -> dict[str, object]:
+    conversation_id = _acting_conversation(scenario)
     # The scenario's own run id for the main run; interleaved runs keep their derived ids.
-    run_id = scenario.run_id or run_id_for(scenario.conversation_id)
+    run_id = scenario.run_id or run_id_for(conversation_id)
     data = load_harness_data(kit_dir)
     setup = read_preconditions(scenario.preconditions, data.config.limits)
     world = World(
         data, workdir, now, read_faults(scenario.faults, data.catalog.names), setup.limits
     )
-    conversation_id = scenario.conversation_id
     try:
         auth = data.directory.authenticate(scenario.tenant_id, scenario.principal_id)
         # Every interleaved writer too, before anything runs: one that does not belong to its
         # company refuses the whole scenario, exactly like the main principal.
         writers = tuple(world.auth_for(e.tenant_id, e.principal_id) for e in setup.interleaved)
     except AuthenticationFailed:
-        return _unauthenticated(scenario, run_id, setup.limits, now)
+        return _unauthenticated(scenario, conversation_id, run_id, setup.limits, now)
 
     separated = world.interleave(setup, writers) if setup.interleaved else None
     world.seed(auth, conversation_id, setup)
@@ -109,6 +116,15 @@ def run_scenario(
         chat_events=tuple(chat_log),
     )
     return build_output(result, store=store, counter=world.counter, audit=world.audit, facts=facts)
+
+
+def _acting_conversation(scenario: Scenario) -> str:
+    """The conversation the scenario acts on: the one its event names, when the event is of the
+    scenario's company (Zoco Chat says which conversation the event is about). An event of
+    another company names nothing to act on, and is refused later as out of scope."""
+    event = scenario.incoming_event
+    named = None if event is None else named_conversation(event, tenant_id=scenario.tenant_id)
+    return scenario.conversation_id if named is None else checked_conversation_id(named)
 
 
 # --------------------------------------------------------------------------- restart
@@ -167,13 +183,14 @@ def _takeover(
         except AuthenticationFailed:
             log.append({"type": "chat_event_rejected", "reason": "auth_invalid"})
             return
-        log.append(
-            {
-                "type": "chat_event_applied" if outcome.applied else "chat_event_ignored",
-                "version": outcome.version,
-                "responsible": outcome.responsible,
-            }
-        )
+        entry: dict[str, object] = {
+            "type": "chat_event_applied" if outcome.applied else "chat_event_ignored",
+            "version": outcome.version,
+            "responsible": outcome.responsible,
+        }
+        if outcome.conflict:
+            entry["conflict"] = True
+        log.append(entry)
 
     if when in (None, "before_run"):
         take_over()
@@ -225,7 +242,7 @@ def _follow_up(
 
 
 def _unauthenticated(
-    scenario: Scenario, run_id: str, limits: RunLimits, now: datetime
+    scenario: Scenario, conversation_id: str, run_id: str, limits: RunLimits, now: datetime
 ) -> dict[str, object]:
     """The caller is not who it claims: nothing runs and nothing is stored.
 
@@ -241,13 +258,13 @@ def _unauthenticated(
     return {
         "run_id": run_id,
         "tenant_id": scenario.tenant_id,
-        "conversation_id": scenario.conversation_id,
+        "conversation_id": conversation_id,
         "finish_reason": "BLOCKED",
         "finish_detail": "auth_invalid",
         "step_count": 0,
         "max_steps": limits.max_steps,
         "events": events,
-        "effects": {"claims_created": 0, "customer_messages_sent": 0},
+        "effects": {"claims_created": 0, "customer_messages_sent": 0, "ai_replies_delivered": 0},
         "state": {"conversation_mode": None, "control_version": None},
         **refused_observables(),
     }

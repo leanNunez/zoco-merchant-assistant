@@ -42,6 +42,14 @@ class StoredMessage:
 
 
 @dataclass(frozen=True, slots=True)
+class Deliveries:
+    """What one run delivered to the customer, as the outbox proves it."""
+
+    replies: int  # answers to an inbound message of the same run
+    proactive: int  # anything else: the system wrote to the customer on its own initiative
+
+
+@dataclass(frozen=True, slots=True)
 class Contact:
     contact_id: str
     name: str
@@ -110,13 +118,17 @@ class TenantStore:
 
     def append_message(
         self, conversation_id: str, run_id: str, role: MessageRole, content: str
-    ) -> None:
+    ) -> int:
+        """Store a message and return its id (a reply names the message it answers by it)."""
         with self._db.transaction() as tx:
-            tx.execute(
+            cursor = tx.execute(
                 "INSERT INTO messages (tenant_id, conversation_id, run_id, role, content, "
                 "created_at) VALUES (?, ?, ?, ?, ?, ?)",
                 (self.tenant_id, conversation_id, run_id, role, content, self._db.now()),
             )
+        if cursor.lastrowid is None:
+            raise RuntimeError("a stored message has no id")
+        return cursor.lastrowid
 
     def recent_messages(self, conversation_id: str, limit: int) -> tuple[StoredMessage, ...]:
         """The last `limit` messages, oldest first: the bounded history the model receives."""
@@ -129,12 +141,20 @@ class TenantStore:
         return tuple(StoredMessage(role, content) for role, content in reversed(rows))
 
     def deliver_if_current(
-        self, conversation_id: str, run_id: str, text: str, expected_version: int
+        self,
+        conversation_id: str,
+        run_id: str,
+        text: str,
+        expected_version: int,
+        *,
+        reply_to: int | None,
     ) -> bool:
         """Send `text` only if the agent still controls the conversation at that version.
 
-        The check and the write happen in one write transaction, so an operator's takeover
-        either lands before (the reply is suppressed) or after (it was already sent).
+        `reply_to` is the inbound message the text answers; None means the system writes to the
+        customer on its own initiative. The check and the write happen in one write transaction,
+        so an operator's takeover either lands before (the reply is suppressed) or after (it was
+        already sent).
         """
         with self._db.transaction() as tx:
             row = tx.execute(
@@ -144,14 +164,16 @@ class TenantStore:
             ).fetchone()
             current = row is not None and row[0] == State.AUTO and row[1] == expected_version
             tx.execute(
-                "INSERT INTO outbox (tenant_id, conversation_id, run_id, content, status, "
-                "control_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO outbox (tenant_id, conversation_id, run_id, content, status, kind, "
+                "reply_to, control_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     self.tenant_id,
                     conversation_id,
                     run_id,
                     text,
                     "SENT" if current else "SUPPRESSED",
+                    "proactive" if reply_to is None else "reply",
+                    reply_to,
                     expected_version,
                     self._db.now(),
                 ),
@@ -191,11 +213,25 @@ class TenantStore:
             ).fetchone()
         return None if row is None else str(row[0])
 
-    def sent_count(self, run_id: str) -> int:
+    def deliveries(self, run_id: str) -> Deliveries:
+        """The messages the run sent, split by what they were.
+
+        A reply needs evidence: it names an inbound message of the same company, conversation and
+        run, and the run did not handle a follow-up (an event-triggered run answers nobody).
+        Anything else sent counts as contacting the customer, so a mislabelled message is never
+        hidden among the replies.
+        """
         with self._db.reading() as db:
-            row = db.execute(
-                "SELECT COUNT(*) FROM outbox "
-                "WHERE tenant_id = ? AND run_id = ? AND status = 'SENT'",
+            rows = db.execute(
+                "SELECT o.kind = 'reply' AND EXISTS ("
+                "  SELECT 1 FROM messages m WHERE m.tenant_id = o.tenant_id "
+                "  AND m.message_id = o.reply_to AND m.conversation_id = o.conversation_id "
+                "  AND m.run_id = o.run_id AND m.role = 'user'"
+                ") AND NOT EXISTS ("
+                "  SELECT 1 FROM followup_decisions f WHERE f.tenant_id = o.tenant_id "
+                "  AND f.run_id = o.run_id"
+                ") FROM outbox o WHERE o.tenant_id = ? AND o.run_id = ? AND o.status = 'SENT'",
                 (self.tenant_id, run_id),
-            ).fetchone()
-        return int(row[0])
+            ).fetchall()
+        replies = sum(1 for (is_reply,) in rows if is_reply)
+        return Deliveries(replies=replies, proactive=len(rows) - replies)
