@@ -125,12 +125,33 @@ La consigna descarta una entrega que permita alguna de estas tres cosas.
 - El verificador no importa el harness: recalcula los efectos leyendo los archivos SQLite en solo
   lectura, así que un adaptador que informe algo distinto de lo que hay en la base falla.
 
+## Revisión adversarial
+
+Antes de entregar, dos revisores ciegos e independientes (dos agentes con el mismo encargo, sin
+ver el trabajo del otro) buscaron formas de violar las tres condiciones críticas. Coincidieron en
+un defecto crítico: una escritura con resultado incierto se volvía a enviar sin revisar la
+confirmación, así que después de una toma de control podía crear un reclamo que nadie había
+confirmado de nuevo. También coincidieron en cinco advertencias: carreras entre el control y la
+escritura, una operación que podía quedar trabada, un reintento tras un crash que podía repetir
+una respuesta, la ficha del operador y un código de salida. Todo se corrigió, y cada hallazgo
+tiene un test que falla con el código revisado y pasa ahora:
+`tests/cortex/integration/test_review_findings.py`.
+
+Una segunda pasada no encontró ningún defecto crítico. También se corrigieron sus cinco hallazgos
+menores (un `run_id` derivado que desbordaba el largo permitido, una conversación ajena que podía
+conciliar un comando incierto, una confirmación ya usada que se reutilizaba tras un fallo, la
+repetición de un seguimiento con otra conversación o carrera, y un valor que podía imitar otro
+campo en la pregunta de confirmación), con sus tests en el mismo archivo.
+
 ## Limitaciones pendientes
 
 - **Sin demostración con LLM real** (ver arriba).
 - **Los hilos abandonados por un timeout no se pueden matar** (Python no lo permite): una llamada
   lenta puede terminar en segundo plano. Por eso todo timeout de una escritura se trata como
   incierto y se verifica por su `operation_id`; una lectura abandonada se descarta.
+- **Un comando interrumpido por un crash no se vuelve a ejecutar con el mismo `run_id`** (podría
+  haber respondido antes de caerse): termina `FAILED` con `run_interrupted` y se reintenta con un
+  `run_id` nuevo. Una escritura que quedó en vuelo se concilia por su `operation_id`.
 - **Autenticación simulada.** El principal y la empresa son fixtures confiables del evaluador;
   no hay login, emisión ni vencimiento de credenciales.
 - **Un solo proceso y SQLite local.** Los candados (una ejecución por conversación, escrituras con

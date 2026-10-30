@@ -15,3 +15,5 @@ htmlcov/
 
 # runtime state (the initial claims DB lives in data/ and IS committed)
 var/
+# Output of the contract's example command
+resultado.json
