@@ -157,6 +157,13 @@ conciliar un comando incierto, una confirmación ya usada que se reutilizaba tra
 repetición de un seguimiento con otra conversación o carrera, y un valor que podía imitar otro
 campo en la pregunta de confirmación), con sus tests en el mismo archivo.
 
+La revisión final tampoco encontró defectos críticos. Se corrigieron sus advertencias y
+sugerencias: una confirmación que seguía vigente si su escritura se rechazaba antes de intentarse,
+una toma de control rechazada que no dejaba `tool_rejected` en la traza, lo pendiente de una
+oportunidad que se cancelaba con la decisión de otra, el evento de fallo sintético y sus
+contadores, un texto que UTF-8 no puede codificar, el responsable sin enmascarar en la ficha y
+rutas equivocadas en `SEGURIDAD.md`.
+
 ## Limitaciones pendientes
 
 - **Sin demostración con LLM real** (ver arriba).
@@ -173,9 +180,11 @@ campo en la pregunta de confirmación), con sus tests en el mismo archivo.
   no hay login, emisión ni vencimiento de credenciales.
 - **Un solo proceso y SQLite local.** Los candados (una ejecución por conversación, escrituras con
   `BEGIN IMMEDIATE`) están probados con hilos y con procesos secuenciales, no con varios servidores.
-- **Los mensajes se guardan completos** en la tabla de la conversación (es la memoria); las
-  trazas, los resultados, los logs y la ficha del operador no los llevan, pero no hay política de
-  retención ni de borrado.
+- **Los mensajes se guardan completos** en la tabla de la conversación (es la memoria), y no hay
+  política de retención ni de borrado. Las trazas y los logs no los llevan. La ficha del operador,
+  que también va en la salida del adaptador, lleva un extracto enmascarado de hasta 200 caracteres
+  de la última consulta, de la última respuesta enviada y de la última retenida, y los valores
+  enmascarados de las escrituras pendientes.
 - **La clave del seudónimo del principal en las trazas es pública por defecto** en esta
   demostración, para que las salidas sean reproducibles. El seudónimo es un HMAC-SHA-256 de la
   empresa y el principal; con `CORTEX_TRACE_KEY` el punto de entrada usa una clave propia. Una
