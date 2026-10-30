@@ -23,6 +23,7 @@ El comando que lo prueba todo, sin claves ni internet: `make eval`.
 ```bash
 make setup    # dependencias desde uv.lock (Python 3.11 o superior)
 make eval     # los 13 escenarios del kit y variantes propias, contra el estado real
+make demo     # cinco escenarios (lectura, otra empresa, escritura, toma de control, seguimiento)
 make check    # lint, tipos estrictos, contratos de arquitectura y tests
 uv run python evaluation_adapter.py --scenario examples/T02.json --output resultado.json
 ```
