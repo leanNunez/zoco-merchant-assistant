@@ -447,11 +447,21 @@ def _rules(output: Mapping[str, object]) -> list[Check]:
     events = [e for e in raw_events if isinstance(e, dict)] if isinstance(raw_events, list) else []
     failures = [e for e in events if e["type"] in {"tool_rejected", "tool_error"}]
     denied = output.get("finish_detail") in {"auth_invalid", "scope_violation"}
+    rejection = any(e["type"] == "tool_rejected" and e.get("reason") for e in events)
+    raw_chat = output.get("chat_events")
+    chat_refused = isinstance(raw_chat, list) and any(
+        isinstance(e, dict) and e.get("type") == "chat_event_rejected" for e in raw_chat
+    )
     return [
         Check(
             "rule.a_denial_has_a_rejection_event",
-            not denied or any(e["type"] == "tool_rejected" and e.get("reason") for e in events),
+            not denied or rejection,
             "an authorization denial needs a tool_rejected event with its reason",
+        ),
+        Check(
+            "rule.a_refused_chat_event_has_a_rejection_event",
+            not chat_refused or rejection,
+            "a refused chat event is a denial: it needs a tool_rejected event with its reason",
         ),
         Check(
             "rule.rejection_never_reaches_the_tool",

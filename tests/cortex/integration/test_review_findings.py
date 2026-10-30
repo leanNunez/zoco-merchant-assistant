@@ -1,7 +1,8 @@
-"""Regression tests for what the adversarial review (two blind judges) found in commit abb4006.
+"""Regression tests for what the adversarial reviews (two blind judges) found.
 
 Each test is named after its finding. Every one failed, or could not even be written, before the
-fix: the critical one let an uncertain write run again without a valid confirmation.
+fix: the critical one of the first review (commit abb4006) let an uncertain write run again
+without a valid confirmation. The section "final review" holds the findings of the last one.
 """
 
 import hashlib
@@ -116,6 +117,7 @@ class _Rig:
         *,
         conversation: str = "conv_1",
         model: Any = None,
+        tools: frozenset[str] | None = None,
     ) -> RunResult:
         runner = build_runner(
             data=self.data,
@@ -126,7 +128,9 @@ class _Rig:
             ticker=ManualTicker(),
         )
         return runner.run(
-            RunRequest(run_id, conversation, message, self.auth, self.data.config.limits)
+            RunRequest(
+                run_id, conversation, message, self.auth, self.data.config.limits, tools=tools
+            )
         )
 
     def takeover(self, version: int, conversation: str = "conv_1") -> None:
@@ -666,3 +670,100 @@ def test_a_value_cannot_fake_another_field_in_the_confirmation_question(
     assert rig.store.ledger.pending_action("op_claim_001").fingerprint is not None
     rig.run("sí", [{"final": "Listo"}], "run-2")
     assert rig.claims == 1
+
+
+# --------------------------------------------------------------------------- final review
+
+
+def test_f1_a_yes_whose_write_is_rejected_before_any_attempt_does_not_stay_confirmed(
+    make_rig: Callable[..., _Rig],
+) -> None:
+    rig = make_rig()
+    rig.run("Quiero reclamar", [ASK], "run-1")
+
+    # This run may not use the claims tool: the confirmed write is rejected before any attempt.
+    refused = rig.run("sí", [{"final": "No puedo"}], "run-2", tools=frozenset())
+
+    rejection = next(e for e in refused.events if e.type == "tool_rejected")
+    assert rejection.attributes["reason"] == "tool_not_allowed"
+    assert "confirmation_cancelled" in rig.types(refused)
+    assert rig.store.ledger.pending_action("op_claim_001").status is PendingStatus.CANCELLED
+
+    # A later run with every tool asks again for the same values instead of running them.
+    again = rig.run("Quiero reclamar", [ASK, {"final": "?"}], "run-3")
+
+    assert again.finish_detail is FinishDetail.AWAITING_CONFIRMATION
+    assert rig.flaky.creates == 0
+    assert rig.claims == 0
+
+
+def _decide(rig: _Rig, run_id: str, **facts: Any) -> None:
+    chat = _chat(rig)
+    tracer = chat.tracer(rig.auth, "conv_1", run_id)
+    chat.follow_up(rig.auth, "conv_1", run_id, FollowupFacts(**facts), tracer)
+
+
+def _owed(rig: _Rig) -> list[dict[str, object]]:
+    commitments = continuity_card(rig.store, "conv_1")["commitments"]
+    assert isinstance(commitments, list)
+    return commitments
+
+
+TASK_FOR_A = {"opportunity_id": "opp_a", "pending_on": "ZOCO", "responsible": "Benjamin"}
+OWED_ON_A = {
+    "kind": "internal_task",
+    "responsible": "Benjamin",
+    "due_date": None,
+    "opportunity_id": "opp_a",
+}
+
+
+def test_f3_cancelling_one_opportunity_keeps_the_task_owed_on_another(
+    make_rig: Callable[..., _Rig],
+) -> None:
+    rig = make_rig()
+    _decide(rig, "run-a", **TASK_FOR_A)
+
+    _decide(rig, "run-b", opportunity_id="opp_b", opted_out=True)
+
+    assert _owed(rig) == [OWED_ON_A]
+
+
+def test_f3_cancelling_the_same_opportunity_cancels_its_task(
+    make_rig: Callable[..., _Rig],
+) -> None:
+    rig = make_rig()
+    _decide(rig, "run-a", **TASK_FOR_A)
+
+    _decide(rig, "run-a2", opportunity_id="opp_a", opted_out=True)
+
+    assert _owed(rig) == []
+
+
+def test_f3_decisions_without_an_opportunity_only_replace_each_other(
+    make_rig: Callable[..., _Rig],
+) -> None:
+    rig = make_rig()
+    _decide(rig, "run-1", pending_on="ZOCO", responsible="Benjamin")
+    _decide(rig, "run-a", **TASK_FOR_A)
+    assert [c["opportunity_id"] for c in _owed(rig)] == [None, "opp_a"]
+
+    _decide(rig, "run-2", opted_out=True)  # no opportunity: what is owed without one
+
+    assert _owed(rig) == [OWED_ON_A]
+
+
+def test_f6_the_responsible_of_a_commitment_is_scrubbed_and_capped(
+    make_rig: Callable[..., _Rig],
+) -> None:
+    rig = make_rig()
+    _decide(rig, "run-f", pending_on="ZOCO", responsible="ana.perez@example.com " + "x" * 500)
+    model = ScriptedModel([{"final": "OK"}])
+
+    rig.run("Hola", [], "run-1", model=model)
+
+    for commitment in (_owed(rig)[0], model.prompts[0].state["commitments"][0]):  # type: ignore[index]
+        responsible = str(commitment["responsible"])
+        assert "@" not in responsible
+        assert responsible.startswith("[redacted]")
+        assert len(responsible) <= 120

@@ -1,6 +1,7 @@
 """Zoco Chat (brief section 6): takeover, restart, continuity card and follow-ups, end to end."""
 
 import json
+import sqlite3
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -86,7 +87,12 @@ def test_t12_leaves_an_internal_task_for_the_responsible(tmp_path: Path) -> None
     card = _run(tmp_path, "T12")["state"]["continuity_card"]
 
     assert card["commitments"] == [
-        {"kind": "internal_task", "responsible": "Benjamin", "due_date": None}
+        {
+            "kind": "internal_task",
+            "responsible": "Benjamin",
+            "due_date": None,
+            "opportunity_id": None,
+        }
     ]
 
 
@@ -242,6 +248,33 @@ def test_an_event_for_another_company_is_refused(tmp_path: Path) -> None:
 
     assert takeover["chat_events"] == [{"type": "chat_event_rejected", "reason": "scope_violation"}]
     assert (follow_up["finish_reason"], follow_up["decision"]) == ("BLOCKED", None)
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [({"actor": "operador_b"}, "auth_invalid"), ({"tenant_id": "comercio_b"}, "scope_violation")],
+)
+def test_a_refused_takeover_is_a_denial_in_the_runs_trace(
+    tmp_path: Path, change: dict[str, str], reason: str
+) -> None:
+    data = json.loads((EXAMPLES / "T11.json").read_text(encoding="utf-8"))
+    data["incoming_event"] = {**data["incoming_event"], **change}
+    path = tmp_path / "T11-refused.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    workdir = tmp_path / "world"
+
+    output: dict[str, Any] = run_scenario_file(path, kit_dir=KIT, workdir=workdir)
+
+    events = [(e["type"], e.get("reason")) for e in output["events"]]
+    assert ("chat_event_rejected", reason) in events
+    assert ("tool_rejected", reason) in events
+    # The run itself goes on as if nothing was reported, and it lists no rejected tool.
+    assert (output["finish_reason"], output["rejected_tools"]) == ("COMPLETED", [])
+    with sqlite3.connect(workdir / "cortex.db") as db:
+        stored = db.execute(
+            "SELECT seq, type FROM trace_events WHERE run_id = ? ORDER BY seq", (output["run_id"],)
+        ).fetchall()
+    assert stored == [(e["seq"], e["type"]) for e in output["events"]]
 
 
 def test_the_takeover_measurement_notices_a_delivery_that_ignores_the_control(

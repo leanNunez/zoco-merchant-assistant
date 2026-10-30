@@ -24,6 +24,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 from cortex.identity import AuthContext
+from cortex.observability.redaction import scrub
 from merchant_assistant.control.states import State
 
 if TYPE_CHECKING:
@@ -48,6 +49,18 @@ class Commitment:
     kind: Literal["internal_task", "contact_date"]
     responsible: str | None
     due_date: str | None
+    # Read back from the store: a commitment is recorded on the opportunity of its decision.
+    opportunity_id: str | None = None
+
+    def view(self) -> dict[str, object]:
+        """The commitment for the operator and the model. `responsible` is free text from Zoco
+        Chat, so it is scrubbed and capped like every other text of the continuity card."""
+        return {
+            "kind": self.kind,
+            "responsible": None if self.responsible is None else scrub(self.responsible),
+            "due_date": self.due_date,
+            "opportunity_id": None if self.opportunity_id is None else scrub(self.opportunity_id),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,8 +171,11 @@ class ChatRecords:
         decision: str,
         reasons: tuple[str, ...],
         commitment: Commitment | None,
+        *,
+        opportunity_id: str | None = None,
     ) -> bool:
-        """Store the decision and keep the commitments in line with it, in one transaction.
+        """Store the decision and keep the commitments of its opportunity in line with it, in one
+        transaction. The commitment, if any, is recorded on `opportunity_id`.
 
         False: the run id already has a decision (someone decided it first), and nothing
         changed. The caller reads that decision and replays it, or reports the conflict."""
@@ -167,12 +183,13 @@ class ChatRecords:
         with self._db.transaction() as tx:
             inserted = tx.execute(
                 "INSERT INTO followup_decisions (tenant_id, conversation_id, run_id, "
-                "event_digest, decision, reasons, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT (tenant_id, run_id) DO NOTHING",
+                "opportunity_id, event_digest, decision, reasons, decided_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (tenant_id, run_id) DO NOTHING",
                 (
                     self.tenant_id,
                     conversation_id,
                     run_id,
+                    opportunity_id,
                     event_digest,
                     decision,
                     ",".join(reasons),
@@ -181,19 +198,23 @@ class ChatRecords:
             ).rowcount
             if inserted != 1:
                 return False
-            # A new decision replaces whatever was owed before.
+            # A new decision replaces what was owed on the same opportunity, and only there. A
+            # decision without one replaces only what was owed without one (`IS` matches NULL).
             tx.execute(
                 "UPDATE commitments SET status = 'CANCELLED' "
-                "WHERE tenant_id = ? AND conversation_id = ? AND status = 'OPEN'",
-                (self.tenant_id, conversation_id),
+                "WHERE tenant_id = ? AND conversation_id = ? AND opportunity_id IS ? "
+                "AND status = 'OPEN'",
+                (self.tenant_id, conversation_id, opportunity_id),
             )
             if commitment is not None:
                 tx.execute(
-                    "INSERT INTO commitments (tenant_id, conversation_id, kind, responsible, "
-                    "due_date, status, created_at) VALUES (?, ?, ?, ?, ?, 'OPEN', ?)",
+                    "INSERT INTO commitments (tenant_id, conversation_id, opportunity_id, kind, "
+                    "responsible, due_date, status, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?)",
                     (
                         self.tenant_id,
                         conversation_id,
+                        opportunity_id,
                         commitment.kind,
                         commitment.responsible,
                         commitment.due_date,
@@ -218,12 +239,15 @@ class ChatRecords:
     def open_commitments(self, conversation_id: str) -> tuple[Commitment, ...]:
         with self._db.reading() as db:
             rows = db.execute(
-                "SELECT kind, responsible, due_date FROM commitments "
+                "SELECT kind, responsible, due_date, opportunity_id FROM commitments "
                 "WHERE tenant_id = ? AND conversation_id = ? AND status = 'OPEN' "
                 "ORDER BY commitment_id",
                 (self.tenant_id, conversation_id),
             ).fetchall()
-        return tuple(Commitment(kind, responsible, due) for kind, responsible, due in rows)
+        return tuple(
+            Commitment(kind, responsible, due, opportunity)
+            for kind, responsible, due, opportunity in rows
+        )
 
 
 def _takeover_outcome(version: int, stored_mode: State, stored_version: int) -> TakeoverOutcome:

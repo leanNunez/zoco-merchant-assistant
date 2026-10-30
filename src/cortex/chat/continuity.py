@@ -32,10 +32,7 @@ def continuity_card(store: TenantStore, conversation_id: str) -> dict[str, objec
         "uncertain_operations": scrub_tree(
             list(store.ledger.uncertain_operations(conversation_id))
         ),
-        "commitments": [
-            {"kind": c.kind, "responsible": c.responsible, "due_date": c.due_date}
-            for c in store.chat.open_commitments(conversation_id)
-        ],
+        "commitments": [c.view() for c in store.chat.open_commitments(conversation_id)],
         "last_reply_sent": _preview(store.last_outbox(conversation_id, "SENT")),
         "last_reply_suppressed": _preview(store.last_outbox(conversation_id, "SUPPRESSED")),
     }

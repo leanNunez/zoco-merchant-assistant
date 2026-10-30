@@ -16,7 +16,7 @@ import os
 import tempfile
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -141,6 +141,7 @@ def run_scenario(
         if event is not None:
             model = _takeover(world, auth, conversation_id, event, model, chat_log)
         result = world.run(auth, run_id, conversation_id, scenario.message, setup.limits, model)
+        result = _with_refused_events(world, auth, result, chat_log)
 
     store = world.database.for_tenant(auth)
     applied = any(entry["type"] == "chat_event_applied" for entry in chat_log)
@@ -236,6 +237,34 @@ def _takeover(
     return TakeoverDuringRun(model, str(when), take_over)
 
 
+def _with_refused_events(
+    world: World, auth: AuthContext, result: RunResult, log: list[dict[str, object]]
+) -> RunResult:
+    """A takeover refused for its company or its actor is an authorization denial.
+
+    Like the follow-up path, the denial is traced as `chat_event_rejected` plus the
+    `tool_rejected` with its reason that the contract asks every denial for. Both are added to
+    the run's trace after its own events, written through when the run's trace was stored. The
+    run itself is unchanged: a refused takeover changes nothing.
+    """
+    refusals = [entry for entry in log if entry["type"] == "chat_event_rejected"]
+    if not refusals:
+        return result
+    stored = world.database.for_tenant(auth).traces.events_of(result.run_id)
+    tracer = world.chat.tracer(
+        auth,
+        result.conversation_id,
+        result.run_id,
+        first_seq=len(result.events) + 1,
+        write_through=len(stored) == len(result.events),
+    )
+    for refusal in refusals:
+        reason = str(refusal["reason"])
+        tracer.emit("chat_event_rejected", step=result.step_count, reason=reason)
+        tracer.emit("tool_rejected", step=result.step_count, tool=None, reason=reason)
+    return replace(result, events=(*result.events, *tracer.events))
+
+
 def _follow_up(
     world: World,
     auth: AuthContext,
@@ -262,7 +291,9 @@ def _follow_up(
         except RunIdConflict:
             detail = FinishDetail.RUN_ID_CONFLICT
     reason = REASON_OF[detail]
-    missing = missing_failure_event(reason, (event.type for event in tracer.events))
+    missing = missing_failure_event(
+        detail, ((event.type, event.attributes.get("reason")) for event in tracer.events)
+    )
     if missing is not None:
         tracer.emit(missing, step=0, tool=None, reason=detail.value)
     tracer.emit("run_finished", step=0, finish_reason=reason.value, finish_detail=detail.value)
@@ -290,7 +321,9 @@ def _unauthenticated(
     stamp = now.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
     refusal = {"timestamp": stamp, "reason": FinishDetail.AUTH_INVALID.value}
     events: list[dict[str, object]] = [{"seq": 1, "type": "run_rejected", **refusal}]
-    missing = missing_failure_event(FinishReason.BLOCKED, ["run_rejected"])
+    missing = missing_failure_event(
+        FinishDetail.AUTH_INVALID, [("run_rejected", FinishDetail.AUTH_INVALID.value)]
+    )
     if missing is not None:
         events.append({"seq": len(events) + 1, "type": missing, "tool": None, **refusal})
     return {

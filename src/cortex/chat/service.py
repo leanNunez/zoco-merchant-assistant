@@ -60,8 +60,17 @@ class ChatEvents:
         outcome = store.chat.apply_takeover(conversation_id, event.version, responsible)
         return TakeoverResult(outcome, event.version, responsible)
 
-    def tracer(self, auth: AuthContext, conversation_id: str, run_id: str) -> Tracer:
-        """A tracer for an event handled outside a run, written through to the company's traces."""
+    def tracer(
+        self,
+        auth: AuthContext,
+        conversation_id: str,
+        run_id: str,
+        *,
+        first_seq: int = 1,
+        write_through: bool = True,
+    ) -> Tracer:
+        """A tracer for an event handled outside a run, written through to the company's traces
+        unless `write_through` is False. `first_seq` continues a trace already written."""
         store = self.database.for_tenant(auth)
         store.open_conversation(conversation_id)
         tracer = Tracer(
@@ -71,8 +80,10 @@ class ChatEvents:
             clock=self.clock,
             elapsed_ms=lambda: 0,
             redactor=self.redactor,
+            first_seq=first_seq,
         )
-        tracer.attach(store.traces.write)
+        if write_through:
+            tracer.attach(store.traces.write)
         return tracer
 
     def follow_up(
@@ -100,6 +111,7 @@ class ChatEvents:
                 decision.decision,
                 decision.reasons,
                 _owed(decision),
+                opportunity_id=facts.opportunity_id,
             )
             if recorded:
                 tracer.emit(

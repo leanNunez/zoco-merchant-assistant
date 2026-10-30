@@ -112,6 +112,25 @@ def test_a_blocked_conversation_says_why_with_one_tool_rejected(tmp_path: Path) 
     assert output["rejected_tools"] == []  # no tool was asked for, so none is listed
 
 
+def test_a_blocked_conversation_reports_no_rejected_tool_in_run_finished(tmp_path: Path) -> None:
+    output = _run(tmp_path, "T10", preconditions={"initial_state": "BLOCKED"})
+    finished = _of(output["events"], "run_finished")[0]
+
+    # The synthetic tool_rejected says why the run was refused; no tool was rejected.
+    assert finished["tools_rejected"] == 0
+
+
+def test_a_failure_after_a_recovered_read_still_says_its_own_cause(tmp_path: Path) -> None:
+    script = json.loads((EXAMPLES / "T07.json").read_text())["model_script"]
+    output = _run(tmp_path, "T07", model_script=[script[0]])  # the answer never comes
+    errors = [(e["reason"], e.get("tool")) for e in _of(output["events"], "tool_error")]
+
+    assert (output["finish_reason"], output["finish_detail"]) == ("FAILED", "script_exhausted")
+    # The read's timeout was retried and recovered: it does not explain why the run failed.
+    assert errors == [("timeout", "consultar_ventas"), ("script_exhausted", None)]
+    assert _ending(output) == ["tool_error", "run_finished"]
+
+
 def test_a_model_that_fails_ends_the_run_with_a_tool_error(tmp_path: Path) -> None:
     output = _run(tmp_path, "T01", model_script=[])
 

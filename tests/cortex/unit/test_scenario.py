@@ -1,5 +1,7 @@
 """Reading a kit scenario: what is dropped on load, and what is refused."""
 
+import json
+
 import pytest
 
 from cortex.chat.events import InvalidEvent, read_followup
@@ -39,3 +41,24 @@ def test_an_event_that_is_not_an_object_is_refused() -> None:
 
 def test_a_scenario_without_an_event_has_none() -> None:
     assert load_scenario(_scenario(None)).incoming_event is None
+
+
+LONE_SURROGATE = json.loads('"a\\ud800b"')  # valid JSON, but no UTF-8 can encode it
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"message": LONE_SURROGATE},
+        {"model_script": [{"final": LONE_SURROGATE}]},
+        {"preconditions": {"history": [{"text": LONE_SURROGATE}]}},
+        {"preconditions": {LONE_SURROGATE: 1}},
+    ],
+)
+def test_a_string_that_utf8_cannot_encode_is_refused_wherever_it_is(
+    changes: dict[str, object],
+) -> None:
+    with pytest.raises(UnsupportedScenario, match="UTF-8") as refused:
+        load_scenario({**_scenario(None), **changes})
+
+    str(refused.value).encode("utf-8")  # the reason itself can be written anywhere

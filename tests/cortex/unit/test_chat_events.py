@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from cortex.chat.events import (
@@ -53,6 +55,8 @@ def test_a_takeover_needs_a_positive_integer_version(version: object) -> None:
         {"type": "followup_due", "agreed_contact_date": "06/11/2026"},
         {"type": "followup_due", "pending_on": "NOBODY"},
         {"type": "followup_due", "contact_allowed": "yes"},
+        {"type": "followup_due", "opportunity_id": "opp a; DROP"},
+        {"type": "followup_due", "opportunity_id": "o" * 200},
     ],
 )
 def test_malformed_follow_up_facts_are_refused(raw: dict[str, object]) -> None:
@@ -87,3 +91,15 @@ def test_an_event_names_a_conversation_only_inside_the_trusted_company(
     raw: dict[str, object], named: str | None
 ) -> None:
     assert named_conversation(raw, tenant_id="comercio_a") == named
+
+
+def test_a_follow_up_keeps_its_opportunity_and_the_digest_covers_every_fact() -> None:
+    event = {"type": "followup_due", "pending_on": "ZOCO"}
+    first = read_followup({**event, "opportunity_id": "opp_a"}, **SCOPE)
+    second = read_followup({**event, "opportunity_id": "opp_b"}, **SCOPE)
+
+    assert first.opportunity_id == "opp_a"
+    # The same facts about another opportunity are another event, not a repetition.
+    assert first.digest() != second.digest()
+    assert read_followup(event, **SCOPE).opportunity_id is None
+    assert set(json.loads(first.canonical())) == set(first.__dataclass_fields__)

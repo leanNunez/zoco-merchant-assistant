@@ -265,3 +265,19 @@ def test_an_empty_or_blank_trace_key_is_refused_with_exit_2(
     assert refused.value.code == 2
     assert "CORTEX_TRACE_KEY" in capsys.readouterr().err
     assert not (tmp_path / "o.json").exists()
+
+
+def test_a_scenario_with_a_lone_surrogate_exits_2_without_a_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    text = (ROOT / "examples" / "T01.json").read_text(encoding="utf-8").rstrip()
+    scenario = tmp_path / "surrogate.json"
+    # The JSON escape is valid text; the string it decodes to cannot be encoded as UTF-8.
+    scenario.write_text(text[:-1] + ', "message": "hola \\ud800"}', encoding="utf-8")
+    output = tmp_path / "out.json"
+
+    code = _adapter("--scenario", scenario, "--output", output)
+
+    assert code == 2
+    assert "UTF-8" in capsys.readouterr().err
+    assert not output.exists()

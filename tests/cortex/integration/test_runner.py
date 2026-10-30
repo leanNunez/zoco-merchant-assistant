@@ -122,5 +122,10 @@ def test_the_history_sent_to_the_model_is_bounded_but_critical_state_is_not_summ
     assert isinstance(pending, list)
     assert pending[0]["arguments"]["descripcion"] == "No recibi comprobante"  # exact values
     assert prompt.state["commitments"] == [
-        {"kind": "internal_task", "responsible": "Benjamin", "due_date": None}
+        {
+            "kind": "internal_task",
+            "responsible": "Benjamin",
+            "due_date": None,
+            "opportunity_id": None,
+        }
     ]

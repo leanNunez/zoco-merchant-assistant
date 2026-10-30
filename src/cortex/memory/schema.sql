@@ -102,10 +102,13 @@ CREATE TABLE IF NOT EXISTS journal (
 );
 
 -- What someone owes and until when: an internal task for Zoco, or a date the customer chose.
+-- Kept per opportunity: a decision on one opportunity never cancels what is owed on another.
+-- NULL means the follow-up named no opportunity.
 CREATE TABLE IF NOT EXISTS commitments (
     commitment_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant_id       TEXT    NOT NULL,
     conversation_id TEXT    NOT NULL,
+    opportunity_id  TEXT,
     kind            TEXT    NOT NULL CHECK (kind IN ('internal_task', 'contact_date')),
     responsible     TEXT,
     due_date        TEXT,
@@ -119,6 +122,7 @@ CREATE TABLE IF NOT EXISTS followup_decisions (
     tenant_id       TEXT    NOT NULL,
     conversation_id TEXT    NOT NULL,
     run_id          TEXT    NOT NULL,
+    opportunity_id  TEXT,
     event_digest    TEXT    NOT NULL,
     decision        TEXT    NOT NULL
                     CHECK (decision IN ('CONTACTAR', 'TAREA_INTERNA', 'REPROGRAMAR', 'CANCELAR')),

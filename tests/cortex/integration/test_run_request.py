@@ -162,6 +162,17 @@ def test_a_message_over_the_limit_is_blocked_before_it_is_stored_or_the_model_is
     assert result.events[-2].attributes["reason"] == "message_too_long"
 
 
+def test_a_message_that_utf8_cannot_encode_is_refused_as_an_invalid_request(
+    tmp_path: Path, harness_data: HarnessData
+) -> None:
+    rig = _rig(tmp_path, harness_data, [{"final": "OK"}])
+
+    with pytest.raises(ValueError, match="UTF-8"):
+        rig.run("hola \ud800")
+
+    assert rig.model.prompts == []
+
+
 def test_a_message_at_the_limit_goes_on(tmp_path: Path, harness_data: HarnessData) -> None:
     rig = _rig(tmp_path, harness_data, [{"final": "OK"}])
 

@@ -77,8 +77,14 @@ class Tracer:
         clock: Clock,
         elapsed_ms: Callable[[], int],
         redactor: TraceRedactor,
+        first_seq: int = 1,
     ) -> None:
+        """`first_seq` numbers the first event: events added to a trace already written go on
+        from where it ended, so no two events of a run share a number."""
+        if first_seq < 1:
+            raise ValueError("a trace starts at seq 1")
         self._ids = (run_id, tenant_id, conversation_id)
+        self._first_seq = first_seq
         self._clock = clock
         self._elapsed_ms = elapsed_ms
         self._redactor = redactor
@@ -102,7 +108,7 @@ class Tracer:
             clean["dropped_attributes"] = dropped
         timestamp = self._clock.now().astimezone(UTC).isoformat(timespec="seconds")
         event = TraceEvent(
-            seq=len(self._events) + 1,
+            seq=self._first_seq + len(self._events),
             type=type_,
             run_id=run_id,
             tenant_id=tenant_id,

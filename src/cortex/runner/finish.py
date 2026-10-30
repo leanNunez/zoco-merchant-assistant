@@ -77,16 +77,36 @@ _FAILURE_EVENT_OF: Mapping[FinishReason, str] = MappingProxyType(
     {FinishReason.BLOCKED: "tool_rejected", FinishReason.FAILED: "tool_error"}
 )
 
+# The reasons of a failure event that already explain a finish detail, besides the detail's own
+# value. Taken from the code that emits them: a write whose outcome stays unknown was reported by
+# the tool_error of its attempt (`writes.py`, UncertainOutcome.code). A scope violation is
+# reported by the policy's tool_rejected with the detail's own value, so it needs no entry.
+_EXPLAINED_BY: Mapping[FinishDetail, frozenset[str]] = MappingProxyType(
+    {FinishDetail.WRITE_OUTCOME_UNKNOWN: frozenset({"outcome_unknown"})}
+)
 
-def missing_failure_event(reason: FinishReason, emitted: Iterable[str]) -> str | None:
+
+def explaining_reasons(detail: FinishDetail) -> frozenset[str]:
+    """The failure-event reasons that say why a run ended with `detail`."""
+    return _EXPLAINED_BY.get(detail, frozenset()) | {detail.value}
+
+
+def missing_failure_event(
+    detail: FinishDetail, emitted: Iterable[tuple[str, object]]
+) -> str | None:
     """The event a run must still emit before it finishes, if any.
 
     The contract asks every failure or denial for a `tool_rejected` or `tool_error` event with
-    its reason. A run that ends BLOCKED or FAILED without one (a blocked conversation, a model
-    that failed, a refused admission) gets exactly one before `run_finished`: `tool_rejected`
-    when it was refused, `tool_error` when it failed, with the finish detail as its reason.
+    its reason. A run that ends BLOCKED or FAILED gets exactly one before `run_finished`, unless
+    a failure event it already emitted explains this very ending: `tool_rejected` when it was
+    refused, `tool_error` when it failed, with the finish detail as its reason. An unrelated one
+    (a read that failed and was retried, a tool rejected before the run went on) does not count.
+    `emitted` holds the (type, reason) of every event emitted so far.
     """
-    needed = _FAILURE_EVENT_OF.get(reason)
-    if needed is None or FAILURE_EVENTS & set(emitted):
+    needed = _FAILURE_EVENT_OF.get(REASON_OF[detail])
+    if needed is None:
+        return None
+    explaining = explaining_reasons(detail)
+    if any(kind in FAILURE_EVENTS and reason in explaining for kind, reason in emitted):
         return None
     return needed

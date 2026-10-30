@@ -141,6 +141,22 @@ def test_a_denial_with_its_rejection_event_passes() -> None:
     assert _failed(output) == set()
 
 
+REFUSED_CHAT_EVENT = [{"type": "chat_event_rejected", "reason": "auth_invalid"}]
+
+
+def test_a_refused_chat_event_without_a_tool_rejected_is_caught() -> None:
+    output = _with(chat_events=REFUSED_CHAT_EVENT)
+
+    assert "rule.a_refused_chat_event_has_a_rejection_event" in _failed(output)
+
+
+def test_a_refused_chat_event_with_its_tool_rejected_passes() -> None:
+    rejected = {"seq": 2, "type": "tool_rejected", "timestamp": STAMP, "reason": "auth_invalid"}
+    output = _with(chat_events=REFUSED_CHAT_EVENT, events=[*GOOD["events"], rejected])
+
+    assert _failed(output) == set()
+
+
 def test_a_refusal_needs_the_right_exit_code_a_reason_and_no_output() -> None:
     assert all(c.ok for c in check_refusal(2, 2, "unsupported scenario", output_exists=False))
     names = {c.name for c in check_refusal(0, 2, "", output_exists=True) if not c.ok}

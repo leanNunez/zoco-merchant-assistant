@@ -22,6 +22,7 @@ from types import MappingProxyType
 from typing import ClassVar, Literal
 
 from cortex.config import MAX_CONTROL_VERSION
+from cortex.identifiers import EXTERNAL_ID
 from cortex.tools.policy import RejectionCode
 from merchant_assistant.sales.contract import parse_iso_day
 from merchant_assistant.shared.errors import DomainError
@@ -70,12 +71,17 @@ class FollowupFacts:
     opportunity_status: str | None = None
     agreed_contact_date: date | None = None
     customer_replied: bool = False
+    # The opportunity the follow-up is about: what is owed is kept per opportunity.
+    opportunity_id: str | None = None
+
+    def canonical(self) -> str:
+        """Every fact of the event, as canonical JSON."""
+        facts = {name: getattr(self, name) for name in self.__dataclass_fields__}
+        return json.dumps(facts, sort_keys=True, default=str, separators=(",", ":"))
 
     def digest(self) -> str:
         """A fingerprint of the event's facts: the same event always gives the same digest."""
-        facts = {name: getattr(self, name) for name in self.__dataclass_fields__}
-        text = json.dumps(facts, sort_keys=True, default=str, separators=(",", ":"))
-        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+        return hashlib.sha256(self.canonical().encode("utf-8")).hexdigest()
 
 
 def event_type(raw: Mapping[str, object]) -> str:
@@ -136,6 +142,7 @@ def read_followup(
         opportunity_status=status.upper() if status else None,
         agreed_contact_date=agreed_date,
         customer_replied=_flag(data, "customer_replied") is True,
+        opportunity_id=_identifier(data, "opportunity_id"),
     )
 
 
@@ -158,6 +165,14 @@ def _text(data: Mapping[str, object], key: str) -> str | None:
         return None
     if not isinstance(value, str) or not value.strip():
         raise InvalidEvent(f"{key} must be a non-empty string")
+    return value
+
+
+def _identifier(data: Mapping[str, object], key: str) -> str | None:
+    """An id from Zoco Chat, held to the closed alphabet and cap of every external id."""
+    value = _text(data, key)
+    if value is not None and EXTERNAL_ID.fullmatch(value) is None:
+        raise InvalidEvent(f"{key} is not a valid id")
     return value
 
 

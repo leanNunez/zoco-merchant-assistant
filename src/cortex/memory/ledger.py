@@ -173,6 +173,23 @@ class TenantLedger:
             ).rowcount
         return changed == 1
 
+    def cancel_unused_confirmation(self, operation_id: str) -> bool:
+        """Cancel a confirmation that no attempt used: the action is still CONFIRMED and the
+        command was never claimed. True when it was cancelled.
+
+        A "sí" whose call is rejected before any attempt (a tool this run may not use, say) must
+        not leave a confirmation behind for a later run to execute without asking again."""
+        with self._db.transaction() as tx:
+            changed = tx.execute(
+                "UPDATE pending_actions SET status = 'CANCELLED', updated_at = ? "
+                "WHERE tenant_id = ? AND operation_id = ? AND status = 'CONFIRMED' "
+                "AND NOT EXISTS (SELECT 1 FROM operations o "
+                "WHERE o.tenant_id = pending_actions.tenant_id "
+                "AND o.operation_id = pending_actions.operation_id)",
+                (self._db.now(), self.tenant_id, operation_id),
+            ).rowcount
+        return changed == 1
+
     def pending_action(self, operation_id: str) -> PendingAction | None:
         with self._db.reading() as db:
             row = db.execute(

@@ -53,6 +53,7 @@ class Scenario:
 
 def load_scenario(raw: Mapping[str, object]) -> Scenario:
     data = {key: value for key, value in raw.items() if key not in DROPPED_KEYS}
+    _check_encodable(data, "the scenario")
     unknown = set(data) - KNOWN_KEYS
     if unknown:
         raise UnsupportedScenario(f"unknown scenario keys: {sorted(unknown)}")
@@ -74,6 +75,26 @@ def load_scenario(raw: Mapping[str, object]) -> Scenario:
         incoming_event=None if incoming is None else _without_fixture_keys(incoming),
         run_id=_run_id(data["run_id"]) if "run_id" in data else None,
     )
+
+
+def _check_encodable(node: object, where: str) -> None:
+    """Every string of the scenario, keys included, can be encoded as UTF-8.
+
+    JSON accepts a lone surrogate (`"\\ud800"`), and no UTF-8 encoder does: it would fail deep
+    inside the harness instead of here. The reason names where the string is, never the string.
+    """
+    if isinstance(node, str):
+        try:
+            node.encode("utf-8")
+        except UnicodeEncodeError:
+            raise UnsupportedScenario(f"{where} holds a string UTF-8 cannot encode") from None
+    elif isinstance(node, Mapping):
+        for key, value in node.items():
+            _check_encodable(key, f"a key of {where}")
+            _check_encodable(value, f"{where}.{key}")
+    elif isinstance(node, list):
+        for index, item in enumerate(node):
+            _check_encodable(item, f"{where}[{index}]")
 
 
 def _without_fixture_keys(event: Mapping[str, object]) -> dict[str, object]:

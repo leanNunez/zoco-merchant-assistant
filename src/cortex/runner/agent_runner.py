@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import tzinfo
@@ -166,6 +166,7 @@ class AgentRunner:
     def run(self, request: RunRequest) -> RunResult:
         check_external_id(request.run_id)
         check_external_id(request.conversation_id)
+        _check_encodable(request.message)
         return _Run(self, request).execute()
 
 
@@ -328,8 +329,7 @@ class _Run:
                     for action in self.store.ledger.open_actions(self.request.conversation_id)
                 ],
                 "commitments": [
-                    {"kind": c.kind, "responsible": c.responsible, "due_date": c.due_date}
-                    for c in self.store.chat.open_commitments(self.request.conversation_id)
+                    c.view() for c in self.store.chat.open_commitments(self.request.conversation_id)
                 ],
             },
             tools=self.catalog.names,
@@ -422,7 +422,15 @@ class _Run:
         self._trace("confirmation_received", tool=latest.tool, operation_id=latest.operation_id)
         # The confirmed values go through the same verification as any request.
         call = ToolCall(f"confirmed-{latest.operation_id}", latest.tool, latest.arguments or "{}")
-        return self._use_tool(call)
+        try:
+            return self._use_tool(call)
+        finally:
+            # Rejected before any attempt (a tool this run may not use, invalid values): the
+            # confirmation was not used, and must not wait for a later run to execute it.
+            if self.store.ledger.cancel_unused_confirmation(latest.operation_id):
+                self._trace(
+                    "confirmation_cancelled", tool=latest.tool, operation_id=latest.operation_id
+                )
 
     def _cancel(
         self, action: PendingAction, from_status: PendingStatus = PendingStatus.PENDING
@@ -547,7 +555,7 @@ class _Run:
     def _finish(self, detail: FinishDetail) -> RunResult:
         reason = REASON_OF[detail]
         # Every run that ends BLOCKED or FAILED says why with a tool event (the contract's rule).
-        missing = missing_failure_event(reason, (event.type for event in self.tracer.events))
+        missing = missing_failure_event(detail, _reasons(self.tracer.events))
         if missing is not None:
             self._trace(missing, tool=None, reason=detail.value)
         self._trace(
@@ -555,8 +563,9 @@ class _Run:
             finish_reason=reason.value,
             finish_detail=detail.value,
             steps=self.budget.steps_taken,
-            tools_executed=self.tracer.count("tool_executed"),
-            tools_rejected=self.tracer.count("tool_rejected"),
+            tools_executed=_count_tools(self.tracer.events, "tool_executed"),
+            # The event that says why a whole run was refused names no tool: it is not counted.
+            tools_rejected=_count_tools(self.tracer.events, "tool_rejected"),
             retries=self.tracer.count("tool_retry"),
             duration_ms=self.budget.elapsed_ms(),
         )
@@ -581,6 +590,25 @@ class _Run:
 
     def _trace(self, type_: str, **attributes: str | int | bool | None) -> None:
         self.tracer.emit(type_, step=self.budget.steps_taken, **attributes)
+
+
+def _reasons(events: Iterable[TraceEvent]) -> Iterator[tuple[str, object]]:
+    """(type, reason) of each event, for `missing_failure_event`."""
+    return ((event.type, event.attributes.get("reason")) for event in events)
+
+
+def _count_tools(events: Iterable[TraceEvent], type_: str) -> int:
+    """How many events of a type name a tool."""
+    return sum(1 for e in events if e.type == type_ and e.attributes.get("tool") is not None)
+
+
+def _check_encodable(message: str) -> None:
+    """A message is stored, hashed and shown as UTF-8: one that holds a lone surrogate cannot be,
+    so it is an invalid request, refused before anything runs."""
+    try:
+        message.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("the message holds a character UTF-8 cannot encode") from None
 
 
 def _check_answer_length(turn: ModelTurn) -> None:
