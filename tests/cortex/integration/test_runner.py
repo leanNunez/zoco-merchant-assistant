@@ -87,6 +87,7 @@ def test_the_history_sent_to_the_model_is_bounded_but_critical_state_is_not_summ
     store.chat.record_followup(
         "conv_1",
         "run-0",
+        "digest-0",
         "TAREA_INTERNA",
         ("ZOCO_OWES_ACTION",),
         Commitment("internal_task", "Benjamin", None),

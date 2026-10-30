@@ -25,7 +25,7 @@ from cortex.identity import AuthContext
 from cortex.kit_adapter.audit import Audit
 from cortex.kit_adapter.observables import CallCounter
 from cortex.kit_adapter.preconditions import Setup
-from cortex.kit_adapter.scenario import UnsupportedScenario
+from cortex.kit_adapter.scenario import UnsupportedScenario, run_id_for
 from cortex.memory.database import Database
 from cortex.memory.ledger import PendingAction, PendingStatus
 from cortex.observability.redaction import TraceRedactor
@@ -178,11 +178,19 @@ class World:
             [(e.tenant_id, e.conversation_id, e.message) for e in setup.interleaved],
             [(e.tenant_id, e.conversation_id, FOLLOW_UP) for e in setup.interleaved],
         ]
+        # Every run id is derived and checked before anything runs: an id that is too long is an
+        # unsupported scenario, not a crash in the middle of the second round.
+        run_ids: list[str] = []
+        counts: dict[tuple[str, str], int] = {}
+        for tenant_id, conversation_id, _ in (*rounds[0], *rounds[1]):
+            counts[tenant_id, conversation_id] = counts.get((tenant_id, conversation_id), 0) + 1
+            run_ids.append(run_id_for(conversation_id, counts[tenant_id, conversation_id]))
+        pending_run_ids = iter(run_ids)
         for turn in rounds:
             for tenant_id, conversation_id, message in turn:
                 key = (tenant_id, conversation_id)
                 model = ScriptedModel([{"final": INTERLEAVED_REPLY}])
-                run_id = f"run-{conversation_id}-{len(seen.get(key, [])) + 1}"
+                run_id = next(pending_run_ids)
                 self.run(
                     self.auth_for(tenant_id), run_id, conversation_id, message, setup.limits, model
                 )

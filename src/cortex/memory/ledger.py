@@ -192,6 +192,24 @@ class TenantLedger:
             ).fetchall()
         return tuple(_pending(row) for row in rows)
 
+    def spent_confirmations(self, conversation_id: str) -> tuple[PendingAction, ...]:
+        """Confirmed actions of a conversation whose command was already attempted.
+
+        The confirmation was used by that attempt, which did not settle: a message that comes
+        later must renew it. A confirmed action nobody attempted yet (state reported by the
+        system of record, or a run cut short before the claim) is not in this list."""
+        columns = ", ".join(f"p.{name}" for name in _PENDING_COLUMNS.split(", "))
+        with self._db.reading() as db:
+            rows = db.execute(
+                f"SELECT {columns} FROM pending_actions p "  # noqa: S608 - fixed columns
+                "JOIN operations o ON o.tenant_id = p.tenant_id "
+                "AND o.operation_id = p.operation_id "
+                "WHERE p.tenant_id = ? AND p.conversation_id = ? AND p.status = 'CONFIRMED' "
+                "AND o.status != 'COMMITTED' ORDER BY p.rowid",
+                (self.tenant_id, conversation_id),
+            ).fetchall()
+        return tuple(_pending(row) for row in rows)
+
     # ------------------------------------------------------------------ operations
 
     def operation(self, operation_id: str) -> Operation | None:

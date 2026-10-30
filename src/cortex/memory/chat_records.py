@@ -27,6 +27,16 @@ class Commitment:
     due_date: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class StoredDecision:
+    """A follow-up decision as stored: for which conversation and event, and what was decided."""
+
+    conversation_id: str
+    event_digest: str
+    decision: str
+    reasons: tuple[str, ...]
+
+
 class ChatRecords:
     def __init__(self, database: Database, auth: AuthContext) -> None:
         self._db = database
@@ -111,18 +121,33 @@ class ChatRecords:
         self,
         conversation_id: str,
         run_id: str,
+        event_digest: str,
         decision: str,
         reasons: tuple[str, ...],
         commitment: Commitment | None,
-    ) -> None:
-        """Store the decision and keep the commitments in line with it, in one transaction."""
+    ) -> bool:
+        """Store the decision and keep the commitments in line with it, in one transaction.
+
+        False: the run id already has a decision (someone decided it first), and nothing
+        changed. The caller reads that decision and replays it, or reports the conflict."""
         now = self._db.now()
         with self._db.transaction() as tx:
-            tx.execute(
-                "INSERT INTO followup_decisions (tenant_id, conversation_id, run_id, decision, "
-                "reasons, decided_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (self.tenant_id, conversation_id, run_id, decision, ",".join(reasons), now),
-            )
+            inserted = tx.execute(
+                "INSERT INTO followup_decisions (tenant_id, conversation_id, run_id, "
+                "event_digest, decision, reasons, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (tenant_id, run_id) DO NOTHING",
+                (
+                    self.tenant_id,
+                    conversation_id,
+                    run_id,
+                    event_digest,
+                    decision,
+                    ",".join(reasons),
+                    now,
+                ),
+            ).rowcount
+            if inserted != 1:
+                return False
             # A new decision replaces whatever was owed before.
             tx.execute(
                 "UPDATE commitments SET status = 'CANCELLED' "
@@ -142,18 +167,20 @@ class ChatRecords:
                         now,
                     ),
                 )
+        return True
 
-    def decision_of(self, run_id: str) -> tuple[str, tuple[str, ...]] | None:
+    def decision_of(self, run_id: str) -> StoredDecision | None:
         """The decision already taken for this run, if the same event was handled before."""
         with self._db.reading() as db:
             row = db.execute(
-                "SELECT decision, reasons FROM followup_decisions "
+                "SELECT conversation_id, event_digest, decision, reasons FROM followup_decisions "
                 "WHERE tenant_id = ? AND run_id = ?",
                 (self.tenant_id, run_id),
             ).fetchone()
         if row is None:
             return None
-        return str(row[0]), tuple(reason for reason in str(row[1]).split(",") if reason)
+        reasons = tuple(reason for reason in str(row[3]).split(",") if reason)
+        return StoredDecision(str(row[0]), str(row[1]), str(row[2]), reasons)
 
     def open_commitments(self, conversation_id: str) -> tuple[Commitment, ...]:
         with self._db.reading() as db:

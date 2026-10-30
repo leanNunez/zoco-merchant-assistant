@@ -10,6 +10,8 @@ fixtures carry them) are dropped unread; any other unknown key is refused.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -60,6 +62,12 @@ class FollowupFacts:
     opportunity_status: str | None = None
     agreed_contact_date: date | None = None
     customer_replied: bool = False
+
+    def digest(self) -> str:
+        """A fingerprint of the event's facts: the same event always gives the same digest."""
+        facts = {name: getattr(self, name) for name in self.__dataclass_fields__}
+        text = json.dumps(facts, sort_keys=True, default=str, separators=(",", ":"))
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def event_type(raw: Mapping[str, object]) -> str:

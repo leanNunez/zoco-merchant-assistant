@@ -2,8 +2,9 @@
 
 1. The ledger is checked first, by `(company, operation_id)`. A committed command with the same
    values is answered from the ledger without calling the tool again; the same id with other
-   values is refused. A command whose outcome is uncertain is only looked up: if it was applied,
-   it is recorded; if not, it starts over and needs a valid confirmation like any first attempt.
+   values is refused. A command whose outcome is uncertain is only looked up, and only by the
+   conversation that owns it: if it was applied, it is recorded there; if not, it starts over
+   and needs a valid confirmation like any first attempt. Any other conversation is refused.
 2. The exact values must be confirmed at the current control version. Otherwise the action is
    proposed (only while the agent still controls the conversation) and the user is asked.
 3. The command is claimed in the ledger (STARTED) in one transaction that also checks the
@@ -105,6 +106,10 @@ def write(approved: Approved, adapter: WriteAdapter, context: WriteContext) -> W
         if existing.status is OperationStatus.COMMITTED:
             stored = json.loads(existing.result) if existing.result else {}
             return Done(_ok(name, adapter, stored), "deduplicated")
+        if not _owned_by(ledger, operation_id, context.conversation_id):
+            # Only the conversation that owns an unsettled command may look it up: a lookup that
+            # finds it would journal the effect, and consume the owner's pending action, here.
+            return Refused("operation_id_conflict", "the id belongs to another conversation")
         if existing.status is OperationStatus.STARTED and ledger.owner_has_finished(operation_id):
             # Its run ended without settling it (a crash in the middle): its outcome is unknown.
             ledger.abandon_started(operation_id)
@@ -136,6 +141,13 @@ def write(approved: Approved, adapter: WriteAdapter, context: WriteContext) -> W
             return ControlChanged(operation_id)
         return NeedsConfirmation(operation_id, confirmation_question(name, arguments))
     return _execute(approved, adapter, context, operation_id, values, may_retry=True)
+
+
+def _owned_by(ledger: TenantLedger, operation_id: str, conversation_id: str) -> bool:
+    """The conversation that proposed the command. No pending action: nobody can be shown to own
+    it, so nobody does."""
+    pending = ledger.pending_action(operation_id)
+    return pending is not None and pending.conversation_id == conversation_id
 
 
 def _execute(

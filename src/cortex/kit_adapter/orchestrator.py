@@ -28,11 +28,12 @@ from cortex.chat.events import (
     read_takeover,
 )
 from cortex.chat.followup import FollowupDecision
+from cortex.chat.service import RunIdConflict
 from cortex.config import RunLimits
 from cortex.identity import AuthContext, AuthenticationFailed
 from cortex.kit_adapter.observables import ScenarioFacts, build_output, refused_observables
 from cortex.kit_adapter.preconditions import Setup, read_faults, read_preconditions
-from cortex.kit_adapter.scenario import Scenario, UnsupportedScenario, load_scenario
+from cortex.kit_adapter.scenario import Scenario, UnsupportedScenario, load_scenario, run_id_for
 from cortex.kit_adapter.world import TakeoverDuringRun, World
 from cortex.runner.agent_runner import RunResult
 from cortex.runner.finish import REASON_OF, FinishDetail
@@ -65,13 +66,13 @@ def run_scenario_file(
 def run_scenario(
     scenario: Scenario, *, kit_dir: Path, workdir: Path, now: datetime
 ) -> dict[str, object]:
+    run_id = run_id_for(scenario.conversation_id)
     data = load_harness_data(kit_dir)
     setup = read_preconditions(scenario.preconditions, data.config.limits)
     world = World(
         data, workdir, now, read_faults(scenario.faults, data.catalog.names), setup.limits
     )
     conversation_id = scenario.conversation_id
-    run_id = f"run-{conversation_id}"
     try:
         auth = data.directory.authenticate(scenario.tenant_id, scenario.principal_id)
     except AuthenticationFailed:
@@ -197,8 +198,11 @@ def _follow_up(
     except InvalidEvent as invalid:
         raise UnsupportedScenario(invalid.detail) from None
     else:
-        decision = world.chat.follow_up(auth, conversation_id, run_id, facts, tracer)
-        detail = FinishDetail.FOLLOWUP_DECIDED
+        try:
+            decision = world.chat.follow_up(auth, conversation_id, run_id, facts, tracer)
+            detail = FinishDetail.FOLLOWUP_DECIDED
+        except RunIdConflict:
+            detail = FinishDetail.RUN_ID_CONFLICT
     reason = REASON_OF[detail]
     tracer.emit("run_finished", step=0, finish_reason=reason.value, finish_detail=detail.value)
     result = RunResult(

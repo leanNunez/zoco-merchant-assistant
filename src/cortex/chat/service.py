@@ -22,6 +22,10 @@ from merchant_assistant.control.states import State
 from merchant_assistant.shared.clock import Clock, business_today
 
 
+class RunIdConflict(Exception):  # noqa: N818 - named after the situation
+    """The run id was already used for another conversation or another event."""
+
+
 @dataclass(frozen=True, slots=True)
 class TakeoverResult:
     applied: bool  # False: the event was not newer than the stored state, so it changed nothing
@@ -72,26 +76,40 @@ class ChatEvents:
     ) -> FollowupDecision:
         store = self.database.for_tenant(auth)
         conversation = store.open_conversation(conversation_id)
+        digest = facts.digest()
         previous = store.chat.decision_of(run_id)
-        if previous is not None:
-            # The same event, handled again: answer with what was decided, change nothing.
-            tracer.emit("followup_replayed", step=0, decision=previous[0])
-            return FollowupDecision(Decision(previous[0]), previous[1])
-        decision = decide(
-            facts,
-            today=business_today(self.clock, self.business_tz),
-            human_in_control=conversation.mode is not State.AUTO,
-        )
-        store.chat.record_followup(
-            conversation_id, run_id, decision.decision, decision.reasons, _owed(decision)
-        )
-        tracer.emit(
-            "followup_decided",
-            step=0,
-            decision=decision.decision.value,
-            reasons=",".join(decision.reasons),
-        )
-        return decision
+        if previous is None:
+            decision = decide(
+                facts,
+                today=business_today(self.clock, self.business_tz),
+                human_in_control=conversation.mode is not State.AUTO,
+            )
+            recorded = store.chat.record_followup(
+                conversation_id,
+                run_id,
+                digest,
+                decision.decision,
+                decision.reasons,
+                _owed(decision),
+            )
+            if recorded:
+                tracer.emit(
+                    "followup_decided",
+                    step=0,
+                    decision=decision.decision.value,
+                    reasons=",".join(decision.reasons),
+                )
+                return decision
+            # Another handler of the same event decided first, between our read and our insert.
+            previous = store.chat.decision_of(run_id)
+            if previous is None:
+                raise RuntimeError("a follow-up decision vanished after it was found")
+        if (previous.conversation_id, previous.event_digest) != (conversation_id, digest):
+            # The same id for another conversation or another event is not a repetition.
+            raise RunIdConflict(run_id)
+        # The same event, handled again: answer with what was decided, change nothing.
+        tracer.emit("followup_replayed", step=0, decision=previous.decision)
+        return FollowupDecision(Decision(previous.decision), previous.reasons)
 
 
 def _owed(decision: FollowupDecision) -> Commitment | None:

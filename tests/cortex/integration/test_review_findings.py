@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from cortex.bootstrap import BUSINESS_TIMEZONE, DEFAULT_TRACE_SALT, HarnessData, build_runner
 from cortex.chat.continuity import continuity_card
 from cortex.chat.events import FollowupFacts
-from cortex.chat.service import ChatEvents
+from cortex.chat.service import ChatEvents, RunIdConflict
 from cortex.kit_adapter.audit import Audit
 from cortex.kit_adapter.orchestrator import run_scenario_file
 from cortex.kit_adapter.scenario import UnsupportedScenario
@@ -282,8 +282,12 @@ def test_w2_an_unexpected_error_after_the_claim_leaves_the_command_uncertain_not
     assert crashed.finish_detail is FinishDetail.INTERNAL_ERROR
     assert operation.status is OperationStatus.UNCERTAIN
     rig.flaky.raise_unexpected = False
-    retried = rig.run("Repetilo", [ASK, {"final": "Listo"}], "run-3")
-    assert "tool_executed" in rig.types(retried)  # looked up, not found, still confirmed: runs
+    asked = rig.run("Repetilo", [ASK, {"final": "Listo"}], "run-3")
+    # The attempt used the confirmation: a message that is not a "sí" does not renew it.
+    assert asked.finish_detail is FinishDetail.AWAITING_CONFIRMATION
+    assert rig.claims == 0
+    retried = rig.run("sí", [{"final": "Listo"}], "run-4")
+    assert "tool_executed" in rig.types(retried)  # looked up, not found, confirmed again: runs
     assert rig.claims == 1
 
 
@@ -423,3 +427,239 @@ def test_the_same_follow_up_handled_twice_is_decided_once(make_rig: Callable[...
     assert [e.type for e in replayed_tracer.events] == ["followup_replayed"]
     with sqlite3.connect(rig.database.path) as db:
         assert db.execute("SELECT COUNT(*) FROM followup_decisions").fetchone()[0] == 1
+
+
+# =========================================================================== second pass
+#
+# What the second adversarial pass found (no critical defect, five minor ones).
+
+
+def _scenario_file(tmp_path: Path, example: str, **changes: Any) -> Path:
+    data = json.loads((ROOT / "examples" / example).read_text())
+    data.update(changes)
+    path = tmp_path / "scenario.json"
+    path.write_text(json.dumps(data))
+    return path
+
+
+def _adapter_exit_code(path: Path, out: Path) -> int:
+    done = subprocess.run(  # noqa: S603 - the project's own entry point
+        [
+            sys.executable,
+            str(ROOT / "evaluation_adapter.py"),
+            "--scenario",
+            str(path),
+            "--output",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert "Traceback" not in done.stderr
+    return done.returncode
+
+
+# --------------------------------------------------------------------------- run ids
+
+
+def test_a_conversation_id_whose_run_id_is_too_long_is_an_unsupported_scenario(
+    tmp_path: Path,
+) -> None:
+    long_id = "c" * 125  # a valid conversation id, but "run-" + it is 129 characters
+    path = _scenario_file(tmp_path, "T01.json", conversation_id=long_id)
+
+    with pytest.raises(UnsupportedScenario):
+        run_scenario_file(path, kit_dir=ROOT / "kit")
+
+    assert _adapter_exit_code(path, tmp_path / "out.json") == 2
+    assert not (tmp_path / "out.json").exists()
+
+
+def test_an_interleaved_conversation_whose_run_id_is_too_long_is_an_unsupported_scenario(
+    tmp_path: Path,
+) -> None:
+    data = json.loads((ROOT / "examples" / "T06.json").read_text())
+    interleaved = data["preconditions"]["interleaved_conversations"]
+    interleaved[0]["conversation_id"] = "c" * 123  # "run-" + it + "-1" is 129 characters
+    path = _scenario_file(tmp_path, "T06.json", preconditions=data["preconditions"])
+
+    with pytest.raises(UnsupportedScenario):
+        run_scenario_file(path, kit_dir=ROOT / "kit")
+
+    assert _adapter_exit_code(path, tmp_path / "out.json") == 2
+
+
+# --------------------------------------------------------------------------- ownership
+
+
+def _operation_effects(rig: _Rig) -> list[tuple[str, str]]:
+    with sqlite3.connect(rig.database.path) as db:
+        rows = db.execute(
+            "SELECT conversation_id, reference FROM journal WHERE kind = 'effect'"
+        ).fetchall()
+    return [(str(conversation), str(reference)) for conversation, reference in rows]
+
+
+def test_another_conversation_cannot_reconcile_an_uncertain_command_that_did_land(
+    make_rig: Callable[..., _Rig],
+) -> None:
+    rig = make_rig(failures=1, commit_first=True)
+    rig.flaky.lookup_fails = True  # nobody can tell whether the claim landed
+    rig.run("Quiero reclamar", [ASK], "run-1")
+    unresolved = rig.run("sí", [{"final": "?"}], "run-2")
+    assert unresolved.finish_detail is FinishDetail.WRITE_OUTCOME_UNKNOWN
+    rig.flaky.lookup_fails = False  # the claim did land, and now it could be found
+
+    other = rig.run("Yo también", [ASK, {"final": "No"}], "run-3", conversation="conv_2")
+
+    rejection = next(e for e in other.events if e.type == "tool_rejected")
+    assert rejection.attributes["reason"] == "operation_id_conflict"
+    assert "write_reconciled" not in rig.types(other)
+    assert _operation_effects(rig) == []  # nothing journaled, least of all in conv_2
+    assert rig.store.ledger.pending_action("op_claim_001").status is PendingStatus.CONFIRMED
+    assert rig.store.ledger.operation("op_claim_001").status is OperationStatus.UNCERTAIN
+
+    # The owner can still reconcile it, and the effect is journaled in its conversation.
+    owner = rig.run("¿Se registró?", [ASK, {"final": "Sí"}], "run-4")
+    assert "write_reconciled" in rig.types(owner)
+    assert _operation_effects(rig) == [("conv_1", "op_claim_001")]
+
+
+# --------------------------------------------------------------------------- spent confirmation
+
+
+@pytest.mark.parametrize("message", ["no, dejalo", "sí"])
+def test_a_confirmation_spent_on_an_uncertain_write_is_never_reused(
+    make_rig: Callable[..., _Rig], message: str
+) -> None:
+    # Even a "sí" nobody asked for: one confirmation is good for one attempt.
+    rig = make_rig(failures=2)
+    rig.run("Quiero reclamar", [ASK], "run-1")
+    unresolved = rig.run("sí", [{"final": "?"}], "run-2")
+    assert unresolved.finish_detail is FinishDetail.WRITE_OUTCOME_UNKNOWN
+    calls_before = rig.flaky.creates
+
+    again = rig.run(message, [ASK, {"final": "?"}], "run-3")
+
+    assert again.finish_detail is FinishDetail.AWAITING_CONFIRMATION
+    assert "confirmation_cancelled" in rig.types(again)
+    assert rig.flaky.creates == calls_before  # the adapter was not called
+    assert rig.claims == 0
+    assert rig.store.ledger.pending_action("op_claim_001").status is PendingStatus.PENDING
+
+    confirmed = rig.run("sí", [{"final": "Registrado"}], "run-4")  # a new question, a new yes
+    assert "tool_executed" in rig.types(confirmed)
+    assert rig.claims == 1
+
+
+# --------------------------------------------------------------------------- follow-up replay
+
+
+def _chat(rig: _Rig) -> ChatEvents:
+    return ChatEvents(
+        rig.database,
+        rig.data.directory,
+        CLOCK,
+        BUSINESS_TIMEZONE,
+        TraceRedactor(DEFAULT_TRACE_SALT),
+    )
+
+
+def _decisions(rig: _Rig) -> int:
+    with sqlite3.connect(rig.database.path) as db:
+        return int(db.execute("SELECT COUNT(*) FROM followup_decisions").fetchone()[0])
+
+
+FACTS = FollowupFacts(pending_on="ZOCO", responsible="Benjamin", contact_allowed=True)
+
+
+def test_a_follow_up_run_id_reused_for_another_conversation_is_a_conflict(
+    make_rig: Callable[..., _Rig],
+) -> None:
+    rig = make_rig()
+    chat = _chat(rig)
+    chat.follow_up(rig.auth, "conv_1", "run-f", FACTS, chat.tracer(rig.auth, "conv_1", "run-f"))
+
+    with pytest.raises(RunIdConflict):
+        chat.follow_up(rig.auth, "conv_2", "run-f", FACTS, chat.tracer(rig.auth, "conv_2", "run-f"))
+
+    assert _decisions(rig) == 1
+    assert rig.store.chat.open_commitments("conv_2") == ()
+
+
+def test_a_follow_up_run_id_reused_with_other_facts_is_a_conflict(
+    make_rig: Callable[..., _Rig],
+) -> None:
+    rig = make_rig()
+    chat = _chat(rig)
+    chat.follow_up(rig.auth, "conv_1", "run-f", FACTS, chat.tracer(rig.auth, "conv_1", "run-f"))
+    other_facts = FollowupFacts(pending_on="CUSTOMER", contact_allowed=True)
+
+    with pytest.raises(RunIdConflict):
+        chat.follow_up(
+            rig.auth, "conv_1", "run-f", other_facts, chat.tracer(rig.auth, "conv_1", "run-f")
+        )
+
+    assert _decisions(rig) == 1
+
+
+@pytest.mark.parametrize("same_event", [True, False])
+def test_a_follow_up_decided_concurrently_is_a_replay_or_a_conflict_never_an_error(
+    make_rig: Callable[..., _Rig], monkeypatch: pytest.MonkeyPatch, same_event: bool
+) -> None:
+    rig = make_rig()
+    chat = _chat(rig)
+    records = type(rig.store.chat)
+    original_read, original_record = records.decision_of, records.record_followup
+    state = {"raced": False}
+
+    def read_then_lose_the_race(self: Any, run_id: str) -> Any:
+        found = original_read(self, run_id)
+        if not state["raced"]:
+            state["raced"] = True  # the competitor commits between our read and our insert
+            winner = FACTS if same_event else FollowupFacts(pending_on="CUSTOMER")
+            original_record(
+                self,
+                "conv_1",
+                run_id,
+                winner.digest(),
+                "TAREA_INTERNA",
+                ("ZOCO_OWES_ACTION",),
+                None,
+            )
+        return found
+
+    monkeypatch.setattr(records, "decision_of", read_then_lose_the_race)
+    tracer = chat.tracer(rig.auth, "conv_1", "run-f")
+
+    if same_event:
+        replayed = chat.follow_up(rig.auth, "conv_1", "run-f", FACTS, tracer)
+        assert replayed.decision.value == "TAREA_INTERNA"
+        assert [e.type for e in tracer.events] == ["followup_replayed"]
+    else:
+        with pytest.raises(RunIdConflict):
+            chat.follow_up(rig.auth, "conv_1", "run-f", FACTS, tracer)
+    assert _decisions(rig) == 1
+
+
+# --------------------------------------------------------------------------- question escaping
+
+
+def test_a_value_cannot_fake_another_field_in_the_confirmation_question(
+    make_rig: Callable[..., _Rig],
+) -> None:
+    rig = make_rig()
+    forged = {**CLAIM, "descripcion": "ok» - monto: «999 y \\ también «"}
+
+    rig.run("Quiero reclamar", [{"tool": "crear_reclamo", "args": forged}], "run-1")
+    question = rig.store.last_outbox("conv_1", "SENT")
+
+    fields = [line for line in question.splitlines() if line.startswith("- ")]
+    assert len(fields) == 3
+    assert "- descripcion: «ok\\» - monto: \\«999 y \\\\ también \\«»" in question
+    # The confirmation still binds the raw values: the same call is confirmed by one "sí".
+    assert rig.store.ledger.pending_action("op_claim_001").fingerprint is not None
+    rig.run("sí", [{"final": "Listo"}], "run-2")
+    assert rig.claims == 1

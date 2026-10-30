@@ -355,8 +355,14 @@ class _Run:
         A clear "sí" confirms the exact values, and only if they were asked under the current
         control version (a question asked before a takeover is stale) and the agent still
         controls the conversation. Anything else cancels it, so a later "sí" can never confirm
-        something stale.
+        something stale. A confirmation an earlier attempt already used (its outcome stayed
+        uncertain) is cancelled by any new message, even a "sí" nobody asked for: if the model
+        asks for the command again, it is proposed and asked anew.
         """
+        # One confirmation, one attempt: a later message never stretches it to a second one.
+        for spent in self.store.ledger.spent_confirmations(self.request.conversation_id):
+            self._cancel(spent, PendingStatus.CONFIRMED)
+        reply = classify_reply(self.request.message)
         waiting = [
             action
             for action in self.store.ledger.open_actions(self.request.conversation_id)
@@ -367,7 +373,7 @@ class _Run:
         latest, older = waiting[-1], waiting[:-1]
         for action in older:
             self._cancel(action)
-        if classify_reply(self.request.message) is not ReplyKind.AFFIRMATIVE:
+        if reply is not ReplyKind.AFFIRMATIVE:
             self._cancel(latest)
             return None
         confirmed = self.store.ledger.confirm_pending(
@@ -383,10 +389,12 @@ class _Run:
         call = ToolCall(f"confirmed-{latest.operation_id}", latest.tool, latest.arguments or "{}")
         return self._use_tool(call)
 
-    def _cancel(self, action: PendingAction) -> None:
+    def _cancel(
+        self, action: PendingAction, from_status: PendingStatus = PendingStatus.PENDING
+    ) -> None:
         self.store.ledger.move_pending(
             action.operation_id,
-            from_status=PendingStatus.PENDING,
+            from_status=from_status,
             to_status=PendingStatus.CANCELLED,
         )
         self._trace("confirmation_cancelled", tool=action.tool, operation_id=action.operation_id)

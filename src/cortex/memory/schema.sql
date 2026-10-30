@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS followup_decisions (
     tenant_id       TEXT    NOT NULL,
     conversation_id TEXT    NOT NULL,
     run_id          TEXT    NOT NULL,
+    event_digest    TEXT    NOT NULL,
     decision        TEXT    NOT NULL
                     CHECK (decision IN ('CONTACTAR', 'TAREA_INTERNA', 'REPROGRAMAR', 'CANCELAR')),
     reasons         TEXT    NOT NULL,

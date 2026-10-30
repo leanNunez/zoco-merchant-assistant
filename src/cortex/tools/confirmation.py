@@ -36,8 +36,18 @@ def is_confirmed(pending: PendingAction | None, fingerprint_: str, control_versi
 
 def confirmation_question(tool: str, arguments: BaseModel) -> str:
     # Each value between «» on its own line: the user sees where every value starts and ends.
-    values = "\n".join(f"- {name}: «{value}»" for name, value in arguments.model_dump().items())
+    values = "\n".join(
+        f"- {name}: «{_escaped(value)}»" for name, value in arguments.model_dump().items()
+    )
     return (
         f"Para ejecutar {tool} necesito tu confirmación de estos datos exactos:\n{values}\n"
         "Respondé «sí» para confirmar o «no» para cancelar."
     )
+
+
+def _escaped(value: object) -> str:
+    """The value with the delimiters backslash-escaped, so no value can close its own «»."""
+    text = str(value)
+    for character in ("\\", "«", "»"):
+        text = text.replace(character, "\\" + character)
+    return text

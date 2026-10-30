@@ -459,6 +459,11 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
             "a conversation id outside the allowed alphabet",
             {"conversation_id": "conv/../x"},
         ),
+        (
+            "V36_conversation_id_too_long_for_its_run_id",
+            "a conversation id that fits, but whose derived run id does not",
+            {"conversation_id": "c" * 125},
+        ),
     ):
         scenario = _derive(t02, description, {"finish_reason": "COMPLETED"})
         scenario.update(changes)
