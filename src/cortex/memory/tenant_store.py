@@ -41,6 +41,12 @@ class StoredMessage:
     content: str
 
 
+@dataclass(frozen=True, slots=True)
+class Contact:
+    contact_id: str
+    name: str
+
+
 def check_external_id(value: str) -> str:
     if EXTERNAL_ID.fullmatch(value) is None:
         raise ValueError(f"not a valid id: {value[:40]!r}")
@@ -80,6 +86,27 @@ class TenantStore:
         if row is None:
             return None
         return ConversationState(conversation_id, State(row[0]), row[1], row[2])
+
+    def record_contact(self, contact_id: str, name: str) -> None:
+        """A contact of this company, as its system of record lists it. Recording it again
+        changes nothing."""
+        check_external_id(contact_id)
+        with self._db.transaction() as tx:
+            tx.execute(
+                "INSERT OR IGNORE INTO contacts (tenant_id, contact_id, name) VALUES (?, ?, ?)",
+                (self.tenant_id, contact_id, name),
+            )
+
+    def contacts(self, name: str | None = None) -> tuple[Contact, ...]:
+        """This company's contacts by id, only those called `name` when it is given. Another
+        company's contact with the same name is never among them."""
+        with self._db.reading() as db:
+            rows = db.execute(
+                "SELECT contact_id, name FROM contacts "
+                "WHERE tenant_id = ? AND (? IS NULL OR name = ?) ORDER BY contact_id",
+                (self.tenant_id, name, name),
+            ).fetchall()
+        return tuple(Contact(contact_id, contact_name) for contact_id, contact_name in rows)
 
     def append_message(
         self, conversation_id: str, run_id: str, role: MessageRole, content: str

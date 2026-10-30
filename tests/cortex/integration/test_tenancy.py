@@ -18,7 +18,7 @@ from cortex.identity import AuthContext
 from cortex.kit_adapter import world
 from cortex.kit_adapter.orchestrator import run_scenario_file
 from cortex.memory.database import RECOVERY_STATEMENTS, Database
-from cortex.memory.tenant_store import StoredMessage, TenantStore
+from cortex.memory.tenant_store import Contact, StoredMessage, TenantStore
 from cortex.tools.adapters.claims import ClaimsDesk
 from cortex.tools.gateway import ToolAdapter
 
@@ -29,7 +29,7 @@ EXAMPLES = ROOT / "examples"
 KIT = ROOT / "kit"
 TENANT_TABLES = re.compile(
     r"\b(conversations|messages|outbox|pending_actions|operations|runs|journal|commitments"
-    r"|followup_decisions)\b",
+    r"|followup_decisions|contacts)\b",
     re.IGNORECASE,
 )
 
@@ -134,6 +134,33 @@ def test_a_history_that_ignores_the_company_is_detected(monkeypatch: pytest.Monk
     assert _run(EXAMPLES / "T06.json")["contexts_separated"] is False
 
 
+def test_the_kit_world_loads_each_companys_contacts(tmp_path: Path) -> None:
+    world_dir = tmp_path / "world"
+    run_scenario_file(EXAMPLES / "T06.json", kit_dir=KIT, workdir=world_dir)
+
+    with sqlite3.connect(world_dir / "cortex.db") as db:
+        rows = db.execute(
+            "SELECT tenant_id, contact_id, name FROM contacts ORDER BY tenant_id"
+        ).fetchall()
+
+    assert rows == [("comercio_a", "a_01", "Alex"), ("comercio_b", "b_01", "Alex")]
+
+
+def test_a_contact_lookup_that_ignores_the_company_is_detected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def leaky(self: TenantStore, name: str | None = None) -> tuple[Contact, ...]:
+        with self._db.reading() as db:
+            rows = db.execute(
+                "SELECT contact_id, name FROM contacts ORDER BY contact_id"
+            ).fetchall()
+        return tuple(Contact(contact_id, contact_name) for contact_id, contact_name in rows)
+
+    monkeypatch.setattr(TenantStore, "contacts", leaky)
+
+    assert _run(EXAMPLES / "T06.json")["contexts_separated"] is False
+
+
 def test_tools_bound_to_the_wrong_company_are_detected(monkeypatch: pytest.MonkeyPatch) -> None:
     def wrong_binder(
         data: HarnessData, claims: ClaimsDesk
@@ -164,3 +191,37 @@ def test_writes_under_another_company_are_detected(
     monkeypatch.setattr(Database, "for_tenant", misbound)
 
     assert _run(EXAMPLES / "T01.json")["cross_tenant_effects"] > 0
+
+
+def _interleaved(*principals: str) -> list[dict[str, str]]:
+    entries = [
+        {"tenant_id": "comercio_a", "conversation_id": "conv_a_inter", "message": "Soy Alex de A"},
+        {"tenant_id": "comercio_b", "conversation_id": "conv_b_inter", "message": "Soy Alex de B"},
+    ]
+    return [{**entry, "principal_id": who} for entry, who in zip(entries, principals, strict=True)]
+
+
+def test_interleaved_conversations_may_name_their_own_principals(tmp_path: Path) -> None:
+    interleaved = _interleaved("operador_a", "operador_b")
+    output = _run(
+        _variant(tmp_path, "T06", preconditions={"interleaved_conversations": interleaved})
+    )
+
+    assert (output["finish_reason"], output["contexts_separated"]) == ("COMPLETED", True)
+
+
+def test_an_interleaved_principal_of_another_company_is_refused_before_anything_runs(
+    tmp_path: Path,
+) -> None:
+    interleaved = _interleaved("operador_b", "operador_b")  # operador_b acting in comercio_a
+    world = tmp_path / "world"
+    output = run_scenario_file(
+        _variant(tmp_path, "T06", preconditions={"interleaved_conversations": interleaved}),
+        kit_dir=KIT,
+        workdir=world,
+    )
+
+    assert (output["finish_reason"], output["finish_detail"]) == ("BLOCKED", "auth_invalid")
+    assert output["step_count"] == 0
+    with sqlite3.connect(world / "cortex.db") as db:
+        assert db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0  # nothing ran

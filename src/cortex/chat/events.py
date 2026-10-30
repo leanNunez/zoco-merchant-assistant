@@ -1,6 +1,7 @@
 """The two Zoco Chat events the harness understands, read strictly (brief section 6).
 
-- `operator_took_over`: a person took the conversation, at a control version.
+- `operator_took_over` (also `operator_takeover`): a person took the conversation, at a
+  control version.
 - `followup_due`: a follow-up of an opportunity is due and needs a decision.
 
 The company and the conversation an event names must be the trusted ones of the call: an event
@@ -15,6 +16,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
+from types import MappingProxyType
 from typing import ClassVar, Literal
 
 from merchant_assistant.sales.contract import parse_iso_day
@@ -22,6 +24,8 @@ from merchant_assistant.shared.errors import DomainError
 
 TAKEOVER = "operator_took_over"
 FOLLOWUP = "followup_due"
+# Other names the kit's documents give to the same events.
+_ALIASES: Mapping[str, str] = MappingProxyType({"operator_takeover": TAKEOVER})
 
 _COMMON = frozenset({"type", "id", "tenant_id", "conversation_id", "timestamp"})
 _TAKEOVER_KEYS = _COMMON | {"version", "actor"}
@@ -71,7 +75,9 @@ class FollowupFacts:
 
 
 def event_type(raw: Mapping[str, object]) -> str:
+    """The event's type, by its canonical name."""
     kind = raw.get("type")
+    kind = _ALIASES.get(kind, kind) if isinstance(kind, str) else kind
     if kind not in (TAKEOVER, FOLLOWUP):
         raise InvalidEvent(f"unsupported event type {kind!r}")
     return str(kind)

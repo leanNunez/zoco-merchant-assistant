@@ -124,3 +124,23 @@ def test_an_unknown_or_malformed_scenario_fails_loudly(
 ) -> None:
     with pytest.raises(UnsupportedScenario):
         run_scenario_file(_scenario(tmp_path, **changes), kit_dir=KIT)
+
+
+def test_a_scenario_may_name_the_run_id_of_its_main_run(tmp_path: Path) -> None:
+    output: dict[str, Any] = run_scenario_file(
+        _scenario(tmp_path, run_id="run_ext_40"), kit_dir=KIT
+    )
+
+    assert output["run_id"] == "run_ext_40"
+    assert {event["run_id"] for event in output["events"]} == {"run_ext_40"}
+    assert output["executed_tools"] == ["consultar_ventas"]
+
+
+def test_without_a_run_id_the_main_run_keeps_the_derived_one(tmp_path: Path) -> None:
+    assert run_scenario_file(_scenario(tmp_path), kit_dir=KIT)["run_id"] == "run-conv_t02"
+
+
+@pytest.mark.parametrize("bad", ["", "run/../x", "r" * 129, 7, None])
+def test_an_invalid_run_id_is_an_unsupported_scenario(tmp_path: Path, bad: object) -> None:
+    with pytest.raises(UnsupportedScenario, match="run_id"):
+        run_scenario_file(_scenario(tmp_path, run_id=bad), kit_dir=KIT)

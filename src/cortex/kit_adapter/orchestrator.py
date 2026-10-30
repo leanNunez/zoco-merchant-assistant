@@ -36,7 +36,7 @@ from cortex.kit_adapter.preconditions import Setup, read_faults, read_preconditi
 from cortex.kit_adapter.scenario import Scenario, UnsupportedScenario, load_scenario, run_id_for
 from cortex.kit_adapter.world import TakeoverDuringRun, World
 from cortex.runner.agent_runner import RunResult
-from cortex.runner.finish import REASON_OF, FinishDetail
+from cortex.runner.finish import REASON_OF, FinishDetail, FinishReason, missing_failure_event
 from cortex.runner.model import ModelPort
 from cortex.runner.scripted_model import ScriptedModel
 
@@ -66,7 +66,8 @@ def run_scenario_file(
 def run_scenario(
     scenario: Scenario, *, kit_dir: Path, workdir: Path, now: datetime
 ) -> dict[str, object]:
-    run_id = run_id_for(scenario.conversation_id)
+    # The scenario's own run id for the main run; interleaved runs keep their derived ids.
+    run_id = scenario.run_id or run_id_for(scenario.conversation_id)
     data = load_harness_data(kit_dir)
     setup = read_preconditions(scenario.preconditions, data.config.limits)
     world = World(
@@ -75,10 +76,13 @@ def run_scenario(
     conversation_id = scenario.conversation_id
     try:
         auth = data.directory.authenticate(scenario.tenant_id, scenario.principal_id)
+        # Every interleaved writer too, before anything runs: one that does not belong to its
+        # company refuses the whole scenario, exactly like the main principal.
+        writers = tuple(world.auth_for(e.tenant_id, e.principal_id) for e in setup.interleaved)
     except AuthenticationFailed:
         return _unauthenticated(scenario, run_id, setup.limits, now)
 
-    separated = world.interleave(setup) if setup.interleaved else None
+    separated = world.interleave(setup, writers) if setup.interleaved else None
     world.seed(auth, conversation_id, setup)
     after_restart = _restart(world, auth, conversation_id, setup) if setup.restart else None
 
@@ -191,9 +195,8 @@ def _follow_up(
     try:
         facts = read_followup(raw, tenant_id=auth.tenant_id, conversation_id=conversation_id)
     except EventOutOfScope:
+        # The denial's tool_rejected is added at the end, like for any run that ends BLOCKED.
         tracer.emit("chat_event_rejected", step=0, reason="scope_violation")
-        # The contract asks every denial for a tool_rejected event with its reason.
-        tracer.emit("tool_rejected", step=0, tool=None, reason="scope_violation")
         detail = FinishDetail.SCOPE_VIOLATION
     except InvalidEvent as invalid:
         raise UnsupportedScenario(invalid.detail) from None
@@ -204,6 +207,9 @@ def _follow_up(
         except RunIdConflict:
             detail = FinishDetail.RUN_ID_CONFLICT
     reason = REASON_OF[detail]
+    missing = missing_failure_event(reason, (event.type for event in tracer.events))
+    if missing is not None:
+        tracer.emit(missing, step=0, tool=None, reason=detail.value)
     tracer.emit("run_finished", step=0, finish_reason=reason.value, finish_detail=detail.value)
     result = RunResult(
         run_id=run_id,
@@ -223,11 +229,15 @@ def _unauthenticated(
 ) -> dict[str, object]:
     """The caller is not who it claims: nothing runs and nothing is stored.
 
-    The contract asks every denial for a `tool_rejected` event with its reason, so the refusal
-    is reported as one, besides the event that says the run itself was refused.
+    The refusal is reported by the event that says the run itself was refused and, like any run
+    that ends BLOCKED, by the `tool_rejected` the contract asks every denial for.
     """
     stamp = now.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
-    refusal = {"timestamp": stamp, "reason": "auth_invalid"}
+    refusal = {"timestamp": stamp, "reason": FinishDetail.AUTH_INVALID.value}
+    events: list[dict[str, object]] = [{"seq": 1, "type": "run_rejected", **refusal}]
+    missing = missing_failure_event(FinishReason.BLOCKED, ["run_rejected"])
+    if missing is not None:
+        events.append({"seq": len(events) + 1, "type": missing, "tool": None, **refusal})
     return {
         "run_id": run_id,
         "tenant_id": scenario.tenant_id,
@@ -236,10 +246,7 @@ def _unauthenticated(
         "finish_detail": "auth_invalid",
         "step_count": 0,
         "max_steps": limits.max_steps,
-        "events": [
-            {"seq": 1, "type": "run_rejected", **refusal},
-            {"seq": 2, "type": "tool_rejected", "tool": None, **refusal},
-        ],
+        "events": events,
         "effects": {"claims_created": 0, "customer_messages_sent": 0},
         "state": {"conversation_mode": None, "control_version": None},
         **refused_observables(),

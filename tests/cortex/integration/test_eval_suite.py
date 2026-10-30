@@ -166,3 +166,34 @@ def test_a_trace_that_differs_from_the_stored_one_is_caught(tmp_path: Path) -> N
     output["events"] = output["events"][:-1]
 
     assert "files.trace_matches" in _failed(scenario, output, world)
+
+
+FAILURE_RULE = "contract.a_failure_says_why_with_a_tool_event"
+
+
+def test_a_scenario_with_faults_whose_output_hides_the_tool_error_is_caught(
+    tmp_path: Path,
+) -> None:
+    scenario, output, world = _real_run(tmp_path, "T07")
+    assert FAILURE_RULE not in _failed(scenario, output, world)
+    output["events"] = [e for e in output["events"] if e["type"] != "tool_error"]
+
+    assert FAILURE_RULE in _failed(scenario, output, world)
+
+
+@pytest.mark.parametrize("finish_reason", ["BLOCKED", "FAILED"])
+def test_a_blocked_or_failed_output_without_a_tool_event_is_caught(
+    tmp_path: Path, finish_reason: str
+) -> None:
+    scenario, output, world = _real_run(tmp_path, "T01")
+    output["finish_reason"] = finish_reason
+
+    assert FAILURE_RULE in _failed(scenario, output, world)
+
+
+def test_a_tool_event_without_a_reason_does_not_satisfy_the_rule(tmp_path: Path) -> None:
+    scenario, output, world = _real_run(tmp_path, "T01")
+    output["finish_reason"] = "FAILED"
+    output["events"].insert(-1, {"seq": 99, "type": "tool_error", "timestamp": "now", "reason": ""})
+
+    assert FAILURE_RULE in _failed(scenario, output, world)

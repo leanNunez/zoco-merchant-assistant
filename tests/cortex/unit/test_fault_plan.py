@@ -1,12 +1,18 @@
+import sqlite3
 from collections.abc import Mapping
+from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
 
 from cortex.identity import PrincipalDirectory, PrincipalRecord
 from cortex.timekeeping import ManualTicker
+from cortex.tools.adapters.claims import ClaimsDesk
 from cortex.tools.adapters.faults import FaultKind, FaultPlan
 from cortex.tools.failures import PermanentFailure
+from cortex.tools.zoco_catalog import CrearReclamoOperationArgs
+from merchant_assistant.shared.clock import FixedClock
 
 AUTH = PrincipalDirectory([PrincipalRecord("comercio_a", "operador_a", frozenset())]).authenticate(
     "comercio_a", "operador_a"
@@ -87,3 +93,34 @@ def test_two_plans_never_share_their_sequences() -> None:
     assert first.next_for("tool") is FaultKind.TIMEOUT
     assert second.next_for("tool") is FaultKind.TIMEOUT
     assert first.next_for("tool") is FaultKind.SUCCESS
+
+
+def test_a_repeated_operation_id_reaches_the_system_twice() -> None:
+    real, plan, ticker = _adapter(FaultKind.SUCCESS, FaultKind.REPEAT_SAME_OPERATION_ID)
+
+    assert _call(plan, real) == {"ok": True}
+    assert _call(plan, real) == {"ok": True}
+
+    assert (real.calls, ticker.seconds()) == (3, 0.0)  # the repeat arrived once more, no delay
+
+
+def test_the_claims_store_absorbs_a_repeated_operation_id(tmp_path: Path) -> None:
+    clock = FixedClock(datetime(2026, 10, 28, 12, tzinfo=UTC))
+    desk = ClaimsDesk(tmp_path / "claims", clock)
+    claims = desk.for_tenant(AUTH)
+    plan = FaultPlan(
+        {"crear_reclamo": [FaultKind.SUCCESS, FaultKind.REPEAT_SAME_OPERATION_ID]},
+        ticker=ManualTicker(),
+        timeout_cost_ms=3000,
+    )
+    bound = plan.wrap(lambda auth: {"crear_reclamo": claims})(AUTH)["crear_reclamo"]
+    command = CrearReclamoOperationArgs(
+        motivo="demora", descripcion="No recibi comprobante", operation_id="op_claim_001"
+    )
+
+    first = bound(command, conversation_id="conv_1")
+    repeated = bound(command, conversation_id="conv_1")
+
+    assert first["reclamo_id"] == repeated["reclamo_id"]
+    with sqlite3.connect(desk.path_for("comercio_a")) as db:
+        assert db.execute("SELECT COUNT(*) FROM complaints").fetchone()[0] == 1

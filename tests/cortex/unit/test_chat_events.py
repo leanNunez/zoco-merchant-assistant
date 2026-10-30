@@ -65,3 +65,7 @@ def test_only_the_two_known_events_are_accepted() -> None:
     assert event_type({"type": "operator_took_over"}) == "operator_took_over"
     with pytest.raises(InvalidEvent):
         event_type({"type": "delete_conversation"})
+
+
+def test_the_kits_other_name_for_a_takeover_is_the_same_event() -> None:
+    assert event_type({"type": "operator_takeover"}) == event_type({"type": "operator_took_over"})

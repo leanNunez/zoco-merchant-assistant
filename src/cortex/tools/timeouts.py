@@ -15,7 +15,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
-from cortex.tools.failures import ToolFailure, TransientFailure, UncertainOutcome
+from cortex.tools.failures import ToolFailure, ToolTimeout, UncertainOutcome
 from cortex.tools.gateway import ToolAdapter, WriteAdapter
 
 T = TypeVar("T")
@@ -47,7 +47,7 @@ class TimeLimited:
             raise self._on_timeout() from None
 
     def _on_timeout(self) -> ToolFailure:
-        return TransientFailure("the tool did not answer in time")
+        return ToolTimeout("the tool did not answer in time")
 
 
 class TimeLimitedWrite(TimeLimited):

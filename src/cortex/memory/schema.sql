@@ -137,6 +137,15 @@ CREATE TABLE IF NOT EXISTS trace_events (
     PRIMARY KEY (tenant_id, run_id, seq)
 );
 
+-- The contacts of each company, as its system of record lists them. Two companies may each have
+-- a contact with the same name: the key starts with the company, so they never meet.
+CREATE TABLE IF NOT EXISTS contacts (
+    tenant_id  TEXT NOT NULL,
+    contact_id TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, contact_id)
+);
+
 -- One decision per handled event: the same run_id handled again replays it.
 CREATE UNIQUE INDEX IF NOT EXISTS followup_decision_per_run
     ON followup_decisions (tenant_id, run_id);

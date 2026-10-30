@@ -33,6 +33,12 @@ class TransientFailure(ToolFailure):
     user_message: ClassVar[str] = "The tool did not answer in time."
 
 
+class ToolTimeout(TransientFailure):
+    """The attempt ran out of time. Its own code, so a trace tells a timeout from other outages."""
+
+    code: ClassVar[str] = "timeout"
+
+
 class PermanentFailure(ToolFailure):
     kind: ClassVar[FailureKind] = FailureKind.PERMANENT
     code: ClassVar[str] = "tool_refused"

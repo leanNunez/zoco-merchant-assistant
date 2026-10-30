@@ -64,7 +64,7 @@ def test_when_the_retries_run_out_the_model_gets_a_clean_error_and_the_run_goes_
 
     assert output["retry_count"] == 2  # three attempts: the original and two retries
     assert output["executed_tools"] == []
-    assert error["reason"] == "tool_unavailable"
+    assert error["reason"] == "timeout"
     assert (output["finish_reason"], output["finish_detail"]) == ("COMPLETED", "answered")
 
 
@@ -131,6 +131,16 @@ def test_a_write_that_cannot_be_reconciled_fails_the_run_and_files_nothing_twice
     assert (output["finish_reason"], output["finish_detail"]) == ("FAILED", "write_outcome_unknown")
     assert output["claims_created"] == 0
     assert "write_uncertain" in _types(output)
+
+
+@pytest.mark.parametrize("calls", [1, 2])
+def test_the_kits_repeated_operation_id_files_one_claim(tmp_path: Path, calls: int) -> None:
+    # F_WRITE_REPEAT of kit/fixtures/faults.json; with one call the repeat reaches the system.
+    faults = ["REPEAT_SAME_OPERATION_ID"] if calls == 1 else ["SUCCESS", "REPEAT_SAME_OPERATION_ID"]
+    output = _t09(tmp_path, *faults, calls=calls)
+
+    assert output["claims_created"] == output["unique_claims_created"] == 1
+    assert output["finish_reason"] == "COMPLETED"
 
 
 def test_a_refused_write_is_not_retried_and_files_nothing(tmp_path: Path) -> None:

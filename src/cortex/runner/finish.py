@@ -9,7 +9,7 @@ the next step belongs to a person.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from types import MappingProxyType
 
@@ -29,6 +29,7 @@ class FinishDetail(StrEnum):
     CONVERSATION_BUSY = "conversation_busy"
     RUN_ID_CONFLICT = "run_id_conflict"
     CONVERSATION_BLOCKED = "conversation_blocked"
+    STALE_VERSION = "stale_version"
     SCOPE_VIOLATION = "scope_violation"
     HUMAN_IN_CONTROL = "human_in_control"
     OPERATOR_TOOK_OVER = "operator_took_over"
@@ -51,6 +52,7 @@ REASON_OF: Mapping[FinishDetail, FinishReason] = MappingProxyType(
         FinishDetail.CONVERSATION_BUSY: FinishReason.BLOCKED,
         FinishDetail.RUN_ID_CONFLICT: FinishReason.BLOCKED,
         FinishDetail.CONVERSATION_BLOCKED: FinishReason.BLOCKED,
+        FinishDetail.STALE_VERSION: FinishReason.BLOCKED,
         FinishDetail.SCOPE_VIOLATION: FinishReason.BLOCKED,
         FinishDetail.HUMAN_IN_CONTROL: FinishReason.NEEDS_HUMAN,
         FinishDetail.OPERATOR_TOOK_OVER: FinishReason.NEEDS_HUMAN,
@@ -65,3 +67,24 @@ REASON_OF: Mapping[FinishDetail, FinishReason] = MappingProxyType(
         FinishDetail.RUN_INTERRUPTED: FinishReason.FAILED,
     }
 )
+
+# The events that say why something was refused or failed (kit/CONTRATO_EVALUACION.md).
+FAILURE_EVENTS = frozenset({"tool_rejected", "tool_error"})
+
+_FAILURE_EVENT_OF: Mapping[FinishReason, str] = MappingProxyType(
+    {FinishReason.BLOCKED: "tool_rejected", FinishReason.FAILED: "tool_error"}
+)
+
+
+def missing_failure_event(reason: FinishReason, emitted: Iterable[str]) -> str | None:
+    """The event a run must still emit before it finishes, if any.
+
+    The contract asks every failure or denial for a `tool_rejected` or `tool_error` event with
+    its reason. A run that ends BLOCKED or FAILED without one (a blocked conversation, a model
+    that failed, a refused admission) gets exactly one before `run_finished`: `tool_rejected`
+    when it was refused, `tool_error` when it failed, with the finish detail as its reason.
+    """
+    needed = _FAILURE_EVENT_OF.get(reason)
+    if needed is None or FAILURE_EVENTS & set(emitted):
+        return None
+    return needed

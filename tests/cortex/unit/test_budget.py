@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from cortex.config import RunLimits
@@ -45,3 +47,12 @@ def test_a_tool_attempt_never_gets_more_time_than_the_run_has_left() -> None:
     ticker.advance(0.2)
     assert budget.out_of_time()
     assert budget.attempt_timeout_ms() == 0
+
+
+def test_a_tool_limit_above_the_total_is_clamped_to_what_the_run_has_left() -> None:
+    ticker = ManualTicker()
+    budget = Budget(replace(LIMITS, total_timeout_ms=1000, tool_timeout_ms=3000), ticker)
+
+    assert budget.attempt_timeout_ms() == 1000
+    ticker.advance(0.25)
+    assert budget.attempt_timeout_ms() == 750

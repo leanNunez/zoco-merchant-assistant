@@ -56,21 +56,28 @@ class RunLimits:
     context_window_messages: int
 
     def __post_init__(self) -> None:
+        # No rule ties tool_timeout_ms to total_timeout_ms: a tool limit above the total is
+        # harmless, because each attempt gets min(tool_timeout_ms, the time the run has left)
+        # (`Budget.attempt_timeout_ms`). Each limit only has to be inside its own bounds.
         for name, (low, high) in _BOUNDS.items():
             value = getattr(self, name)
             if type(value) is not int or not low <= value <= high:
                 raise ConfigError(f"{name} must be an integer in [{low}, {high}], got {value!r}")
-        if self.tool_timeout_ms > self.total_timeout_ms:
-            raise ConfigError("tool_timeout_ms cannot exceed total_timeout_ms")
 
     def with_max_steps(self, max_steps: int) -> RunLimits:
         return self.with_limit("max_steps", max_steps)
 
     def with_limit(self, name: str, value: int) -> RunLimits:
-        """The same limits with one changed. Unknown names and out-of-range values are refused."""
-        if name not in _BOUNDS:
-            raise ConfigError(f"unknown limit {name!r}")
-        return replace(self, **{name: value})
+        return self.with_limits({name: value})
+
+    def with_limits(self, changes: Mapping[str, int]) -> RunLimits:
+        """The same limits with some changed, all at once and then validated once, so the order
+        in which they are given never matters. Unknown names and out-of-range values are
+        refused."""
+        unknown = set(changes) - set(_BOUNDS)
+        if unknown:
+            raise ConfigError(f"unknown limits {sorted(unknown)}")
+        return replace(self, **changes)
 
 
 @dataclass(frozen=True, slots=True)

@@ -68,3 +68,25 @@ def test_conversation_ids_use_a_closed_alphabet(database: Database, bad: str) ->
 
     with pytest.raises(ValueError, match="not a valid id"):
         store.open_conversation(bad)
+
+
+def test_each_companys_alex_is_its_own_contact(database: Database) -> None:
+    # kit/fixtures/tenants_ventas.json: two companies, each with a contact named Alex.
+    store_a = database.for_tenant(DIRECTORY.authenticate("comercio_a", "operador_a"))
+    store_b = database.for_tenant(DIRECTORY.authenticate("comercio_b", "operador_b"))
+    store_a.record_contact("a_01", "Alex")
+    store_b.record_contact("b_01", "Alex")
+    store_b.record_contact("b_02", "Bruno")
+
+    assert [c.contact_id for c in store_a.contacts(name="Alex")] == ["a_01"]
+    assert [c.contact_id for c in store_b.contacts(name="Alex")] == ["b_01"]
+    assert [c.contact_id for c in store_b.contacts()] == ["b_01", "b_02"]
+    assert store_a.contacts(name="Bruno") == ()
+
+
+def test_recording_a_contact_twice_keeps_one(database: Database) -> None:
+    store = database.for_tenant(DIRECTORY.authenticate("comercio_a", "operador_a"))
+    store.record_contact("a_01", "Alex")
+    store.record_contact("a_01", "Alex")
+
+    assert len(store.contacts()) == 1

@@ -2,13 +2,14 @@
 
 One handler per key. An unknown key, or a known key with a malformed value, stops the scenario
 (exit code 2) instead of being ignored: a precondition the harness did not apply would make a
-PASS meaningless.
+PASS meaningless. The run's limits are collected first and applied together, then validated
+once, so the order of the keys never changes the outcome.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from types import MappingProxyType
 
 from cortex.config import ConfigError, RunLimits
@@ -28,6 +29,8 @@ class InterleavedMessage:
     tenant_id: str
     conversation_id: str
     message: str
+    # Who writes it. None: the kit's test principal of that company.
+    principal_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,12 +51,19 @@ class Setup:
 
 def read_preconditions(preconditions: Mapping[str, object], limits: RunLimits) -> Setup:
     setup = Setup(limits)
+    changed_limits: dict[str, int] = {}
     for key, value in preconditions.items():
+        if key in LIMIT_KEYS:
+            changed_limits[key] = _limit(key, value)
+            continue
         handler = _HANDLERS.get(key)
         if handler is None:
             raise UnsupportedScenario(f"precondition {key!r} is not supported")
         setup = handler(setup, value)
-    return setup
+    try:
+        return replace(setup, limits=limits.with_limits(changed_limits))
+    except ConfigError as invalid:
+        raise UnsupportedScenario(invalid.detail) from None
 
 
 def read_faults(
@@ -73,18 +83,12 @@ def read_faults(
     return faults
 
 
-def _limit(name: str) -> Callable[[Setup, object], Setup]:
+def _limit(name: str, value: object) -> int:
     """A precondition that changes one of the run's limits for this scenario."""
-
-    def handler(setup: Setup, value: object) -> Setup:
-        if type(value) is not int:
-            raise UnsupportedScenario(f"{name} must be an integer")
-        try:
-            return replace(setup, limits=setup.limits.with_limit(name, value))
-        except ConfigError as invalid:
-            raise UnsupportedScenario(invalid.detail) from None
-
-    return handler
+    # `type(...) is int` and not isinstance: a JSON `true` must not pass as the number 1.
+    if type(value) is not int:
+        raise UnsupportedScenario(f"{name} must be an integer")
+    return value
 
 
 def _mode(setup: Setup, value: object) -> Setup:
@@ -93,13 +97,15 @@ def _mode(setup: Setup, value: object) -> Setup:
     except ValueError:
         raise UnsupportedScenario(f"unknown conversation state {value!r}") from None
     if setup.mode is not None and setup.mode is not mode:
-        raise UnsupportedScenario("current_state and initial_state disagree")
+        raise UnsupportedScenario("the names of the conversation mode disagree")
     return replace(setup, mode=mode)
 
 
 def _version(setup: Setup, value: object) -> Setup:
     if type(value) is not int or value < 0:
         raise UnsupportedScenario("current_version must be a non-negative integer")
+    if setup.control_version is not None and setup.control_version != value:
+        raise UnsupportedScenario("the names of the control version disagree")
     return replace(setup, control_version=value)
 
 
@@ -122,10 +128,12 @@ def _interleaved_conversations(setup: Setup, value: object) -> Setup:
     if not isinstance(value, list) or not value:
         raise UnsupportedScenario("interleaved_conversations must be a non-empty list")
     entries = []
+    required = {"tenant_id", "conversation_id", "message"}
     for item in value:
-        if not isinstance(item, dict) or set(item) != {"tenant_id", "conversation_id", "message"}:
+        if not isinstance(item, dict) or not required <= set(item) <= required | {"principal_id"}:
             raise UnsupportedScenario(
-                "each interleaved conversation needs exactly tenant_id, conversation_id and message"
+                "each interleaved conversation needs exactly tenant_id, conversation_id and "
+                "message, and may name its principal_id"
             )
         if not all(isinstance(text, str) and text for text in item.values()):
             raise UnsupportedScenario("interleaved conversation fields must be non-empty strings")
@@ -147,18 +155,19 @@ def _confirmed_actions(setup: Setup, value: object) -> Setup:
     return replace(setup, confirmed_actions=tuple(actions))
 
 
+# The preconditions that change one of the run's limits for this scenario.
+LIMIT_KEYS = frozenset(limit.name for limit in fields(RunLimits))
+
 _HANDLERS: Mapping[str, Callable[[Setup, object], Setup]] = MappingProxyType(
     {
-        "max_steps": _limit("max_steps"),
-        "total_timeout_ms": _limit("total_timeout_ms"),
-        "tool_timeout_ms": _limit("tool_timeout_ms"),
-        "max_read_retries": _limit("max_read_retries"),
-        "context_window_messages": _limit("context_window_messages"),
         "interleaved_conversations": _interleaved_conversations,
         "confirmed_actions": _confirmed_actions,
+        # The kit calls the same fact by several names; giving two that disagree is refused.
         "current_state": _mode,
         "initial_state": _mode,
+        "conversation_mode": _mode,
         "current_version": _version,
+        "control_version": _version,
         "pending_action": _pending_action,
         "restart_between_events": _restart,
     }

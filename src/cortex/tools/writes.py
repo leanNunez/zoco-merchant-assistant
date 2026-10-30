@@ -35,7 +35,7 @@ from cortex.tools.confirmation import (
     fingerprint,
     is_confirmed,
 )
-from cortex.tools.failures import FailureKind, ToolFailure
+from cortex.tools.failures import FailureKind, ToolFailure, UncertainOutcome
 from cortex.tools.gateway import ToolResult, WriteAdapter
 from cortex.tools.policy import Approved
 from merchant_assistant.shared.errors import DomainError
@@ -51,7 +51,7 @@ class WriteContext:
     conversation_id: str
     control_version: int
     run_id: str
-    # Where the write reports what it tries: a failed attempt, a lookup by operation id.
+    # Where the write reports what it tries: an uncertain attempt, a lookup by operation id.
     trace: Callable[..., None] = _ignore
 
 
@@ -192,7 +192,8 @@ def _execute(
                 ToolResult(name, ok=False, source_tenant=adapter.tenant_id, error=failure.public())
             )
         context.ledger.settle_operation(operation_id, OperationStatus.UNCERTAIN)
-        context.trace("write_attempt_failed", tool=name, reason=failure.code)
+        # Whatever the adapter said, what is known now is that the outcome is unknown.
+        context.trace("tool_error", tool=name, reason=UncertainOutcome.code, uncertain=True)
         if not may_retry:
             return Unresolved(operation_id)
         found = _look_up(approved, adapter, context, operation_id)

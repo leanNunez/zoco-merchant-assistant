@@ -129,9 +129,9 @@ def test_a_failed_run_leaves_its_whole_story_behind(tmp_path: Path) -> None:
 
     assert [e["type"] for e in events[3:]] == [
         "tool_requested",
-        "write_attempt_failed",
+        "tool_error",
         "write_lookup",
-        "write_attempt_failed",
+        "tool_error",
         "write_uncertain",
         "run_finished",
     ]

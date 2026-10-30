@@ -1,8 +1,8 @@
 """Composition root: the only place where the harness parts are wired together.
 
 The kit's fixtures play the part of the companies' systems of record: who belongs to which
-company, their sales, and the tools' contract. Everything is checked when loaded, so a broken or
-loosened kit stops the harness before any run.
+company, their sales and contacts, and the tools' contract. Everything is checked when loaded,
+so a broken or loosened kit stops the harness before any run.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 from cortex.config import ConfigError, HarnessConfig, load_harness_config
 from cortex.identity import AuthContext, PrincipalDirectory, PrincipalRecord
 from cortex.memory.database import Database
+from cortex.memory.tenant_store import Contact
 from cortex.observability.redaction import TraceRedactor
 from cortex.runner.agent_runner import AgentRunner
 from cortex.runner.finish import FinishReason
@@ -51,6 +52,8 @@ class HarnessData:
     sales: SalesBook
     docs: DocsLibrary
     catalog: Catalog
+    # Each company's contacts, by company id. The world loads them into each company's store.
+    contacts: Mapping[str, tuple[Contact, ...]]
 
 
 def default_corpora(root: Path) -> Mapping[str, Path]:
@@ -74,6 +77,13 @@ def load_harness_data(kit_dir: Path, corpora: Mapping[str, Path] | None = None) 
     ]
     directory = PrincipalDirectory(records)
     sales = SalesBook.from_fixture(_rows(companies, "sales"))
+    contacts: dict[str, tuple[Contact, ...]] = {}
+    for row in _rows(companies, "contacts"):
+        tenant_id = str(row["tenant_id"])
+        if tenant_id not in {record.tenant_id for record in records}:
+            raise ConfigError(f"a contact names an unknown company: {tenant_id!r}")
+        contact = Contact(str(row["contact_id"]), str(row["name"]))
+        contacts[tenant_id] = (*contacts.get(tenant_id, ()), contact)
 
     catalog = zoco_catalog()
     catalog.verify_against(_rows(_read_json(kit_dir / "tools_config.json"), "tools"))
@@ -84,6 +94,7 @@ def load_harness_data(kit_dir: Path, corpora: Mapping[str, Path] | None = None) 
         sales=sales,
         docs=DocsLibrary(default_corpora(kit_dir.parent) if corpora is None else corpora),
         catalog=catalog,
+        contacts=MappingProxyType(contacts),
     )
 
 

@@ -23,6 +23,7 @@ KNOWN_KEYS = frozenset(
         "preconditions",
         "faults",
         "incoming_event",
+        "run_id",
     }
 )
 # The kit's scenarios carry no user message; the runner needs one.
@@ -43,6 +44,8 @@ class Scenario:
     preconditions: Mapping[str, object] = field(default_factory=dict)
     faults: Mapping[str, object] = field(default_factory=dict)
     incoming_event: Mapping[str, object] | None = None
+    # The id of the main run, when the scenario gives one (the runner accepts a run_id).
+    run_id: str | None = None
 
 
 def load_scenario(raw: Mapping[str, object]) -> Scenario:
@@ -66,6 +69,7 @@ def load_scenario(raw: Mapping[str, object]) -> Scenario:
         preconditions=_object(data, "preconditions"),
         faults=_object(data, "faults"),
         incoming_event=incoming,
+        run_id=_run_id(data["run_id"]) if "run_id" in data else None,
     )
 
 
@@ -73,6 +77,13 @@ def conversation_id(value: str) -> str:
     """A conversation id in the closed alphabet the harness accepts, or an unsupported scenario."""
     if EXTERNAL_ID.fullmatch(value) is None:
         raise UnsupportedScenario(f"not a valid conversation id: {value[:40]!r}")
+    return value
+
+
+def _run_id(value: object) -> str:
+    """A run id the scenario chose, held to the same closed alphabet as any external id."""
+    if not isinstance(value, str) or EXTERNAL_ID.fullmatch(value) is None:
+        raise UnsupportedScenario(f"not a valid run_id: {str(value)[:40]!r}")
     return value
 
 

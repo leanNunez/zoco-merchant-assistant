@@ -1,7 +1,8 @@
 """Simulated failures of the outside world, played from the kit's `faults` (brief section 7).
 
-A plan lists, per tool, what each call does: `SUCCESS`, `TIMEOUT`, `INVALID_REQUEST` or
-`COMMITTED_BUT_TIMEOUT` (the effect happened, the answer was lost). Once a tool's list is used up,
+A plan lists, per tool, what each call does: `SUCCESS`, `TIMEOUT`, `INVALID_REQUEST`,
+`COMMITTED_BUT_TIMEOUT` (the effect happened, the answer was lost) or `REPEAT_SAME_OPERATION_ID`
+(the request reaches the system twice). Once a tool's list is used up,
 its calls succeed. The plan belongs to one scenario's world and is never shared. A simulated
 timeout costs the tool's full time limit on the run's clock, so the budget behaves as it would
 with a real one without anybody waiting.
@@ -26,6 +27,7 @@ class FaultKind(StrEnum):
     TIMEOUT = "TIMEOUT"
     INVALID_REQUEST = "INVALID_REQUEST"
     COMMITTED_BUT_TIMEOUT = "COMMITTED_BUT_TIMEOUT"
+    REPEAT_SAME_OPERATION_ID = "REPEAT_SAME_OPERATION_ID"
 
 
 class FaultPlan:
@@ -69,6 +71,12 @@ class _Faulty:
     def __call__(self, arguments: BaseModel, *, conversation_id: str) -> Mapping[str, object]:
         kind = self._plan.next_for(self._name)
         if kind is FaultKind.SUCCESS:
+            return self._adapter(arguments, conversation_id=conversation_id)
+        if kind is FaultKind.REPEAT_SAME_OPERATION_ID:
+            # The external system receives the same request, and so the same operation_id, a
+            # second time (a duplicated delivery). It performs the same idempotent write with the
+            # same key: the claims store's UNIQUE key absorbs it and no second effect happens.
+            self._adapter(arguments, conversation_id=conversation_id)
             return self._adapter(arguments, conversation_id=conversation_id)
         if kind is FaultKind.INVALID_REQUEST:
             raise PermanentFailure("simulated: the request was refused")

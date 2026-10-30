@@ -63,6 +63,8 @@ def test_limits_outside_their_bounds_are_refused(limit: str, value: object) -> N
         load_harness_config(_with(("defaults", limit), value))
 
 
-def test_a_tool_cannot_have_more_time_than_the_whole_run() -> None:
-    with pytest.raises(ConfigError, match="tool_timeout_ms"):
-        load_harness_config(_with(("defaults", "tool_timeout_ms"), 20000))
+def test_a_tool_limit_above_the_total_is_accepted_because_each_attempt_is_clamped() -> None:
+    # Budget.attempt_timeout_ms gives an attempt min(tool_timeout_ms, the time left).
+    config = load_harness_config(_with(("defaults", "tool_timeout_ms"), 20000))
+
+    assert (config.limits.tool_timeout_ms, config.limits.total_timeout_ms) == (20000, 15000)

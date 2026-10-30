@@ -163,7 +163,6 @@ _REACHED_THE_TOOL = frozenset(
         "tool_deduplicated",
         "write_reconciled",
         "write_uncertain",
-        "write_attempt_failed",
         "tool_confirmation_required",
     }
 )
@@ -192,6 +191,9 @@ def refused_observables() -> dict[str, object]:
 
 
 def _tools_of(result: RunResult, event_type: str) -> list[str]:
+    """The tools named by the events of a type. An event about the run itself names no tool."""
     return [
-        str(event.attributes.get("tool")) for event in result.events if event.type == event_type
+        str(event.attributes["tool"])
+        for event in result.events
+        if event.type == event_type and event.attributes.get("tool") is not None
     ]

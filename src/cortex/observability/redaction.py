@@ -70,7 +70,9 @@ ALLOWED_ATTRIBUTES: Mapping[str, frozenset[str]] = MappingProxyType(
         "tool_requested": _allowed("tool"),
         "tool_rejected": _allowed("tool", "reason", "detail"),
         "tool_executed": _allowed("tool", "data_tenant"),
-        "tool_error": _allowed("tool", "reason", "data_tenant"),
+        "tool_error": _allowed(
+            "tool", "reason", "transient", "attempt", "uncertain", "data_tenant"
+        ),
         "tool_retry": _allowed("tool", "attempt", "reason"),
         "tool_deduplicated": _allowed("tool", "data_tenant"),
         "tool_confirmation_required": _allowed("tool", "operation_id"),
@@ -78,7 +80,6 @@ ALLOWED_ATTRIBUTES: Mapping[str, frozenset[str]] = MappingProxyType(
         "confirmation_cancelled": _allowed("tool", "operation_id"),
         "write_reconciled": _allowed("tool", "data_tenant"),
         "write_uncertain": _allowed("tool", "operation_id"),
-        "write_attempt_failed": _allowed("tool", "reason"),
         "write_lookup": _allowed("tool", "found"),
         "reply_suppressed": _allowed("chars"),
         "final_answer": _allowed("chars"),

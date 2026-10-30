@@ -123,6 +123,28 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
         ),
     )
     add(
+        "V38_total_time_below_the_default_tool_time",
+        _derive(
+            t07,
+            "total_timeout_ms 1000 alone: the 3 s tool limit is clamped to the run's 1 s",
+            {"finish_reason": "LIMIT_REACHED", "finish_detail": "total_timeout", "retry_count": 0},
+            preconditions={"total_timeout_ms": 1000},
+        ),
+    )
+    add(
+        "V39_both_time_limits_total_first",
+        _derive(
+            t07,
+            "total 1000 then tool 500: a 500 ms timeout leaves time for the retry",
+            {
+                "finish_reason": "COMPLETED",
+                "retry_count": 1,
+                "executed_tools": ["consultar_ventas"],
+            },
+            preconditions={"total_timeout_ms": 1000, "tool_timeout_ms": 500},
+        ),
+    )
+    add(
         "V07_one_step_only",
         _derive(
             t02,
@@ -134,6 +156,15 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
                 "executed_tools": ["consultar_ventas"],
             },
             preconditions={"max_steps": 1},
+        ),
+    )
+    add(
+        "V40_scenario_names_its_run_id",
+        _derive(
+            t02,
+            "the scenario gives the run_id of its main run",
+            {"run_id": "run_ext_40", "finish_reason": "COMPLETED"},
+            run_id="run_ext_40",
         ),
     )
     add(
@@ -233,6 +264,15 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
             },
             faults={"crear_reclamo": ["TIMEOUT", "TIMEOUT"]},
             model_script=write_once,
+        ),
+    )
+    add(
+        "V37_write_repeated_with_the_same_operation_id",
+        _derive(
+            t09,
+            "F_WRITE_REPEAT: the same operation_id arrives again, one claim",
+            {"unique_claims_created": 1, "claims_created": 1, "finish_reason": "COMPLETED"},
+            faults={"crear_reclamo": ["SUCCESS", "REPEAT_SAME_OPERATION_ID"]},
         ),
     )
     add(
@@ -357,6 +397,43 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
             "an operator of B cannot take a conversation of A",
             {"finish_reason": "COMPLETED", "customer_messages_sent": 1},
             incoming_event={**t11["incoming_event"], "actor": "operador_b"},
+        ),
+    )
+
+    # The kit's other names for the same facts, given alone.
+    aliases = _derive(
+        t11,
+        "conversation_mode and control_version: a takeover at version 2 is not newer than 2",
+        {"finish_reason": "COMPLETED", "customer_messages_sent": 1},
+    )
+    aliases["preconditions"] = {"conversation_mode": "AUTO", "control_version": 2}
+    add("V41_other_names_of_the_control_state", aliases)
+    add(
+        "V42_other_name_of_the_takeover_event",
+        _derive(
+            t11,
+            "operator_takeover is the same event as operator_took_over",
+            {
+                "finish_reason": "NEEDS_HUMAN",
+                "finish_detail": "operator_took_over",
+                "delivered_ai_messages_after_takeover": 0,
+                "customer_messages_sent": 0,
+            },
+            incoming_event={**t11["incoming_event"], "type": "operator_takeover"},
+        ),
+    )
+    add(
+        "V43_interleaved_principal_of_another_company",
+        _derive(
+            t06,
+            "an interleaved conversation of A written by an operator of B is refused",
+            {"finish_reason": "BLOCKED", "finish_detail": "auth_invalid", "step_count": 0},
+            preconditions={
+                "interleaved_conversations": [
+                    {**entry, "principal_id": "operador_b"}
+                    for entry in t06["preconditions"]["interleaved_conversations"]
+                ]
+            },
         ),
     )
 

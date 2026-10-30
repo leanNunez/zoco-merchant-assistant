@@ -37,7 +37,7 @@ from cortex.memory.tenant_store import (
 from cortex.observability.redaction import TraceRedactor
 from cortex.observability.tracer import TraceEvent, Tracer
 from cortex.runner.budget import Budget
-from cortex.runner.finish import REASON_OF, FinishDetail, FinishReason
+from cortex.runner.finish import REASON_OF, FinishDetail, FinishReason, missing_failure_event
 from cortex.runner.model import (
     FinalAnswer,
     InvalidModelOutput,
@@ -98,6 +98,12 @@ class RunRequest:
     message: str
     auth: AuthContext
     limits: RunLimits
+    # The tools this run may use; None means the whole catalog. It can only narrow what the
+    # company's adapters offer: a tool outside it is rejected as tool_not_allowed.
+    tools: frozenset[str] | None = None
+    # The control version the caller saw. A run that finds another one is refused (BLOCKED,
+    # stale_version) before the model is asked; None means the caller does not check it.
+    expected_control_version: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,9 +174,12 @@ class _Run:
         self.store: TenantStore = runner.database.for_tenant(request.auth)
         # Tool attempts run in worker threads so that each one can be abandoned at its time limit.
         self.executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix=request.run_id)
+        # A tool outside the request's list is not even bound: the policy then rejects it as
+        # not allowed, and nothing can reach its adapter.
         self.adapters: dict[str, ToolAdapter] = {
             name: time_limited(adapter, self.executor, self.budget.attempt_timeout_ms)
             for name, adapter in runner.bind_tools(request.auth).items()
+            if request.tools is None or name in request.tools
         }
         self.jitter = jitter_for(request.run_id)
         # The tools offered in this run: the catalog's, limited to those bound to this company.
@@ -221,6 +230,12 @@ class _Run:
 
     def _loop(self, conversation: ConversationState) -> RunResult:
         conversation_id = self.request.conversation_id
+        expected = self.request.expected_control_version
+        if expected is not None and expected != conversation.control_version:
+            # The caller acted on a control state that is no longer current: its message is
+            # not taken, and nobody asks the model.
+            self._trace("checkpoint_failed", mode=conversation.mode.value)
+            return self._finish(FinishDetail.STALE_VERSION)
         self.store.append_message(
             conversation_id, self.request.run_id, "user", self.request.message
         )
@@ -337,6 +352,11 @@ class _Run:
 
     def _retrier(self, tool: str) -> Retrier:
         def note(retry_number: int, failure: ToolFailure) -> None:
+            # The attempt that failed, then the one about to be made. The last failed attempt,
+            # the one that is not retried, is reported with the result (`_record_result`).
+            self._trace(
+                "tool_error", tool=tool, reason=failure.code, transient=True, attempt=retry_number
+            )
             self._trace("tool_retry", tool=tool, attempt=retry_number + 1, reason=failure.code)
 
         return Retrier(
@@ -468,9 +488,18 @@ class _Run:
         if result.ok:
             self._trace("tool_executed", tool=result.tool, data_tenant=result.source_tenant)
         else:
-            code = result.error.get("code") if result.error else None
+            error = result.error or {}
+            attempt: dict[str, int | bool] = {}
+            if "retryable" in error:
+                attempt["transient"] = error["retryable"] == "true"
+            if "attempts" in error:
+                attempt["attempt"] = int(error["attempts"])
             self._trace(
-                "tool_error", tool=result.tool, reason=code, data_tenant=result.source_tenant
+                "tool_error",
+                tool=result.tool,
+                reason=error.get("code"),
+                data_tenant=result.source_tenant,
+                **attempt,
             )
         self._remember_tool_message(result.envelope())
 
@@ -498,6 +527,10 @@ class _Run:
 
     def _finish(self, detail: FinishDetail) -> RunResult:
         reason = REASON_OF[detail]
+        # Every run that ends BLOCKED or FAILED says why with a tool event (the contract's rule).
+        missing = missing_failure_event(reason, (event.type for event in self.tracer.events))
+        if missing is not None:
+            self._trace(missing, tool=None, reason=detail.value)
         self._trace(
             "run_finished",
             finish_reason=reason.value,

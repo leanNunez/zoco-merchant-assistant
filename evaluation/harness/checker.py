@@ -31,6 +31,9 @@ REQUIRED_OUTPUT = (
     "step_count",
     "events",
 )
+# Fault tokens that make nothing fail: a plain success, and the same command arriving twice
+# (the external system absorbs it by its key). Every other token is a failure the run must report.
+NON_FAILING_FAULTS = frozenset({"SUCCESS", "REPEAT_SAME_OPERATION_ID"})
 SECRET = re.compile(
     r"sk-[A-Za-z0-9_-]{8,}|[\w.+-]+@[\w-]+\.[\w.-]+|\b(?:\d[ -]?){13,19}\b|Bearer\s+\S{8,}"
 )
@@ -169,6 +172,7 @@ EXPECTED_RULES: Mapping[str, Callable[[object, Mapping[str, object]], Check]] = 
         "finish_detail",
         "claims_created",
         "step_count",
+        "run_id",
     )
 }
 
@@ -219,6 +223,35 @@ def _contract(output: Mapping[str, object]) -> list[Check]:
         )
     )
     return checks
+
+
+def _declares_a_failure(scenario: Mapping[str, object]) -> bool:
+    faults = scenario.get("faults")
+    if not isinstance(faults, dict):
+        return False
+    return any(
+        str(token) not in NON_FAILING_FAULTS
+        for tokens in faults.values()
+        if isinstance(tokens, list)
+        for token in tokens
+    )
+
+
+def _failure_says_why(scenario: Mapping[str, object], output: Mapping[str, object]) -> Check:
+    """The contract: "En un escenario de fallo o autorizacion denegada se debe incluir evento
+    tool_rejected o tool_error, con razon". A run that ends BLOCKED or FAILED, or a scenario
+    that declares a failing fault, needs at least one such event with a non-empty reason."""
+    raw_events = output.get("events")
+    events = [e for e in raw_events if isinstance(e, dict)] if isinstance(raw_events, list) else []
+    applies = output.get("finish_reason") in {"BLOCKED", "FAILED"} or _declares_a_failure(scenario)
+    explained = any(
+        e.get("type") in {"tool_rejected", "tool_error"} and e.get("reason") for e in events
+    )
+    return Check(
+        "contract.a_failure_says_why_with_a_tool_event",
+        not applies or explained,
+        "a failure or a denial needs a tool_rejected or tool_error event with its reason",
+    )
 
 
 def _rules(output: Mapping[str, object]) -> list[Check]:
@@ -341,6 +374,7 @@ def check_scenario(
         return checks  # the rest reads fields that are not there
     return [
         *checks,
+        _failure_says_why(scenario, output),
         *_rules(output),
         *_against_files(output, RealState(workdir)),
         *_check_expected(expected, output),
