@@ -17,12 +17,13 @@ El comando que lo prueba todo, sin claves ni internet: `make eval`.
 | Cómo se comprueba que todo funciona | `evaluation/harness/checker.py` |
 | Qué dice la consigna, qué es trampa y qué decidí | [REVISION_CONSIGNA.md](REVISION_CONSIGNA.md) |
 | Por qué está hecho así, y el caso de Zoco Canchas | [DESIGN_DECISIONS.md](DESIGN_DECISIONS.md) |
+| Amenazas, controles, lo que no se agregó y los riesgos que quedan | [SEGURIDAD.md](SEGURIDAD.md) |
 
 ## Instalación y uso
 
 ```bash
 make setup    # dependencias desde uv.lock (Python 3.11 o superior)
-make eval     # los 13 escenarios del kit y variantes propias, contra el estado real
+make eval     # los 13 escenarios del kit y las variantes propias, contra el estado real
 make demo     # cinco escenarios (lectura, otra empresa, escritura, toma de control, seguimiento)
 make check    # lint, tipos estrictos, contratos de arquitectura y tests
 uv run python evaluation_adapter.py --scenario examples/T02.json --output resultado.json
@@ -126,11 +127,17 @@ La consigna descarta una entrega que permita alguna de estas tres cosas.
 
 ## Resultados y trazas
 
-- Resultados fechados, con el commit evaluado: `evaluation/results/harness/2026-10-30/report.md`.
+- Resultados fechados: `evaluation/results/harness/2026-10-30/report.md`. Registran el commit del
+  código que corrió; el último commit del repositorio solo agrega esos resultados.
 - Dos trazas anonimizadas, un éxito y un fallo: `evaluation/results/harness/traces/`
-  (se regeneran con `uv run python -m cortex.kit_adapter.samples`).
-- El verificador no importa el harness: recalcula los efectos leyendo los archivos SQLite en solo
-  lectura, así que un adaptador que informe algo distinto de lo que hay en la base falla.
+  (se regeneran con `uv run python -m cortex.kit_adapter.samples`). El éxito es T07 del kit. El
+  fallo es T09 con dos TIMEOUT inyectados en la escritura: queda incierta y la búsqueda no
+  encuentra nada. No es un escenario del kit tal cual.
+- El verificador no importa el harness: relee los archivos SQLite en solo lectura y recalcula
+  mensajes enviados, reclamos, filas de otra empresa, modo, trazas, herramientas ejecutadas y
+  rechazadas, reintentos, pasos, decisión de seguimiento, acciones pendientes y estado tras el
+  reinicio, separación de conversaciones y límite de pasos. Lo único que no puede recalcular es
+  `external_calls_to_rejected_tool`, que se cuenta en el borde de la herramienta y no se guarda.
 
 ## Revisión adversarial
 
@@ -199,3 +206,8 @@ arquitectura y la evaluación contra el estado real (`make check` y `make eval`)
 
 El buscador, el agente, la máquina de estados y su evaluación siguen intactos, con la etiqueta
 `prueba-1` y su documentación en [PRUEBA_1.md](PRUEBA_1.md).
+
+| Entrega | Archivos y carpetas |
+|---|---|
+| Primera | `PRUEBA_1.md`, `SPEC_REVIEW.md`, `questions.jsonl`, `data/`, `docs/`, `design/`, `src/merchant_assistant/` |
+| Segunda | `src/cortex/`, `evaluation/`, `kit/`, `examples/`, `README.md`, `REVISION_CONSIGNA.md`, `DESIGN_DECISIONS.md`, `SEGURIDAD.md` |
