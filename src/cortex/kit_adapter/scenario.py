@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from cortex.config import MAX_CONTROL_VERSION
 from cortex.identifiers import EXTERNAL_ID
 
 DROPPED_KEYS = frozenset({"id", "description", "expected"})
@@ -27,6 +28,8 @@ KNOWN_KEYS = frozenset(
         "faults",
         "incoming_event",
         "run_id",
+        "tools",
+        "expected_control_version",
     }
 )
 # The kit's scenarios carry no user message; the runner needs one.
@@ -49,6 +52,11 @@ class Scenario:
     incoming_event: Mapping[str, object] | None = None
     # The id of the main run, when the scenario gives one (the runner accepts a run_id).
     run_id: str | None = None
+    # The tools the main run may use (None: the whole catalog), names checked against the catalog
+    # once it is loaded.
+    tools: frozenset[str] | None = None
+    # The control version the caller saw (None: the caller does not check it).
+    expected_control_version: int | None = None
 
 
 def load_scenario(raw: Mapping[str, object]) -> Scenario:
@@ -74,6 +82,12 @@ def load_scenario(raw: Mapping[str, object]) -> Scenario:
         faults=_object(data, "faults"),
         incoming_event=None if incoming is None else _without_fixture_keys(incoming),
         run_id=_run_id(data["run_id"]) if "run_id" in data else None,
+        tools=_tools(data["tools"]) if "tools" in data else None,
+        expected_control_version=(
+            _control_version(data["expected_control_version"])
+            if "expected_control_version" in data
+            else None
+        ),
     )
 
 
@@ -114,6 +128,21 @@ def _run_id(value: object) -> str:
     """A run id the scenario chose, held to the same closed alphabet as any external id."""
     if not isinstance(value, str) or EXTERNAL_ID.fullmatch(value) is None:
         raise UnsupportedScenario(f"not a valid run_id: {str(value)[:40]!r}")
+    return value
+
+
+def _tools(value: object) -> frozenset[str]:
+    if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
+        raise UnsupportedScenario("tools must be a list of tool names")
+    return frozenset(value)
+
+
+def _control_version(value: object) -> int:
+    # `type(...) is int` and not isinstance: a JSON `true` must not pass as the number 1.
+    if type(value) is not int or not 0 <= value <= MAX_CONTROL_VERSION:
+        raise UnsupportedScenario(
+            f"expected_control_version must be an integer between 0 and {MAX_CONTROL_VERSION}"
+        )
     return value
 
 

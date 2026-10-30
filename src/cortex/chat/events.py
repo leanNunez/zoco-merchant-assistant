@@ -17,7 +17,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, tzinfo
 from types import MappingProxyType
 from typing import ClassVar, Literal
 
@@ -70,6 +70,9 @@ class FollowupFacts:
     opted_out: bool = False
     opportunity_status: str | None = None
     agreed_contact_date: date | None = None
+    # The event gave an agreed date that is not a day nor a moment with an offset (06/11/2026,
+    # 2026-02-30): it says nothing reliable, so it can never reschedule.
+    agreed_date_unreadable: bool = False
     customer_replied: bool = False
     # The opportunity the follow-up is about: what is owed is kept per opportunity.
     opportunity_id: str | None = None
@@ -85,9 +88,10 @@ class FollowupFacts:
 
 
 def event_type(raw: Mapping[str, object]) -> str:
-    """The event's type, by its canonical name."""
+    """The event's type, by its canonical name, in any letter case."""
     kind = raw.get("type")
-    kind = _ALIASES.get(kind, kind) if isinstance(kind, str) else kind
+    if isinstance(kind, str):
+        kind = _ALIASES.get(kind.lower(), kind.lower())
     if kind not in (TAKEOVER, FOLLOWUP):
         raise InvalidEvent(f"unsupported event type {kind!r}")
     return str(kind)
@@ -115,11 +119,13 @@ def read_takeover(raw: Mapping[str, object], *, tenant_id: str, conversation_id:
 
 
 def read_followup(
-    raw: Mapping[str, object], *, tenant_id: str, conversation_id: str
+    raw: Mapping[str, object], *, tenant_id: str, conversation_id: str, business_tz: tzinfo
 ) -> FollowupFacts:
+    """`business_tz` turns an agreed moment (a datetime with its offset) into a business date."""
     data = _checked(raw, _FOLLOWUP_KEYS, tenant_id, conversation_id)
     pending_on: Literal["ZOCO", "CUSTOMER"] | None
-    match data.get("pending_on"):
+    raw_pending_on = data.get("pending_on")
+    match raw_pending_on.upper() if isinstance(raw_pending_on, str) else raw_pending_on:
         case None:
             pending_on = None
         case "ZOCO":
@@ -128,12 +134,8 @@ def read_followup(
             pending_on = "CUSTOMER"
         case _:
             raise InvalidEvent("pending_on must be ZOCO or CUSTOMER")
-    agreed = _text(data, "agreed_contact_date")
     status = _text(data, "opportunity_status")
-    try:
-        agreed_date = parse_iso_day(agreed) if agreed is not None else None
-    except DomainError:
-        raise InvalidEvent("agreed_contact_date must be YYYY-MM-DD") from None
+    agreed_date, unreadable = _agreed_date(data.get("agreed_contact_date"), business_tz)
     return FollowupFacts(
         pending_on=pending_on,
         responsible=_text(data, "responsible"),
@@ -141,9 +143,31 @@ def read_followup(
         opted_out=_flag(data, "opted_out") is True,
         opportunity_status=status.upper() if status else None,
         agreed_contact_date=agreed_date,
+        agreed_date_unreadable=unreadable,
         customer_replied=_flag(data, "customer_replied") is True,
         opportunity_id=_identifier(data, "opportunity_id"),
     )
+
+
+def _agreed_date(value: object, business_tz: tzinfo) -> tuple[date | None, bool]:
+    """(the agreed contact date, whether it was unreadable). A day (YYYY-MM-DD), or a moment with
+    its offset (ISO 8601) taken as the business date it falls on. Anything else is unreadable,
+    never a guess."""
+    if value is None:
+        return None, False
+    if not isinstance(value, str):
+        return None, True
+    try:
+        return parse_iso_day(value), False
+    except DomainError:
+        pass
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError:
+        return None, True
+    if moment.utcoffset() is None:
+        return None, True  # a moment without an offset could be any day
+    return moment.astimezone(business_tz).date(), False
 
 
 def _checked(

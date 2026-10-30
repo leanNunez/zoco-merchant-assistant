@@ -5,8 +5,9 @@ output and, when the world was kept, the SQLite files themselves, and it recompu
 with its own queries. An adapter that reported something different from what is in the files, or
 broke a rule of the contract, fails here even when its `expected` values happen to match.
 
-From the files it recomputes the messages sent, the replies, the claims, the cross-company rows,
-the conversation mode, the counts after a takeover, the trace, the tools executed and rejected,
+From the files it recomputes the messages sent, the replies, the claims, the cross-company rows
+and data, the conversation mode, the counts after a takeover, the trace, how the run finished
+(reason and detail, from its stored `run_finished`), the tools executed and rejected,
 the retries, the steps, the follow-up decision, the pending actions kept across a restart, the
 mode after it, whether interleaved conversations stayed apart, and the step limit. The one thing
 it cannot recompute is `external_calls_to_rejected_tool`: it is counted at the tool boundary
@@ -101,6 +102,10 @@ SECRET = re.compile(
             r"(?<![\w-])\d(?:[ .-]?\d){12,18}(?![\w-])",  # card-like groups of 13 to 19 digits
         )
     )
+)
+# The fields that hold an identifier: their values are ids, not text, and are not scanned.
+IDENTIFIER_FIELDS = frozenset(
+    {"run_id", "conversation_id", "tenant_id", "principal_id", "operation_id"}
 )
 # Any other long opaque token. Only the values are searched for it: the contract's own keys
 # (delivered_ai_messages_after_takeover) are as long as a token.
@@ -400,25 +405,65 @@ def _contract(output: Mapping[str, object]) -> list[Check]:
     return checks
 
 
-def _declares_a_failure(scenario: Mapping[str, object]) -> bool:
-    faults = scenario.get("faults")
-    if not isinstance(faults, dict):
-        return False
-    return any(
-        str(token) not in NON_FAILING_FAULTS
-        for tokens in faults.values()
-        if isinstance(tokens, list)
-        for token in tokens
+def _attempts(events: list[tuple[str, dict[str, Any]]], tool: str) -> int:
+    """How many calls of `tool` may have reached its adapter, counted from the trace.
+
+    Each call of a tool plays the next token of its faults, so the count is: every request of
+    the tool (`tool_requested`), every retry of a read (`tool_retry`), and every further write
+    attempt, the one made after a lookup that found the write not applied (`write_lookup` with
+    `found` false). A request that was rejected, asked for a confirmation or answered from the
+    ledger never reaches the adapter but is counted all the same: the count is an upper bound,
+    so a failing token that might have fired always needs its event.
+    """
+    return sum(
+        1
+        for kind, attributes in events
+        if attributes.get("tool") == tool
+        and (
+            kind in {"tool_requested", "tool_retry"}
+            or (kind == "write_lookup" and attributes.get("found") is False)
+        )
     )
 
 
-def _failure_says_why(scenario: Mapping[str, object], output: Mapping[str, object]) -> Check:
+def _reaches_a_failure(
+    scenario: Mapping[str, object], events: list[tuple[str, dict[str, Any]]]
+) -> bool:
+    """Did a failing fault token fire? Only when the tool was called at least as many times as
+    the position of its first failing token (see `_attempts`)."""
+    faults = scenario.get("faults")
+    if not isinstance(faults, dict):
+        return False
+    for tool, tokens in faults.items():
+        if not isinstance(tokens, list):
+            continue
+        # In any letter case, as the adapter reads them.
+        failing = [
+            i for i, token in enumerate(tokens, 1) if str(token).upper() not in NON_FAILING_FAULTS
+        ]
+        if failing and _attempts(events, str(tool)) >= failing[0]:
+            return True
+    return False
+
+
+def _failure_says_why(
+    scenario: Mapping[str, object], output: Mapping[str, object], real: RealState
+) -> Check:
     """The contract: "En un escenario de fallo o autorizacion denegada se debe incluir evento
     tool_rejected o tool_error, con razon". A run that ends BLOCKED or FAILED, or a scenario
-    that declares a failing fault, needs at least one such event with a non-empty reason."""
+    whose failing fault really fired, needs at least one such event with a non-empty reason.
+    The calls are counted from the stored trace, or from the output's when none was stored."""
     raw_events = output.get("events")
     events = [e for e in raw_events if isinstance(e, dict)] if isinstance(raw_events, list) else []
-    applies = output.get("finish_reason") in {"BLOCKED", "FAILED"} or _declares_a_failure(scenario)
+    stored = (
+        real.stored_events(str(output["tenant_id"]), str(output["run_id"]))
+        if real.available
+        else []
+    )
+    trace = stored or [(str(e.get("type")), e) for e in events]
+    applies = output.get("finish_reason") in {"BLOCKED", "FAILED"} or _reaches_a_failure(
+        scenario, trace
+    )
     explained = any(
         e.get("type") in {"tool_rejected", "tool_error"} and e.get("reason") for e in events
     )
@@ -430,15 +475,29 @@ def _failure_says_why(scenario: Mapping[str, object], output: Mapping[str, objec
 
 
 def _string_values(node: object) -> Iterator[str]:
-    """Every string stored as a value anywhere in the output (never a key)."""
+    """Every string stored as a value anywhere in the output (never a key), except the values of
+    the identifier fields: an id the caller chose (a UUID run_id, say) is not a secret. A number
+    is never one either (a control version of 2147483647)."""
     if isinstance(node, str):
         yield node
     elif isinstance(node, Mapping):
-        for value in node.values():
-            yield from _string_values(value)
+        for key, value in node.items():
+            if key not in IDENTIFIER_FIELDS:
+                yield from _string_values(value)
     elif isinstance(node, list | tuple):
         for item in node:
             yield from _string_values(item)
+
+
+def _keys(node: object) -> Iterator[str]:
+    """Every key anywhere in the output."""
+    if isinstance(node, Mapping):
+        for key, value in node.items():
+            yield str(key)
+            yield from _keys(value)
+    elif isinstance(node, list | tuple):
+        for item in node:
+            yield from _keys(item)
 
 
 def _rules(output: Mapping[str, object]) -> list[Check]:
@@ -487,7 +546,7 @@ def _rules(output: Mapping[str, object]) -> list[Check]:
         ),
         Check(
             "rule.no_secrets_in_the_output",
-            SECRET.search(json.dumps(output, ensure_ascii=False)) is None
+            not any(SECRET.search(text) for text in (*_string_values(output), *_keys(output)))
             and not any(OPAQUE_TOKEN.search(text) for text in _string_values(output)),
             "the output contains something that looks like a secret",
         ),
@@ -522,7 +581,9 @@ def _contexts_separated(preconditions: Mapping[str, object], real: RealState) ->
     nothing was stored (the run was refused before anything ran).
 
     Every interleaved message must be stored as a user message under its own company and
-    conversation and under no other, and each company's contacts must be exactly its own."""
+    conversation and under no other, and each company's contacts must be exactly its own. A
+    message stored nowhere was refused before it was stored (too long, say): it crossed nowhere,
+    so it is left out."""
     entries = preconditions.get("interleaved_conversations")
     if not isinstance(entries, list):
         return None
@@ -537,7 +598,7 @@ def _contexts_separated(preconditions: Mapping[str, object], real: RealState) ->
     held = {text: real.holders_of_user_message(text) for text in where}
     if not any(held.values()):
         return None
-    return all(held[text] == where[text] for text in where) and all(
+    return all(held[text] == where[text] for text in where if held[text]) and all(
         real.contacts(tenant) == COMPANY_CONTACTS.get(tenant, frozenset()) for tenant in tenants
     )
 
@@ -594,6 +655,11 @@ def _against_files(
             "files.cross_tenant_effects",
             real.rows_outside(tenant, run_id) + real.claims_outside(tenant),
             output.get("cross_tenant_effects"),
+        ),
+        _equal(
+            "files.cross_tenant_data_exposed",
+            _foreign_data(stored_events, str(scenario.get("tenant_id", tenant))),
+            output.get("cross_tenant_data_exposed"),
         ),
         _equal(
             "files.executed_tools",
@@ -660,7 +726,21 @@ def _against_files(
                 [(e["seq"], e["type"]) for e in events if isinstance(e, dict)],
             )
         )
+    finished = [attributes for kind, attributes in stored_events if kind == "run_finished"]
+    if finished:
+        checks += [
+            _equal(f"files.{key}", finished[-1].get(key), output.get(key))
+            for key in ("finish_reason", "finish_detail")
+        ]
     return checks
+
+
+def _foreign_data(events: list[tuple[str, dict[str, Any]]], tenant: str) -> bool:
+    """Did a stored tool result carry data of a company other than the scenario's own?"""
+    return any(
+        kind == "tool_executed" and attributes.get("data_tenant") not in (None, tenant)
+        for kind, attributes in events
+    )
 
 
 # --------------------------------------------------------------------------- the entry point
@@ -681,7 +761,7 @@ def check_scenario(
     real = RealState(workdir)
     return [
         *checks,
-        _failure_says_why(scenario, output),
+        _failure_says_why(scenario, output, real),
         *_rules(output),
         *_against_files(scenario, output, real),
         *_check_expected(expected, output, real),

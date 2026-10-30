@@ -77,7 +77,7 @@ def read_faults(
         if not isinstance(kinds, list) or not kinds:
             raise UnsupportedScenario(f"the faults of {tool} must be a non-empty list")
         try:
-            faults[tool] = tuple(FaultKind(str(kind)) for kind in kinds)
+            faults[tool] = tuple(FaultKind(str(kind).upper()) for kind in kinds)
         except ValueError:
             raise UnsupportedScenario(f"unknown fault kind in {tool}: {kinds!r}") from None
     return faults
@@ -93,7 +93,7 @@ def _limit(name: str, value: object) -> int:
 
 def _mode(setup: Setup, value: object) -> Setup:
     try:
-        mode = State(str(value))
+        mode = State(str(value).upper())
     except ValueError:
         raise UnsupportedScenario(f"unknown conversation state {value!r}") from None
     if setup.mode is not None and setup.mode is not mode:
@@ -114,7 +114,7 @@ def _version(setup: Setup, value: object) -> Setup:
 def _pending_action(setup: Setup, value: object) -> Setup:
     if not isinstance(value, dict) or set(value) != {"type", "operation_id"}:
         raise UnsupportedScenario("pending_action needs exactly type and operation_id")
-    tool = PENDING_KINDS.get(str(value["type"]))
+    tool = PENDING_KINDS.get(str(value["type"]).lower())
     if tool is None or not isinstance(value["operation_id"], str):
         raise UnsupportedScenario(f"unknown pending action {value!r}")
     return replace(setup, pending=(*setup.pending, (tool, value["operation_id"])))

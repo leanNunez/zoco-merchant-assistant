@@ -251,6 +251,11 @@ def test_a_trace_that_differs_from_the_stored_one_is_caught(tmp_path: Path) -> N
         ("T02", "state_after_restart", "AUTO"),
         ("T06", "contexts_separated", False),
         ("T02", "contexts_separated", True),
+        ("T02", "finish_reason", "LIMIT_REACHED"),
+        ("T02", "finish_detail", "max_steps"),
+        ("T05", "finish_detail", "answered"),
+        ("T12", "finish_detail", "answered"),
+        ("T02", "cross_tenant_data_exposed", True),
     ],
     ids=lambda value: str(value),
 )
@@ -268,6 +273,20 @@ def test_an_adapter_that_reports_an_observable_the_files_contradict_is_caught(
 def _edit(world: Path, sql: str, *params: object) -> None:
     with sqlite3.connect(world / "cortex.db") as db:
         db.execute(sql, params)
+
+
+def test_data_of_another_company_in_the_stored_trace_is_caught_when_the_output_hides_it(
+    tmp_path: Path,
+) -> None:
+    scenario, output, world = _real_run(tmp_path, "T02")
+    _edit(
+        world,
+        "UPDATE trace_events SET attributes = json_set(attributes, '$.data_tenant', 'comercio_b') "
+        "WHERE type = 'tool_executed'",
+    )
+
+    assert output["cross_tenant_data_exposed"] is False
+    assert "files.cross_tenant_data_exposed" in _failed(scenario, output, world)
 
 
 def test_a_pending_action_the_files_no_longer_hold_is_caught(tmp_path: Path) -> None:
@@ -347,5 +366,72 @@ def test_a_tool_event_without_a_reason_does_not_satisfy_the_rule(tmp_path: Path)
     scenario, output, world = _real_run(tmp_path, "T01")
     output["finish_reason"] = "FAILED"
     output["events"].insert(-1, {"seq": 99, "type": "tool_error", "timestamp": "now", "reason": ""})
+
+    assert FAILURE_RULE in _failed(scenario, output, world)
+
+
+def _real_variant(
+    tmp_path: Path, name: str, **changes: Any
+) -> tuple[dict[str, Any], dict[str, Any], Path]:
+    """A kit scenario with some keys changed, run with its world kept."""
+    scenario = {**_scenario(name), **changes}
+    path, world = tmp_path / "scenario.json", tmp_path / "world"
+    path.write_text(json.dumps(scenario), encoding="utf-8")
+    output = run_scenario_file(path, kit_dir=KIT, workdir=world)
+    return scenario, output, world
+
+
+def test_the_mode_after_a_restart_is_the_mode_at_the_end_of_the_restarted_run(
+    tmp_path: Path,
+) -> None:
+    preconditions = {**_scenario("T11")["preconditions"], "restart_between_events": True}
+    scenario, output, world = _real_variant(tmp_path, "T11", preconditions=preconditions)
+
+    # The takeover lands during the run that follows the restart: the person ends in control.
+    assert output["state_after_restart"] == "HUMAN" == output["state"]["conversation_mode"]
+    assert _failed(scenario, output, world) == set()
+
+
+def test_a_refused_interleaved_message_does_not_count_as_mixing_the_contexts(
+    tmp_path: Path,
+) -> None:
+    entries = _scenario("T06")["preconditions"]["interleaved_conversations"]
+    oversized = [{**entries[0], "message": "x" * 5000}, entries[1]]
+    scenario, output, world = _real_variant(
+        tmp_path, "T06", preconditions={"interleaved_conversations": oversized}
+    )
+
+    # The 5000-character message was refused before it was stored: nothing crossed.
+    assert output["contexts_separated"] is True
+    assert _failed(scenario, output, world) == set()
+
+
+@pytest.mark.parametrize(
+    ("name", "faults"),
+    [
+        # One call, and the failing token is the second one: it never fires.
+        ("T02", {"consultar_ventas": ["SUCCESS", "TIMEOUT"]}),
+        # Faults on a tool the script never calls.
+        ("T01", {"crear_reclamo": ["TIMEOUT"]}),
+        ("T02", {"buscar_documentacion": ["INVALID_REQUEST"]}),
+    ],
+    ids=["second_token_never_reached", "tool_never_called", "other_tool_never_called"],
+)
+def test_a_declared_fault_that_never_fires_needs_no_failure_event(
+    tmp_path: Path, name: str, faults: dict[str, list[str]]
+) -> None:
+    scenario, output, world = _real_variant(tmp_path, name, faults=faults)
+
+    assert output["finish_reason"] == "COMPLETED"
+    assert not [e for e in output["events"] if e["type"] in {"tool_error", "tool_rejected"}]
+    assert _failed(scenario, output, world) == set()
+
+
+def test_a_fault_reached_on_a_later_call_still_needs_its_failure_event(tmp_path: Path) -> None:
+    scenario, output, world = _real_variant(
+        tmp_path, "T08", faults={"consultar_ventas": ["SUCCESS", "INVALID_REQUEST"]}
+    )
+    assert FAILURE_RULE not in _failed(scenario, output, world)
+    output["events"] = [e for e in output["events"] if e["type"] != "tool_error"]
 
     assert FAILURE_RULE in _failed(scenario, output, world)

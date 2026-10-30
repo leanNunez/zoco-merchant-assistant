@@ -11,6 +11,7 @@ from cortex.tools.policy import (
     PolicyContext,
     Rejected,
     RejectionCode,
+    names_a_scope,
     normalize_key,
     review,
 )
@@ -118,6 +119,39 @@ def test_a_scope_field_nested_in_an_object_or_a_list_is_a_scope_violation(
     assert _code(_review("consultar_ventas", arguments)) is RejectionCode.SCOPE_VIOLATION
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        "id_empresa",
+        "es_admin",
+        "esAdmin",
+        "administrador",
+        "id_tenant",
+        "tenant_name",
+        "nombre_empresa",
+        "tenants",
+        "user_role",
+        "rol_usuario",
+        "roles",
+        "empresa_destino",
+    ],
+)
+def test_a_spanish_or_compound_scope_key_is_a_scope_violation(field: str) -> None:
+    verdict = _review("consultar_ventas", {"fecha": "2026-10-15", field: "comercio_b"})
+
+    assert _code(verdict) is RejectionCode.SCOPE_VIOLATION
+
+
+def test_a_spanish_scope_key_nested_in_a_context_object_is_a_scope_violation() -> None:
+    arguments: dict[str, object] = {"fecha": "2026-10-15", "contexto": {"id_empresa": "b"}}
+
+    verdict = _review("consultar_ventas", arguments)
+
+    assert _code(verdict) is RejectionCode.SCOPE_VIOLATION
+    assert isinstance(verdict, Rejected)
+    assert verdict.detail == "fields: ['idempresa']"
+
+
 def test_the_rejection_names_the_field_in_its_plain_form_never_the_raw_key() -> None:
     verdict = _review("consultar_ventas", {"fecha": "2026-10-15", "Tenant\u200b-ID!!": "b"})
 
@@ -133,6 +167,7 @@ def test_no_legitimate_argument_of_the_tools_is_a_scope_field() -> None:
         legitimate |= set(spec.args_model.model_fields)
 
     assert {name for name in legitimate if normalize_key(name) in SCOPE_FIELDS} == set()
+    assert {name for name in legitimate if names_a_scope(name)} == set()
 
 
 def test_a_deeply_nested_payload_is_walked_without_recursion() -> None:

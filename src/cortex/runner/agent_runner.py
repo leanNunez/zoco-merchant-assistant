@@ -18,7 +18,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Iterable, Iterator, Mapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import tzinfo
 from types import MappingProxyType
@@ -78,10 +78,11 @@ from merchant_assistant.shared.clock import Clock, business_today
 
 _LOG = logging.getLogger(__name__)
 
-# Tool attempts run in a pool of this many worker threads per run, so that each can be abandoned
-# at its time limit. An abandoned attempt cannot be killed (Python has no way): it keeps its
-# thread until it returns on its own, so abandoned attempts stay in this pool. The pool does not
-# grow; an attempt that has to wait for a free thread is still bound by its own time limit.
+# Tool attempts and model calls run in a pool of this many worker threads per run, so that each
+# can be abandoned at its time limit (a model call's limit is the time the run has left). An
+# abandoned call cannot be killed (Python has no way): it keeps its thread until it returns on
+# its own, so abandoned calls stay in this pool. The pool does not grow; a call that has to wait
+# for a free thread is still bound by its own time limit.
 MAX_TOOL_WORKERS = 4
 
 # Written by the code, not by the model: the answer to an attempt to reach another company.
@@ -162,6 +163,10 @@ class AgentRunner:
     ticker: Ticker
     business_tz: tzinfo
     redactor: TraceRedactor
+    # The shortest real wait for a tool attempt or a model call, whatever the limit read from
+    # `ticker`. 0 in production; a world whose ticker is simulated sets it high enough that
+    # real time never decides an outcome (see `cortex.tools.timeouts`).
+    real_wait_floor_ms: int = 0
 
     def run(self, request: RunRequest) -> RunResult:
         check_external_id(request.run_id)
@@ -185,7 +190,9 @@ class _Run:
         # A tool outside the request's list is not even bound: the policy then rejects it as
         # not allowed, and nothing can reach its adapter.
         self.adapters: dict[str, ToolAdapter] = {
-            name: time_limited(adapter, self.executor, self.budget.attempt_timeout_ms)
+            name: time_limited(
+                adapter, self.executor, self.budget.attempt_timeout_ms, runner.real_wait_floor_ms
+            )
             for name, adapter in runner.bind_tools(request.auth).items()
             if request.tools is None or name in request.tools
         }
@@ -299,10 +306,21 @@ class _Run:
     def _ask_model(self) -> ModelTurn | FinishDetail:
         self.budget.take_step()
         self._trace("model_called")
+        remaining_ms = self.budget.remaining_ms()
+        # In a worker thread, so the call is bound by the time the run has left: a model that
+        # does not answer by then is abandoned, like a tool attempt (see MAX_TOOL_WORKERS).
+        call = self.executor.submit(
+            self.runner.model.next_turn, self._prompt(), timeout_ms=remaining_ms
+        )
+        answered, _ = wait(
+            (call,), timeout=max(remaining_ms, self.runner.real_wait_floor_ms) / 1000
+        )
+        if not answered:
+            call.cancel()
+            self._trace("model_failed", code=FinishDetail.TOTAL_TIMEOUT.value)
+            return FinishDetail.TOTAL_TIMEOUT
         try:
-            turn = self.runner.model.next_turn(
-                self._prompt(), timeout_ms=self.budget.remaining_ms()
-            )
+            turn = call.result()
             _check_answer_length(turn)
         except (ScriptExhausted, InvalidModelOutput, ModelUnavailable) as failure:
             self._trace("model_failed", code=failure.code)

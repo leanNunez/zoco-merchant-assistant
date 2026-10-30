@@ -167,6 +167,53 @@ def test_a_takeover_after_a_tool_request_is_a_control_change_not_a_rejected_tool
     assert calls == []
 
 
+def _kit_script(name: str) -> list[dict[str, Any]]:
+    script: list[dict[str, Any]] = json.loads(
+        (EXAMPLES / f"{name}.json").read_text(encoding="utf-8")
+    )["model_script"]
+    return script
+
+
+@pytest.mark.parametrize(
+    ("changes", "finish"),
+    [
+        # The confirmation question of a write is written by the code, not by the model.
+        (
+            {"model_script": [{"tool": "crear_reclamo", "args": CLAIM}, {"final": "Listo"}]},
+            ("NEEDS_HUMAN", "operator_took_over"),
+        ),
+        # So is the refusal of a scope violation.
+        ({"model_script": _kit_script("T05")}, ("BLOCKED", "scope_violation")),
+        # A run that never delivers anything: the takeover lands right after it.
+        (
+            {
+                "model_script": _kit_script("T08"),
+                "preconditions": {"current_state": "AUTO", "current_version": 1, "max_steps": 3},
+            },
+            ("LIMIT_REACHED", "max_steps"),
+        ),
+        ({"model_script": []}, ("FAILED", "script_exhausted")),
+        ({"message": "x" * 5000}, ("BLOCKED", "message_too_long")),
+    ],
+    ids=["confirmation_question", "scope_refusal", "limit_reached", "failed", "oversized"],
+)
+def test_a_takeover_before_delivery_is_applied_whatever_the_run_delivers(
+    tmp_path: Path, changes: dict[str, Any], finish: tuple[str, str]
+) -> None:
+    output = _run(tmp_path, "T11", **changes)
+
+    assert (output["finish_reason"], output["finish_detail"]) == finish
+    assert (output["state"]["conversation_mode"], output["state"]["control_version"]) == (
+        "HUMAN",
+        2,
+    )
+    assert [entry["type"] for entry in output["chat_events"]] == ["chat_event_applied"]
+    assert output["delivered_ai_messages_after_takeover"] == 0
+    assert output["tool_effects_after_takeover"] == 0
+    assert (output["ai_replies_delivered"], output["customer_messages_sent"]) == (0, 0)
+    assert output["claims_created"] == 0
+
+
 def test_a_takeover_before_the_run_means_the_model_is_never_called(tmp_path: Path) -> None:
     output = _run(tmp_path, "T11", incoming_event={"type": "operator_took_over", "version": 2})
 

@@ -52,6 +52,35 @@ SCOPE_BASES = frozenset(
 )
 # A normalized key is a scope field when it is a base name or a base name followed by "id".
 SCOPE_FIELDS = SCOPE_BASES | frozenset(f"{base}id" for base in SCOPE_BASES)
+# Compound and Spanish names (`id_empresa`, `es_admin`, `rol_usuario`): a key that is not one of
+# the tool's own arguments is a scope field when one of its words is in this vocabulary, singular
+# or plural, Spanish or English...
+SCOPE_WORDS = frozenset(
+    {
+        "tenant",
+        "tenants",
+        "empresa",
+        "empresas",
+        "company",
+        "companies",
+        "comercio",
+        "comercios",
+        "merchant",
+        "merchants",
+        "principal",
+        "principals",
+        "principales",
+        "role",
+        "roles",
+        "rol",
+        "admin",
+        "admins",
+        "administrador",
+        "administradores",
+    }
+)
+# ...or when its normal form contains one of these stems anywhere (`administracion`, `companyName`).
+SCOPE_STEMS = ("tenant", "empresa", "compan", "comercio", "merchant", "principal", "admin")
 
 # A tool name the model invented is untrusted text: it is shown only when it is a plain name.
 REDACTED_NAME = "<redacted>"
@@ -102,7 +131,7 @@ def review(call: ToolCall, catalog: Catalog, context: PolicyContext) -> Approved
     if spec is None or not _mode_allows(context.mode, spec):
         return Rejected(tool, RejectionCode.TOOL_NOT_ALLOWED, "not offered in this conversation")
 
-    scope_fields = _scope_fields_named(call.arguments)
+    scope_fields = _scope_fields_named(call.arguments, frozenset(spec.args_model.model_fields))
     if scope_fields:
         return Rejected(tool, RejectionCode.SCOPE_VIOLATION, f"fields: {scope_fields}")
 
@@ -138,12 +167,49 @@ def normalize_key(key: str) -> str:
     return "".join(character for character in folded if character.isalnum())
 
 
-def _scope_fields_named(raw: str) -> list[str]:
+def key_words(key: str) -> list[str]:
+    """The words of a key: NFKC, split on every character that is not a letter or a digit and
+    where a camelCase word starts (`esAdmin`, `TenantID`), each word case folded."""
+    text = unicodedata.normalize("NFKC", key)
+    words: list[str] = []
+    current = ""
+    for index, character in enumerate(text):
+        if not character.isalnum():
+            if current:
+                words.append(current)
+            current = ""
+            continue
+        following = text[index + 1] if index + 1 < len(text) else ""
+        previous = current[-1] if current else ""
+        starts_a_word = character.isupper() and (
+            previous.islower() or previous.isdigit() or (previous.isupper() and following.islower())
+        )
+        if current and starts_a_word:
+            words.append(current)
+            current = ""
+        current += character
+    if current:
+        words.append(current)
+    return [word.casefold() for word in words]
+
+
+def names_a_scope(key: str) -> bool:
+    """Whether a key names a company, a principal or a role, in any spelling the guard knows."""
+    normal = normalize_key(key)
+    return (
+        normal in SCOPE_FIELDS
+        or any(word in SCOPE_WORDS for word in key_words(key))
+        or any(stem in normal for stem in SCOPE_STEMS)
+    )
+
+
+def _scope_fields_named(raw: str, declared: frozenset[str]) -> list[str]:
     """The scope fields the payload names at any depth, in their normal form, sorted.
 
-    Only the normal form is returned, never the raw key: the model chose that text. The walk is
-    iterative, so a deeply nested payload cannot exhaust the stack. A payload that is not JSON
-    is left to the schema check.
+    A key that is one of the tool's declared arguments is never one. Only the normal form is
+    returned, never the raw key: the model chose that text. The walk is iterative, so a deeply
+    nested payload cannot exhaust the stack. A payload that is not JSON is left to the schema
+    check.
     """
     if len(raw) > MAX_ARGUMENTS_CHARS:
         return []
@@ -156,7 +222,9 @@ def _scope_fields_named(raw: str) -> list[str]:
     while pending:
         node = pending.pop()
         if isinstance(node, dict):
-            found.update(name for name in map(normalize_key, node) if name in SCOPE_FIELDS)
+            found.update(
+                normalize_key(key) for key in node if key not in declared and names_a_scope(key)
+            )
             pending.extend(node.values())
         elif isinstance(node, list):
             pending.extend(node)

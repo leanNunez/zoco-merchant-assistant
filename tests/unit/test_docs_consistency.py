@@ -753,9 +753,28 @@ def test_the_template_asks_for_no_secret() -> None:
     assert all(variables[name] == (False, "") for name in secrets), "secrets must stay empty"
 
 
+# A line a dotenv loader would read as setting a variable (a commented-out one sets nothing).
+_ACTIVE_ASSIGNMENT = re.compile(r"^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=")
+
+
 def test_env_example_is_the_readme_template() -> None:
     path = ROOT / ".env.example"
     if not path.exists():
         pytest.skip("create .env.example from the README template (see the Configuración section)")
+    content = read(path).strip()
+    template = "\n".join(template_lines()).strip()
 
-    assert read(path).strip() == "\n".join(template_lines()).strip()
+    # The file may open with a header of its own: comment and blank lines only, so it assigns
+    # nothing a dotenv loader would read. After it, the template exactly. Only booleans are
+    # asserted, so a failure never prints the file.
+    ends_with_template = content.endswith(template)
+    header = content[: len(content) - len(template)] if ends_with_template else ""
+    header_lines = header.splitlines()
+    header_ends_a_line = header == "" or header.endswith("\n")
+    header_is_comments = all(not line.strip() or line.startswith("#") for line in header_lines)
+    header_assigns_nothing = not any(_ACTIVE_ASSIGNMENT.match(line) for line in header_lines)
+
+    assert ends_with_template, ".env.example should end with the README template, exactly"
+    assert header_ends_a_line, "the template should start on a line of its own"
+    assert header_is_comments, "the header of .env.example should hold only comments"
+    assert header_assigns_nothing, "the header of .env.example should assign no variable"

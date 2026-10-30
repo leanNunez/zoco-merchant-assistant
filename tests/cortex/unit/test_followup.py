@@ -149,3 +149,30 @@ def test_the_rescheduled_date_and_the_responsible_travel_with_the_decision() -> 
     )
 
     assert (outcome.reschedule_to, outcome.responsible) == (date(2026, 11, 6), "Ana")
+
+
+def test_an_unreadable_agreed_date_is_an_internal_task() -> None:
+    facts = {"agreed_date_unreadable": True, "pending_on": "CUSTOMER", "contact_allowed": True}
+
+    assert _decide(facts) == (Decision.TAREA_INTERNA, ("AGREED_DATE_UNREADABLE",))
+    # It comes right before rescheduling: a person in control does not change the reason.
+    assert _decide(facts, human=True) == (Decision.TAREA_INTERNA, ("AGREED_DATE_UNREADABLE",))
+
+
+@pytest.mark.parametrize(
+    ("facts", "decision", "reasons"),
+    [
+        ({"opted_out": True}, Decision.CANCELAR, ("OPTED_OUT",)),
+        (
+            {"pending_on": "ZOCO", "contact_allowed": True},
+            Decision.TAREA_INTERNA,
+            ("ZOCO_OWES_ACTION",),
+        ),
+        ({"contact_allowed": False}, Decision.TAREA_INTERNA, ("CONTACT_NOT_ALLOWED",)),
+        ({}, Decision.TAREA_INTERNA, ("CONSENT_UNKNOWN",)),
+    ],
+)
+def test_the_earlier_rules_win_over_an_unreadable_agreed_date(
+    facts: dict[str, object], decision: Decision, reasons: tuple[str, ...]
+) -> None:
+    assert _decide({**facts, "agreed_date_unreadable": True}) == (decision, reasons)

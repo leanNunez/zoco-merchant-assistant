@@ -1,4 +1,6 @@
 import json
+from datetime import date
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -13,11 +15,14 @@ from cortex.chat.events import (
 from cortex.config import MAX_CONTROL_VERSION
 
 SCOPE = {"tenant_id": "comercio_a", "conversation_id": "conv_1"}
+BUSINESS_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 
 def test_an_unknown_key_is_refused() -> None:
     with pytest.raises(InvalidEvent, match="unknown event keys"):
-        read_followup({"type": "followup_due", "force_contact": True}, **SCOPE)
+        read_followup(
+            {"type": "followup_due", "force_contact": True}, **SCOPE, business_tz=BUSINESS_TZ
+        )
 
 
 @pytest.mark.parametrize(
@@ -52,7 +57,6 @@ def test_a_takeover_needs_a_positive_integer_version(version: object) -> None:
 @pytest.mark.parametrize(
     "raw",
     [
-        {"type": "followup_due", "agreed_contact_date": "06/11/2026"},
         {"type": "followup_due", "pending_on": "NOBODY"},
         {"type": "followup_due", "contact_allowed": "yes"},
         {"type": "followup_due", "opportunity_id": "opp a; DROP"},
@@ -61,7 +65,7 @@ def test_a_takeover_needs_a_positive_integer_version(version: object) -> None:
 )
 def test_malformed_follow_up_facts_are_refused(raw: dict[str, object]) -> None:
     with pytest.raises(InvalidEvent):
-        read_followup(raw, **SCOPE)
+        read_followup(raw, **SCOPE, business_tz=BUSINESS_TZ)
 
 
 def test_only_the_two_known_events_are_accepted() -> None:
@@ -95,11 +99,52 @@ def test_an_event_names_a_conversation_only_inside_the_trusted_company(
 
 def test_a_follow_up_keeps_its_opportunity_and_the_digest_covers_every_fact() -> None:
     event = {"type": "followup_due", "pending_on": "ZOCO"}
-    first = read_followup({**event, "opportunity_id": "opp_a"}, **SCOPE)
-    second = read_followup({**event, "opportunity_id": "opp_b"}, **SCOPE)
+    first = read_followup({**event, "opportunity_id": "opp_a"}, **SCOPE, business_tz=BUSINESS_TZ)
+    second = read_followup({**event, "opportunity_id": "opp_b"}, **SCOPE, business_tz=BUSINESS_TZ)
 
     assert first.opportunity_id == "opp_a"
     # The same facts about another opportunity are another event, not a repetition.
     assert first.digest() != second.digest()
-    assert read_followup(event, **SCOPE).opportunity_id is None
+    assert read_followup(event, **SCOPE, business_tz=BUSINESS_TZ).opportunity_id is None
     assert set(json.loads(first.canonical())) == set(first.__dataclass_fields__)
+
+
+@pytest.mark.parametrize(
+    ("agreed", "day"),
+    [
+        ("2026-11-06", date(2026, 11, 6)),
+        ("2026-11-06T10:00:00-03:00", date(2026, 11, 6)),
+        # 02:00 in UTC is still the evening before in Buenos Aires: the business date counts.
+        ("2026-11-06T02:00:00+00:00", date(2026, 11, 5)),
+        ("2026-11-06T02:00:00Z", date(2026, 11, 5)),
+    ],
+)
+def test_an_agreed_date_is_a_day_or_a_moment_with_an_offset(agreed: str, day: date) -> None:
+    raw = {"type": "followup_due", "agreed_contact_date": agreed}
+
+    facts = read_followup(raw, **SCOPE, business_tz=BUSINESS_TZ)
+
+    assert (facts.agreed_contact_date, facts.agreed_date_unreadable) == (day, False)
+
+
+@pytest.mark.parametrize(
+    "agreed", ["06/11/2026", "2026-02-30", "2026-11-06T10:00:00", "mañana", "", 20261106]
+)
+def test_an_agreed_date_that_cannot_be_read_is_kept_as_unreadable(agreed: object) -> None:
+    raw = {"type": "followup_due", "agreed_contact_date": agreed}
+
+    facts = read_followup(raw, **SCOPE, business_tz=BUSINESS_TZ)
+
+    assert (facts.agreed_contact_date, facts.agreed_date_unreadable) == (None, True)
+
+
+@pytest.mark.parametrize("raw", ["OPERATOR_TOOK_OVER", "Operator_Takeover", "FollowUp_Due"])
+def test_the_event_type_is_read_in_any_letter_case(raw: str) -> None:
+    assert event_type({"type": raw}) in {"operator_took_over", "followup_due"}
+
+
+@pytest.mark.parametrize(("raw", "pending_on"), [("zoco", "ZOCO"), ("Customer", "CUSTOMER")])
+def test_pending_on_is_read_in_any_letter_case(raw: str, pending_on: str) -> None:
+    event = {"type": "followup_due", "pending_on": raw}
+
+    assert read_followup(event, **SCOPE, business_tz=BUSINESS_TZ).pending_on == pending_on

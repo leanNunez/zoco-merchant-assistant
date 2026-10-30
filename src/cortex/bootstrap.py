@@ -123,7 +123,10 @@ def build_runner(
     clock: Clock,
     ticker: Ticker,
     trace_key: str = DEFAULT_TRACE_KEY,
+    real_wait_floor_ms: int = 0,
 ) -> AgentRunner:
+    """`real_wait_floor_ms` is the shortest real wait of a tool attempt or a model call: 0 unless
+    `ticker` is simulated (see `AgentRunner.real_wait_floor_ms`)."""
     return AgentRunner(
         database=database,
         catalog=data.catalog,
@@ -133,6 +136,7 @@ def build_runner(
         ticker=ticker,
         business_tz=BUSINESS_TIMEZONE,
         redactor=TraceRedactor(trace_key),
+        real_wait_floor_ms=real_wait_floor_ms,
     )
 
 

@@ -6,7 +6,8 @@ running the same scenario twice gives the same output.
 
 The order follows the scenario: interleaved conversations, the starting state, the restart, and
 then either a follow-up decision (no model involved) or a run, with the takeover applied before
-it or, through the model, in the middle of it.
+it, after the model's first tool request, or right before the run's first delivery attempt (right
+after the run when it tried none).
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from cortex.bootstrap import DEFAULT_TRACE_KEY
+from cortex.bootstrap import BUSINESS_TIMEZONE, DEFAULT_TRACE_KEY
 from cortex.chat.events import (
     FOLLOWUP,
     EventOutOfScope,
@@ -44,7 +45,14 @@ from cortex.kit_adapter.scenario import (
     run_id_for,
 )
 from cortex.kit_adapter.scenario import conversation_id as checked_conversation_id
-from cortex.kit_adapter.world import TakeoverDuringRun, World
+from cortex.kit_adapter.world import (
+    AFTER_REPLY,
+    AFTER_TOOL_REQUEST,
+    BEFORE_RUN,
+    TakeoverBeforeDelivery,
+    TakeoverDuringRun,
+    World,
+)
 from cortex.runner.agent_runner import RunResult
 from cortex.runner.finish import REASON_OF, FinishDetail, FinishReason, missing_failure_event
 from cortex.runner.model import ModelPort
@@ -110,6 +118,9 @@ def run_scenario(
     # The scenario's own run id for the main run; interleaved runs keep their derived ids.
     run_id = scenario.run_id or run_id_for(conversation_id)
     data = load_kit_data(kit_dir)
+    unknown_tools = (scenario.tools or frozenset()) - set(data.catalog.names)
+    if unknown_tools:
+        raise UnsupportedScenario(f"tools names unknown tools: {sorted(unknown_tools)}")
     setup = read_preconditions(scenario.preconditions, data.config.limits)
     world = World(
         data,
@@ -138,16 +149,31 @@ def run_scenario(
         result, decision = _follow_up(world, auth, conversation_id, run_id, event, setup.limits)
     else:
         model: ModelPort = ScriptedModel(scenario.model_script)
+        landing: TakeoverBeforeDelivery | None = None
         if event is not None:
-            model = _takeover(world, auth, conversation_id, event, model, chat_log)
-        result = world.run(auth, run_id, conversation_id, scenario.message, setup.limits, model)
+            model, landing = _takeover(world, auth, conversation_id, event, model, chat_log)
+        result = world.run(
+            auth,
+            run_id,
+            conversation_id,
+            scenario.message,
+            setup.limits,
+            model,
+            tools=scenario.tools,
+            expected_control_version=scenario.expected_control_version,
+            before_delivery=landing.land if landing else None,
+        )
+        if landing is not None:
+            landing.land()  # the run never tried to deliver: the takeover lands after it
         result = _with_refused_events(world, auth, result, chat_log)
 
     store = world.database.for_tenant(auth)
     applied = any(entry["type"] == "chat_event_applied" for entry in chat_log)
+    # The mode after a restart is the mode at the end of the run the restarted process made.
+    final = store.conversation(conversation_id)
     facts = ScenarioFacts(
         contexts_separated=separated,
-        state_after_restart=after_restart.mode if after_restart else None,
+        state_after_restart=(final.mode.value if final else None) if after_restart else None,
         pending_action_retained=after_restart.pending_retained if after_restart else None,
         takeover_seq=store.chat.last_takeover_seq(conversation_id) if applied else None,
         decision=decision.decision.value if decision else None,
@@ -171,7 +197,6 @@ def _acting_conversation(scenario: Scenario) -> str:
 
 @dataclass(frozen=True, slots=True)
 class _AfterRestart:
-    mode: str | None
     pending_retained: bool
 
 
@@ -179,10 +204,8 @@ def _restart(world: World, auth: AuthContext, conversation_id: str, setup: Setup
     """Restart, then read what survived with the objects of the new process."""
     world.restart()
     store = world.database.for_tenant(auth)
-    conversation = store.conversation(conversation_id)
     still_open = {action.operation_id for action in store.ledger.open_actions(conversation_id)}
     return _AfterRestart(
-        mode=conversation.mode.value if conversation else None,
         pending_retained=all(operation_id in still_open for _, operation_id in setup.pending),
     )
 
@@ -204,15 +227,17 @@ def _takeover(
     raw: Mapping[str, object],
     model: ModelPort,
     log: list[dict[str, object]],
-) -> ModelPort:
-    """Apply the takeover now, or arrange for it to land in the middle of the run."""
+) -> tuple[ModelPort, TakeoverBeforeDelivery | None]:
+    """Apply the takeover now, or arrange for it to land in the middle of the run: right after
+    the model's first tool request, or right before the run's first delivery attempt."""
     event = dict(raw)
     when = event.pop("when", None)
+    when = when.lower() if isinstance(when, str) else when
     try:
         takeover = read_takeover(event, tenant_id=auth.tenant_id, conversation_id=conversation_id)
     except EventOutOfScope as refused:
         log.append({"type": "chat_event_rejected", "reason": refused.code})
-        return model
+        return model, None
     except InvalidEvent as invalid:
         raise UnsupportedScenario(invalid.detail) from None
 
@@ -231,10 +256,14 @@ def _takeover(
             entry["conflict"] = True
         log.append(entry)
 
-    if when in (None, "before_run"):
+    if when in (None, BEFORE_RUN):
         take_over()
-        return model
-    return TakeoverDuringRun(model, str(when), take_over)
+        return model, None
+    if when == AFTER_TOOL_REQUEST:
+        return TakeoverDuringRun(model, take_over), None
+    if when == AFTER_REPLY:
+        return model, TakeoverBeforeDelivery(take_over)
+    raise UnsupportedScenario(f"unknown moment for the takeover: {when!r}")
 
 
 def _with_refused_events(
@@ -277,7 +306,12 @@ def _follow_up(
     tracer = world.chat.tracer(auth, conversation_id, run_id)
     decision: FollowupDecision | None = None
     try:
-        facts = read_followup(raw, tenant_id=auth.tenant_id, conversation_id=conversation_id)
+        facts = read_followup(
+            raw,
+            tenant_id=auth.tenant_id,
+            conversation_id=conversation_id,
+            business_tz=BUSINESS_TIMEZONE,
+        )
     except EventOutOfScope:
         # The denial's tool_rejected is added at the end, like for any run that ends BLOCKED.
         tracer.emit("chat_event_rejected", step=0, reason=EventOutOfScope.code)
@@ -319,13 +353,15 @@ def _unauthenticated(
     that ends BLOCKED, by the `tool_rejected` the contract asks every denial for.
     """
     stamp = now.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    # Named like every other event, from the request itself: nothing is stored for this caller.
+    ids = {"run_id": run_id, "tenant_id": scenario.tenant_id, "conversation_id": conversation_id}
     refusal = {"timestamp": stamp, "reason": FinishDetail.AUTH_INVALID.value}
-    events: list[dict[str, object]] = [{"seq": 1, "type": "run_rejected", **refusal}]
+    events: list[dict[str, object]] = [{"seq": 1, "type": "run_rejected", **ids, **refusal}]
     missing = missing_failure_event(
         FinishDetail.AUTH_INVALID, [("run_rejected", FinishDetail.AUTH_INVALID.value)]
     )
     if missing is not None:
-        events.append({"seq": len(events) + 1, "type": missing, "tool": None, **refusal})
+        events.append({"seq": len(events) + 1, "type": missing, **ids, "tool": None, **refusal})
     return {
         "run_id": run_id,
         "tenant_id": scenario.tenant_id,

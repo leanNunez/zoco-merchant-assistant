@@ -8,6 +8,7 @@ import json
 import re
 import sqlite3
 from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,8 +18,11 @@ from cortex.bootstrap import HarnessData
 from cortex.identity import AuthContext
 from cortex.kit_adapter import world
 from cortex.kit_adapter.orchestrator import run_scenario_file
+from cortex.kit_adapter.preconditions import Setup
 from cortex.memory.database import RECOVERY_STATEMENTS, Database
 from cortex.memory.tenant_store import Contact, StoredMessage, TenantStore
+from cortex.runner.finish import FinishDetail
+from cortex.runner.scripted_model import ScriptedModel
 from cortex.tools.adapters.claims import ClaimsDesk
 from cortex.tools.gateway import ToolAdapter
 
@@ -225,3 +229,37 @@ def test_an_interleaved_principal_of_another_company_is_refused_before_anything_
     assert output["step_count"] == 0
     with sqlite3.connect(world / "cortex.db") as db:
         assert db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0  # nothing ran
+
+
+def test_the_same_operation_id_in_both_companies_files_one_claim_in_each(
+    tmp_path: Path, harness_data: HarnessData
+) -> None:
+    claim = {"motivo": "demora", "descripcion": "No recibi comprobante", "operation_id": "op_1"}
+    limits = harness_data.config.limits
+    kit_world = world.World(
+        harness_data, tmp_path, datetime(2026, 10, 28, 12, tzinfo=UTC), {}, limits
+    )
+    setup = Setup(limits, confirmed_actions=(("crear_reclamo", claim),))
+    results = {}
+    for tenant_id in ("comercio_a", "comercio_b"):
+        auth = kit_world.auth_for(tenant_id)
+        kit_world.seed(auth, "conv_1", setup)
+        script: list[dict[str, object]] = [
+            {"tool": "crear_reclamo", "args": claim},
+            {"final": "Registrado"},
+        ]
+        results[tenant_id] = kit_world.run(
+            auth, f"run-{tenant_id}", "conv_1", "Hola", limits, ScriptedModel(script)
+        )
+
+    for tenant_id, result in results.items():
+        types = [event.type for event in result.events]
+        executed = [e for e in result.events if e.type == "tool_executed"]
+        assert result.finish_detail is FinishDetail.ANSWERED, tenant_id
+        # Executed in each company, never deduplicated against nor refused by the other's.
+        assert [e.attributes["data_tenant"] for e in executed] == [tenant_id]
+        assert "tool_deduplicated" not in types
+        assert "tool_rejected" not in types
+        assert kit_world.audit.claims(tenant_id) == (1, 1)
+        assert kit_world.audit.claims_outside(tenant_id) == 1  # the other company's own claim
+        assert kit_world.audit.rows_written_outside(tenant_id, f"run-{tenant_id}") == 0

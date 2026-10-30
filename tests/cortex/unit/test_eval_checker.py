@@ -323,3 +323,26 @@ def test_the_long_names_of_the_contracts_own_keys_are_not_taken_for_tokens() -> 
     # delivered_ai_messages_after_takeover is 36 characters of a token's alphabet.
     assert "delivered_ai_messages_after_takeover" in GOOD
     assert _failed(GOOD) == set()
+
+
+def test_identifiers_and_numbers_are_not_taken_for_secrets() -> None:
+    run_id = "123e4567-e89b-12d3-a456-426614174000"
+    event = {
+        "seq": 1,
+        "type": "confirmation_received",
+        "timestamp": STAMP,
+        "run_id": run_id,
+        "operation_id": "3f2a9c4e8b1d7a6f5e0c9b8a7d6e5f4a3b2c1d0e",
+        "elapsed_ms": 2147483647,
+    }
+    output = _with(
+        run_id=run_id,
+        events=[event],
+        state={"conversation_mode": "HUMAN", "control_version": 2147483647},
+        chat_events=[{"type": "chat_event_applied", "version": 2147483647}],
+    )
+
+    assert "rule.no_secrets_in_the_output" not in _failed(output)
+    # The same values in free text are still caught.
+    assert _leaks(f"the run {run_id}")
+    assert _leaks("version 2147483647")

@@ -16,9 +16,10 @@ nor closed, or consent that is not known, never leads to contacting the customer
 | 5 | the status is neither open nor closed        | TAREA_INTERNA | UNKNOWN_OPPORTUNITY_STATUS |
 | 6 | contact is not allowed                       | TAREA_INTERNA | CONTACT_NOT_ALLOWED        |
 |   | consent is unknown                           | TAREA_INTERNA | CONSENT_UNKNOWN            |
-| 7 | the customer agreed a later contact date     | REPROGRAMAR   | CUSTOMER_REQUESTED_LATER   |
-| 8 | a person controls the conversation           | TAREA_INTERNA | HUMAN_IN_CONTROL           |
-| 9 | otherwise                                    | CONTACTAR     | FOLLOWUP_DUE               |
+| 7 | the agreed contact date cannot be read       | TAREA_INTERNA | AGREED_DATE_UNREADABLE     |
+| 8 | the customer agreed a later contact date     | REPROGRAMAR   | CUSTOMER_REQUESTED_LATER   |
+| 9 | a person controls the conversation           | TAREA_INTERNA | HUMAN_IN_CONTROL           |
+|10 | otherwise                                    | CONTACTAR     | FOLLOWUP_DUE               |
 """
 
 from __future__ import annotations
@@ -63,6 +64,11 @@ def decide(facts: FollowupFacts, *, today: date, human_in_control: bool) -> Foll
     internal = _internal_task_reason(facts)
     if internal is not None:
         return FollowupDecision(Decision.TAREA_INTERNA, (internal,), facts.responsible)
+    if facts.agreed_date_unreadable:
+        # Where the date would decide: a person must read it, the customer is not contacted.
+        return FollowupDecision(
+            Decision.TAREA_INTERNA, ("AGREED_DATE_UNREADABLE",), facts.responsible
+        )
     if facts.agreed_contact_date is not None and facts.agreed_contact_date > today:
         return FollowupDecision(
             Decision.REPROGRAMAR,

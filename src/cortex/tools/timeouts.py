@@ -5,6 +5,10 @@ longer it is abandoned: a read is then a TRANSIENT failure (nothing changed, try
 work) and a write is an UNCERTAIN outcome (the request may have landed before the answer was
 lost). Python cannot kill a running thread, so an abandoned call may still finish in the
 background; that is exactly why a write is never assumed to have failed.
+
+The limit is read from the run's clock. When that clock is simulated (the evaluation's world),
+the real wait must never be what decides: `floor_ms` is the shortest real wait, so the wait is
+max(the attempt's limit, floor_ms). It is 0 in production, where both clocks are the same.
 """
 
 from __future__ import annotations
@@ -25,12 +29,17 @@ class TimeLimited:
     """A read adapter that gives up after the time the run still allows."""
 
     def __init__(
-        self, adapter: ToolAdapter, executor: ThreadPoolExecutor, timeout_ms: Callable[[], int]
+        self,
+        adapter: ToolAdapter,
+        executor: ThreadPoolExecutor,
+        timeout_ms: Callable[[], int],
+        floor_ms: int = 0,
     ) -> None:
         self.tenant_id = adapter.tenant_id
         self._adapter = adapter
         self._executor = executor
         self._timeout_ms = timeout_ms
+        self._floor_ms = floor_ms
 
     def __call__(self, arguments: BaseModel, *, conversation_id: str) -> Mapping[str, object]:
         return self._limited(lambda: self._adapter(arguments, conversation_id=conversation_id))
@@ -41,7 +50,7 @@ class TimeLimited:
             raise self._on_timeout()
         future = self._executor.submit(call)
         try:
-            return future.result(timeout=allowed_ms / 1000)
+            return future.result(timeout=max(allowed_ms, self._floor_ms) / 1000)
         except TimeoutError:  # the wait ran out, or the adapter itself timed out
             future.cancel()
             raise self._on_timeout() from None
@@ -54,9 +63,13 @@ class TimeLimitedWrite(TimeLimited):
     """A write adapter: a timeout leaves the outcome unknown, and the lookup is limited too."""
 
     def __init__(
-        self, adapter: WriteAdapter, executor: ThreadPoolExecutor, timeout_ms: Callable[[], int]
+        self,
+        adapter: WriteAdapter,
+        executor: ThreadPoolExecutor,
+        timeout_ms: Callable[[], int],
+        floor_ms: int = 0,
     ) -> None:
-        super().__init__(adapter, executor, timeout_ms)
+        super().__init__(adapter, executor, timeout_ms, floor_ms)
         self._writer = adapter
 
     def lookup(self, operation_id: str) -> Mapping[str, object] | None:
@@ -67,8 +80,11 @@ class TimeLimitedWrite(TimeLimited):
 
 
 def time_limited(
-    adapter: ToolAdapter, executor: ThreadPoolExecutor, timeout_ms: Callable[[], int]
+    adapter: ToolAdapter,
+    executor: ThreadPoolExecutor,
+    timeout_ms: Callable[[], int],
+    floor_ms: int = 0,
 ) -> ToolAdapter:
     if isinstance(adapter, WriteAdapter):
-        return TimeLimitedWrite(adapter, executor, timeout_ms)
-    return TimeLimited(adapter, executor, timeout_ms)
+        return TimeLimitedWrite(adapter, executor, timeout_ms, floor_ms)
+    return TimeLimited(adapter, executor, timeout_ms, floor_ms)

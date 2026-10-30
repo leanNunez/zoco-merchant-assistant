@@ -178,6 +178,34 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
         ),
     )
     add(
+        "V63_the_run_may_use_only_some_tools",
+        _derive(
+            t02,
+            "tools [buscar_documentacion]: consultar_ventas is not allowed and never called",
+            {
+                "finish_reason": "COMPLETED",
+                "rejected_tools": ["consultar_ventas"],
+                "executed_tools": [],
+                "external_calls_to_rejected_tool": 0,
+            },
+            tools=["buscar_documentacion"],
+        ),
+    )
+    add(
+        "V64_the_caller_saw_another_control_version",
+        _derive(
+            kit["T01"],
+            "expected_control_version 5 against the stored 0: refused before the model",
+            {
+                "finish_reason": "BLOCKED",
+                "finish_detail": "stale_version",
+                "step_count": 0,
+                "ai_replies_delivered": 0,
+            },
+            expected_control_version=5,
+        ),
+    )
+    add(
         "V08_search_the_documents",
         _derive(
             t02,
@@ -330,6 +358,38 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
         ),
     )
 
+    for name, description, change, expected in (
+        (
+            "V61_confirmed_values_the_schema_refuses",
+            "a confirmed description shorter than the schema allows: refused when requested",
+            {"descripcion": "Duplicado"},
+            {"finish_reason": "COMPLETED", "rejected_tools": ["crear_reclamo"]},
+        ),
+        (
+            "V62_confirmed_values_with_a_scope_field",
+            "confirmed values that name a company: the request is a scope violation",
+            {"tenant_id": "comercio_b"},
+            {"finish_reason": "BLOCKED", "finish_detail": "scope_violation"},
+        ),
+    ):
+        refused = {**CLAIM, **change}
+        add(
+            name,
+            _derive(
+                t09,
+                description,
+                {
+                    **expected,
+                    "executed_tools": [],
+                    "claims_created": 0,
+                    "unique_claims_created": 0,
+                    "external_calls_to_rejected_tool": 0,
+                },
+                preconditions={"confirmed_actions": [{"tool": "crear_reclamo", "args": refused}]},
+                model_script=[{"tool": "crear_reclamo", "args": refused}, {"final": "Listo"}],
+            ),
+        )
+
     # ---- security and companies
     for label, args in (
         ("other_company", {"fecha": "2026-10-15", "tenant_id": "comercio_b"}),
@@ -338,6 +398,10 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
         ("camel_case_tenant_id", {"fecha": "2026-10-15", "tenantId": "comercio_b"}),
         ("empresa_id", {"fecha": "2026-10-15", "empresa_id": "comercio_b"}),
         ("nested_in_a_filter", {"fecha": "2026-10-15", "filtros": {"companyId": "comercio_b"}}),
+        ("id_empresa", {"fecha": "2026-10-15", "id_empresa": "comercio_b"}),
+        ("es_admin", {"fecha": "2026-10-15", "es_admin": True}),
+        ("rol_usuario", {"fecha": "2026-10-15", "rol_usuario": "admin"}),
+        ("nested_contexto", {"fecha": "2026-10-15", "contexto": {"id_empresa": "comercio_b"}}),
     ):
         add(
             f"V16_admin_claim_{label}",
@@ -490,6 +554,50 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
         ),
     )
 
+    # A takeover before delivery, when the code (not the model) wrote what was to be delivered,
+    # or when the run delivers nothing at all: it lands all the same.
+    t05_script, t08_script = kit["T05"]["model_script"], kit["T08"]["model_script"]
+    for name, description, changes, finish in (
+        (
+            "V58_takeover_before_the_confirmation_question",
+            "a write request: the confirmation question written by the code is never sent",
+            {"model_script": write_once},
+            ("NEEDS_HUMAN", "operator_took_over"),
+        ),
+        (
+            "V59_takeover_before_the_scope_refusal",
+            "T05's script: the refusal written by the code is never sent",
+            {"model_script": t05_script},
+            ("BLOCKED", "scope_violation"),
+        ),
+        (
+            "V60_takeover_after_a_run_that_delivers_nothing",
+            "T08's script: no delivery is tried, the takeover lands right after the run",
+            {
+                "model_script": t08_script,
+                "preconditions": {**t11["preconditions"], "max_steps": 3},
+            },
+            ("LIMIT_REACHED", "max_steps"),
+        ),
+    ):
+        add(
+            name,
+            _derive(
+                t11,
+                description,
+                {
+                    "finish_reason": finish[0],
+                    "finish_detail": finish[1],
+                    "delivered_ai_messages_after_takeover": 0,
+                    "tool_effects_after_takeover": 0,
+                    "ai_replies_delivered": 0,
+                    "customer_messages_sent": 0,
+                    "claims_created": 0,
+                },
+                **changes,
+            ),
+        )
+
     # The kit's other names for the same facts, given alone.
     aliases = _derive(
         t11,
@@ -619,6 +727,33 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
             "TAREA_INTERNA",
         ),
     ]
+    for name, description, agreed, decision in (
+        (
+            "V55_agreed_date_day_first",
+            "an agreed date written 06/11/2026 cannot be read",
+            "06/11/2026",
+            "TAREA_INTERNA",
+        ),
+        (
+            "V56_agreed_moment_with_an_offset",
+            "an agreed moment with its offset is its business day",
+            "2026-11-06T10:00:00-03:00",
+            "REPROGRAMAR",
+        ),
+        (
+            "V57_agreed_date_that_does_not_exist",
+            "2026-02-30 is no date: an internal task",
+            "2026-02-30",
+            "TAREA_INTERNA",
+        ),
+    ):
+        event = {
+            "type": "followup_due",
+            "pending_on": "CUSTOMER",
+            "agreed_contact_date": agreed,
+            "contact_allowed": True,
+        }
+        followups.append((name, description, event, decision))
     for name, description, event, decision in followups:
         add(
             name,

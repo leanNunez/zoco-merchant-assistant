@@ -3,8 +3,9 @@
 import pytest
 
 from cortex.config import MAX_CONTROL_VERSION, RunLimits
-from cortex.kit_adapter.preconditions import read_preconditions
+from cortex.kit_adapter.preconditions import read_faults, read_preconditions
 from cortex.kit_adapter.scenario import UnsupportedScenario
+from cortex.tools.adapters.faults import FaultKind
 from merchant_assistant.control.states import State
 
 DEFAULTS = RunLimits(
@@ -136,3 +137,25 @@ def test_a_control_version_outside_the_bounds_is_an_unsupported_scenario(
 ) -> None:
     with pytest.raises(UnsupportedScenario, match="version"):
         read_preconditions({name: version}, DEFAULTS)
+
+
+# --------------------------------------------------------------------------- letter case
+
+
+@pytest.mark.parametrize("name", ["initial_state", "current_state", "conversation_mode"])
+@pytest.mark.parametrize(("raw", "mode"), [("human", State.HUMAN), ("Blocked", State.BLOCKED)])
+def test_the_conversation_mode_is_read_in_any_letter_case(name: str, raw: str, mode: State) -> None:
+    assert read_preconditions({name: raw}, DEFAULTS).mode is mode
+
+
+@pytest.mark.parametrize("kind", ["Reclamo", "RECLAMO", "Crear_Reclamo"])
+def test_the_kind_of_a_pending_action_is_read_in_any_letter_case(kind: str) -> None:
+    setup = read_preconditions({"pending_action": {"type": kind, "operation_id": "op_1"}}, DEFAULTS)
+
+    assert setup.pending == (("crear_reclamo", "op_1"),)
+
+
+def test_a_fault_kind_is_read_in_any_letter_case() -> None:
+    faults = read_faults({"consultar_ventas": ["timeout", "Success"]}, ("consultar_ventas",))
+
+    assert faults == {"consultar_ventas": (FaultKind.TIMEOUT, FaultKind.SUCCESS)}
