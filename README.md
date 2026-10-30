@@ -34,7 +34,8 @@ El modelo es un guion determinista (el `model_script` de cada escenario), así q
 internet ni claves. El historial que recibe el modelo se limita a 12 mensajes (de
 `harness_config.json`) y siempre empieza en un mensaje del usuario; las acciones pendientes, las
 operaciones y el estado de control se envían estructurados, nunca resumidos. El `.env.example`
-es el de la primera entrega: el harness no lee variables.
+es el de la primera entrega: el harness no lo lee. La única variable de entorno que usa es
+`CORTEX_TRACE_KEY` (opcional), y la lee solo el punto de entrada, nunca la librería.
 **No incluye la demostración con un LLM real** (IT no facilitó acceso): el modelo entra por el
 puerto de `src/cortex/runner/model.py`, que es donde se enchufaría.
 
@@ -158,8 +159,9 @@ campo en la pregunta de confirmación), con sus tests en el mismo archivo.
 - **Un comando interrumpido por un crash no se vuelve a ejecutar con el mismo `run_id`** (podría
   haber respondido antes de caerse): termina `FAILED` con `run_interrupted` y se reintenta con un
   `run_id` nuevo. Una escritura que quedó en vuelo se concilia por su `operation_id`.
-- **Sin migraciones de esquema.** Cada mundo se crea con el esquema vigente; un `--workdir` que
-  quedó de una versión anterior hay que borrarlo antes de reutilizarlo.
+- **Sin migraciones de esquema.** Cada mundo se crea con el esquema vigente. Por eso `--workdir`
+  debe estar vacío o no existir: uno con contenido se rechaza (código de salida 2) en lugar de
+  reutilizarse.
 - **Autenticación simulada.** El principal y la empresa son fixtures confiables del evaluador;
   no hay login, emisión ni vencimiento de credenciales.
 - **Un solo proceso y SQLite local.** Los candados (una ejecución por conversación, escrituras con
@@ -167,7 +169,10 @@ campo en la pregunta de confirmación), con sus tests en el mismo archivo.
 - **Los mensajes se guardan completos** en la tabla de la conversación (es la memoria); las
   trazas, los resultados, los logs y la ficha del operador no los llevan, pero no hay política de
   retención ni de borrado.
-- **La sal del hash del principal en las trazas es pública** en esta demostración.
+- **La clave del seudónimo del principal en las trazas es pública por defecto** en esta
+  demostración, para que las salidas sean reproducibles. El seudónimo es un HMAC-SHA-256 de la
+  empresa y el principal; con `CORTEX_TRACE_KEY` el punto de entrada usa una clave propia. Una
+  clave vacía se rechaza.
 - **No se integra el modo SUGGEST** (borradores que aprueba un operador) de la primera entrega: una
   conversación que no está en AUTO no ejecuta al agente.
 - **El seguimiento registra la decisión, no la ejecuta**: no hay scheduler ni envío (la consigna
