@@ -28,8 +28,13 @@ make check    # lint, tipos estrictos, contratos de arquitectura y tests
 uv run python evaluation_adapter.py --scenario examples/T02.json --output resultado.json
 ```
 
+Tras `make setup`, el comando literal del contrato (`python evaluation_adapter.py ...`) también funciona.
+
 El modelo es un guion determinista (el `model_script` de cada escenario), así que nada necesita
-internet ni claves. El `.env.example` es el de la primera entrega: el harness no lee variables.
+internet ni claves. El historial que recibe el modelo se limita a 12 mensajes (de
+`harness_config.json`) y siempre empieza en un mensaje del usuario; las acciones pendientes, las
+operaciones y el estado de control se envían estructurados, nunca resumidos. El `.env.example`
+es el de la primera entrega: el harness no lee variables.
 **No incluye la demostración con un LLM real** (IT no facilitó acceso): el modelo entra por el
 puerto de `src/cortex/runner/model.py`, que es donde se enchufaría.
 
@@ -122,7 +127,7 @@ La consigna descarta una entrega que permita alguna de estas tres cosas.
 
 - Resultados fechados, con el commit evaluado: `evaluation/results/harness/2026-10-30/report.md`.
 - Dos trazas anonimizadas, un éxito y un fallo: `evaluation/results/harness/traces/`
-  (se regeneran con `python -m cortex.kit_adapter.samples`).
+  (se regeneran con `uv run python -m cortex.kit_adapter.samples`).
 - El verificador no importa el harness: recalcula los efectos leyendo los archivos SQLite en solo
   lectura, así que un adaptador que informe algo distinto de lo que hay en la base falla.
 
