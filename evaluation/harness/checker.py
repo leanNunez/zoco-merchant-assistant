@@ -5,6 +5,13 @@ output and, when the world was kept, the SQLite files themselves, and it recompu
 with its own queries. An adapter that reported something different from what is in the files, or
 broke a rule of the contract, fails here even when its `expected` values happen to match.
 
+From the files it recomputes the messages sent, the replies, the claims, the cross-company rows,
+the conversation mode, the counts after a takeover, the trace, the tools executed and rejected,
+the retries, the steps, the follow-up decision, the pending actions kept across a restart, the
+mode after it, whether interleaved conversations stayed apart, and the step limit. The one thing
+it cannot recompute is `external_calls_to_rejected_tool`: it is counted at the tool boundary
+and nothing stores it, so it stays a check on the adapter's own output.
+
 Every `expected` key needs a rule below. A key nobody knows how to check fails loudly: an
 assertion that is not checked would turn a PASS into a guess.
 """
@@ -20,7 +27,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-KIT_CONFIG = Path(__file__).resolve().parents[2] / "kit" / "harness_config.json"
+KIT = Path(__file__).resolve().parents[2] / "kit"
+KIT_CONFIG = KIT / "harness_config.json"
+KIT_COMPANIES = KIT / "fixtures" / "tenants_ventas.json"
 
 
 def read_allowed_finish_reasons(config: Path) -> frozenset[str]:
@@ -35,7 +44,37 @@ def read_allowed_finish_reasons(config: Path) -> frozenset[str]:
     return frozenset(reasons)
 
 
+def read_default_max_steps(config: Path) -> int:
+    """The step limit of a run that sets none, as the kit's own configuration says."""
+    try:
+        limit = json.loads(config.read_text(encoding="utf-8"))["defaults"]["max_steps"]
+    except (OSError, ValueError, KeyError, TypeError):
+        limit = None
+    if type(limit) is not int:
+        raise ValueError(f"{config.name} has no integer defaults.max_steps")
+    return limit
+
+
+def read_company_contacts(fixture: Path) -> dict[str, frozenset[tuple[str, str]]]:
+    """Each company's contacts, (contact_id, name), as the kit's fixture lists them."""
+    try:
+        rows = json.loads(fixture.read_text(encoding="utf-8"))["contacts"]
+        contacts: dict[str, frozenset[tuple[str, str]]] = {}
+        for row in rows:
+            tenant = str(row["tenant_id"])
+            contacts[tenant] = contacts.get(tenant, frozenset()) | {
+                (str(row["contact_id"]), str(row["name"]))
+            }
+    except (OSError, ValueError, KeyError, TypeError):
+        raise ValueError(f"{fixture.name} has no list of contacts") from None
+    return contacts
+
+
 ALLOWED_FINISH_REASONS = read_allowed_finish_reasons(KIT_CONFIG)
+DEFAULT_MAX_STEPS = read_default_max_steps(KIT_CONFIG)
+COMPANY_CONTACTS = read_company_contacts(KIT_COMPANIES)
+# A write that is still waiting, or was confirmed and not settled, or is held for a person.
+OPEN_ACTIONS = ("PENDING", "CONFIRMED", "SUSPENDED")
 REQUIRED_OUTPUT = (
     "run_id",
     "tenant_id",
@@ -198,6 +237,59 @@ class RealState:
             run_id,
         )
         return [(int(seq), str(kind)) for seq, kind in rows]
+
+    def stored_events(self, tenant: str, run_id: str) -> list[tuple[str, dict[str, Any]]]:
+        """(type, attributes) of each stored event of the run, in order."""
+        rows = self._query(
+            "SELECT type, attributes FROM trace_events "
+            "WHERE tenant_id = ? AND run_id = ? ORDER BY seq",
+            tenant,
+            run_id,
+        )
+        events = []
+        for kind, raw in rows:
+            try:
+                attributes = json.loads(raw)
+            except (TypeError, ValueError):
+                attributes = None
+            events.append((str(kind), attributes if isinstance(attributes, dict) else {}))
+        return events
+
+    def decision(self, tenant: str, run_id: str) -> tuple[str, list[str]] | None:
+        """(decision, reasons) stored for the run's follow-up, None when it decided nothing."""
+        rows = self._query(
+            "SELECT decision, reasons FROM followup_decisions WHERE tenant_id = ? AND run_id = ?",
+            tenant,
+            run_id,
+        )
+        if not rows:
+            return None
+        return str(rows[0][0]), [reason for reason in str(rows[0][1]).split(",") if reason]
+
+    def open_actions(self, tenant: str, conversation: str) -> set[str]:
+        """The operation ids of the conversation's writes still pending, confirmed or suspended."""
+        marks = ", ".join("?" for _ in OPEN_ACTIONS)
+        rows = self._query(
+            "SELECT operation_id FROM pending_actions "  # noqa: S608 - the marks are fixed
+            f"WHERE tenant_id = ? AND conversation_id = ? AND status IN ({marks})",
+            tenant,
+            conversation,
+            *OPEN_ACTIONS,
+        )
+        return {str(row[0]) for row in rows}
+
+    def holders_of_user_message(self, text: str) -> set[tuple[str, str]]:
+        """Every (company, conversation) that stores `text` as a user message."""
+        rows = self._query(
+            "SELECT DISTINCT tenant_id, conversation_id FROM messages "
+            "WHERE role = 'user' AND content = ?",
+            text,
+        )
+        return {(str(tenant), str(conversation)) for tenant, conversation in rows}
+
+    def contacts(self, tenant: str) -> frozenset[tuple[str, str]]:
+        rows = self._query("SELECT contact_id, name FROM contacts WHERE tenant_id = ?", tenant)
+        return frozenset((str(contact_id), str(name)) for contact_id, name in rows)
 
 
 # ------------------------------------------------------------------ what `expected` may say
@@ -395,17 +487,83 @@ def _rules(output: Mapping[str, object]) -> list[Check]:
 # --------------------------------------------------------------------------- against the files
 
 
-def _against_files(output: Mapping[str, object], real: RealState) -> list[Check]:
-    """Recompute from the SQLite files what the output claims, with the checker's own queries."""
+def _tools_named(events: list[tuple[str, dict[str, Any]]], kind: str) -> list[str]:
+    """The tool of each stored event of a type. An event about the run itself names no tool."""
+    return [
+        str(attributes["tool"])
+        for event, attributes in events
+        if event == kind and attributes.get("tool") is not None
+    ]
+
+
+def _preconditions(scenario: Mapping[str, object]) -> Mapping[str, object]:
+    preconditions = scenario.get("preconditions")
+    return preconditions if isinstance(preconditions, dict) else {}
+
+
+def _step_limit(preconditions: Mapping[str, object]) -> int:
+    """The scenario's own step limit, otherwise the kit's default."""
+    limit = preconditions.get("max_steps")
+    return limit if type(limit) is int else DEFAULT_MAX_STEPS
+
+
+def _contexts_separated(preconditions: Mapping[str, object], real: RealState) -> bool | None:
+    """Did the interleaved conversations stay apart? None when the scenario has none, or when
+    nothing was stored (the run was refused before anything ran).
+
+    Every interleaved message must be stored as a user message under its own company and
+    conversation and under no other, and each company's contacts must be exactly its own."""
+    entries = preconditions.get("interleaved_conversations")
+    if not isinstance(entries, list):
+        return None
+    where: dict[str, set[tuple[str, str]]] = {}
+    tenants = set()
+    for entry in entries:
+        if isinstance(entry, dict):
+            where.setdefault(str(entry.get("message")), set()).add(
+                (str(entry.get("tenant_id")), str(entry.get("conversation_id")))
+            )
+            tenants.add(str(entry.get("tenant_id")))
+    held = {text: real.holders_of_user_message(text) for text in where}
+    if not any(held.values()):
+        return None
+    return all(held[text] == where[text] for text in where) and all(
+        real.contacts(tenant) == COMPANY_CONTACTS.get(tenant, frozenset()) for tenant in tenants
+    )
+
+
+def _after_restart(
+    preconditions: Mapping[str, object], real: RealState, tenant: str, conversation: str
+) -> tuple[str | None, bool | None]:
+    """(mode, pending writes kept) of a scenario that restarts the process; (None, None) when it
+    does not, or when the conversation was never stored (the run was refused)."""
+    mode = real.mode(tenant, conversation)
+    if preconditions.get("restart_between_events") is not True or mode is None:
+        return None, None
+    pending = preconditions.get("pending_action")
+    wanted = {str(pending.get("operation_id"))} if isinstance(pending, dict) else set()
+    return mode, wanted <= real.open_actions(tenant, conversation)
+
+
+def _against_files(
+    scenario: Mapping[str, object], output: Mapping[str, object], real: RealState
+) -> list[Check]:
+    """Recompute from the SQLite files what the output claims, with the checker's own queries.
+    Only `external_calls_to_rejected_tool` is left to the output: it is counted at the tool
+    boundary and nothing stores it."""
     if not real.available:
         return []
     tenant, conversation, run_id = (
         str(output[k]) for k in ("tenant_id", "conversation_id", "run_id")
     )
+    preconditions = _preconditions(scenario)
     claims, distinct = real.claims(tenant)
     replies, contacts = real.sent(tenant, run_id)
     effects = output.get("effects")
     effects = effects if isinstance(effects, dict) else {}
+    stored_events = real.stored_events(tenant, run_id)
+    decision = real.decision(tenant, run_id)
+    mode_after_restart, pending_kept = _after_restart(preconditions, real, tenant, conversation)
     checks = [
         *(
             _equal(f"files.{where}{key}", wanted, source.get(key))
@@ -426,6 +584,42 @@ def _against_files(output: Mapping[str, object], real: RealState) -> list[Check]
             "files.cross_tenant_effects",
             real.rows_outside(tenant, run_id) + real.claims_outside(tenant),
             output.get("cross_tenant_effects"),
+        ),
+        _equal(
+            "files.executed_tools",
+            _tools_named(stored_events, "tool_executed"),
+            output.get("executed_tools"),
+        ),
+        _equal(
+            "files.rejected_tools",
+            _tools_named(stored_events, "tool_rejected"),
+            output.get("rejected_tools"),
+        ),
+        _equal(
+            "files.retry_count",
+            sum(1 for kind, _ in stored_events if kind == "tool_retry"),
+            output.get("retry_count"),
+        ),
+        _equal(
+            "files.step_count",
+            sum(1 for kind, _ in stored_events if kind == "model_called"),
+            output.get("step_count"),
+        ),
+        _equal("files.max_steps", _step_limit(preconditions), output.get("max_steps")),
+        _equal("files.decision", decision[0] if decision else None, output.get("decision")),
+        _equal(
+            "files.decision_reasons",
+            decision[1] if decision else [],
+            output.get("decision_reasons"),
+        ),
+        _equal("files.state_after_restart", mode_after_restart, output.get("state_after_restart")),
+        _equal(
+            "files.pending_action_retained", pending_kept, output.get("pending_action_retained")
+        ),
+        _equal(
+            "files.contexts_separated",
+            _contexts_separated(preconditions, real),
+            output.get("contexts_separated"),
         ),
     ]
     state = output.get("state")
@@ -479,7 +673,7 @@ def check_scenario(
         *checks,
         _failure_says_why(scenario, output),
         *_rules(output),
-        *_against_files(output, real),
+        *_against_files(scenario, output, real),
         *_check_expected(expected, output, real),
     ]
 

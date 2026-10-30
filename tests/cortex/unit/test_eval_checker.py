@@ -18,6 +18,8 @@ from evaluation.harness.checker import (
     check_refusal,
     check_scenario,
     read_allowed_finish_reasons,
+    read_company_contacts,
+    read_default_max_steps,
 )
 
 CHECKER = Path(__file__).resolve().parents[3] / "evaluation" / "harness" / "checker.py"
@@ -216,6 +218,38 @@ def test_a_config_without_a_list_of_reasons_is_refused_loudly(tmp_path: Path, co
 
     with pytest.raises(ValueError, match="allowed_finish_reasons"):
         read_allowed_finish_reasons(config)
+
+
+def test_the_default_step_limit_and_the_contacts_are_read_from_the_kit(tmp_path: Path) -> None:
+    config, companies = tmp_path / "config.json", tmp_path / "companies.json"
+    config.write_text(json.dumps({"defaults": {"max_steps": 4}}), encoding="utf-8")
+    companies.write_text(
+        json.dumps({"contacts": [{"tenant_id": "a", "contact_id": "a_1", "name": "Alex"}]}),
+        encoding="utf-8",
+    )
+
+    assert read_default_max_steps(config) == 4
+    assert read_company_contacts(companies) == {"a": frozenset({("a_1", "Alex")})}
+
+
+@pytest.mark.parametrize(
+    "content", ['{"defaults": {"max_steps": true}}', '{"defaults": {}}', "nope"]
+)
+def test_a_kit_without_a_step_limit_is_refused_loudly(tmp_path: Path, content: str) -> None:
+    config = tmp_path / "config.json"
+    config.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="max_steps"):
+        read_default_max_steps(config)
+
+
+@pytest.mark.parametrize("content", ['{"contacts": [{"tenant_id": "a"}]}', "{}", "nope"])
+def test_a_kit_without_contacts_is_refused_loudly(tmp_path: Path, content: str) -> None:
+    companies = tmp_path / "companies.json"
+    companies.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="contacts"):
+        read_company_contacts(companies)
 
 
 # --------------------------------------------------------------------------- secrets

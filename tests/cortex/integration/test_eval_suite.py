@@ -97,6 +97,37 @@ def test_the_code_digest_changes_when_the_code_changes(tmp_path: Path) -> None:
     assert len(suite.code_digest()) == 64
 
 
+# -------------------------------------------------------- a claim in the text decides nothing
+
+
+def test_an_administrator_claim_in_the_message_changes_neither_permissions_nor_scope(
+    tmp_path: Path,
+) -> None:
+    case = next(c for c in suite.all_cases() if c.name == "V54_admin_claim_only_in_the_message")
+    assert "comercio_b" in case.scenario["message"]
+    assert "tenant_id" not in json.dumps(case.scenario["model_script"])  # the claim is only text
+    scenario_file, world = tmp_path / "scenario.json", tmp_path / "world"
+    scenario_file.write_text(json.dumps(case.scenario), encoding="utf-8")
+
+    output = run_scenario_file(scenario_file, kit_dir=KIT, workdir=world)
+
+    assert _failed(case.scenario, output, world) == set()
+    assert (output["finish_reason"], output["executed_tools"]) == (
+        "COMPLETED",
+        ["consultar_ventas"],
+    )
+    events: list[dict[str, Any]] = output["events"]  # type: ignore[assignment]
+    executed = next(e for e in events if e["type"] == "tool_executed")
+    assert executed["data_tenant"] == "comercio_a" == output["tenant_id"]
+    with sqlite3.connect(world / "cortex.db") as db:
+        tool_messages = db.execute("SELECT tenant_id, content FROM messages WHERE role = 'tool'")
+        [(owner, content)] = tool_messages.fetchall()
+    data = json.loads(content)["data"]
+    # comercio_a's own day (15 sales, 300000), never comercio_b's (8 sales, 160000).
+    assert owner == "comercio_a"
+    assert (data["cantidad"], data["bruto"], data["neto"]) == (15, 300000, 300000)
+
+
 # ---------------------------------------------------------------- the checker vs the files
 
 
@@ -198,6 +229,95 @@ def test_a_trace_that_differs_from_the_stored_one_is_caught(tmp_path: Path) -> N
     output["events"] = output["events"][:-1]
 
     assert "files.trace_matches" in _failed(scenario, output, world)
+
+
+# ------------------------------------------- the observables the checker recomputes from the files
+
+
+@pytest.mark.parametrize(
+    ("name", "key", "lie"),
+    [
+        ("T02", "executed_tools", ["crear_reclamo"]),
+        ("T02", "executed_tools", []),
+        ("T03", "rejected_tools", []),
+        ("T07", "retry_count", 0),
+        ("T02", "step_count", 1),
+        ("T08", "max_steps", 99),
+        ("T12", "decision", "CONTACTAR"),
+        ("T12", "decision_reasons", ["NOTHING_OWED"]),
+        ("T02", "decision", "CONTACTAR"),
+        ("T10", "pending_action_retained", False),
+        ("T10", "state_after_restart", "AUTO"),
+        ("T02", "state_after_restart", "AUTO"),
+        ("T06", "contexts_separated", False),
+        ("T02", "contexts_separated", True),
+    ],
+    ids=lambda value: str(value),
+)
+def test_an_adapter_that_reports_an_observable_the_files_contradict_is_caught(
+    tmp_path: Path, name: str, key: str, lie: object
+) -> None:
+    scenario, output, world = _real_run(tmp_path, name)
+    assert _failed(scenario, output, world) == set()  # the honest output passes
+    assert output[key] != lie
+    output[key] = lie
+
+    assert f"files.{key}" in _failed(scenario, output, world)
+
+
+def _edit(world: Path, sql: str, *params: object) -> None:
+    with sqlite3.connect(world / "cortex.db") as db:
+        db.execute(sql, params)
+
+
+def test_a_pending_action_the_files_no_longer_hold_is_caught(tmp_path: Path) -> None:
+    scenario, output, world = _real_run(tmp_path, "T10")
+    _edit(world, "UPDATE pending_actions SET status = 'CANCELLED'")
+
+    assert "files.pending_action_retained" in _failed(scenario, output, world)
+
+
+def test_a_decision_that_the_files_do_not_hold_is_caught(tmp_path: Path) -> None:
+    scenario, output, world = _real_run(tmp_path, "T12")
+    _edit(world, "UPDATE followup_decisions SET decision = 'CANCELAR'")
+
+    assert "files.decision" in _failed(scenario, output, world)
+
+
+def test_a_decision_row_in_a_run_that_reports_none_is_caught(tmp_path: Path) -> None:
+    scenario, output, world = _real_run(tmp_path, "T12")
+    output["decision"], output["decision_reasons"] = None, []
+
+    assert {"files.decision", "files.decision_reasons"} <= _failed(scenario, output, world)
+
+
+def test_an_interleaved_message_stored_under_another_conversation_is_caught(
+    tmp_path: Path,
+) -> None:
+    scenario, output, world = _real_run(tmp_path, "T06")
+    assert output["contexts_separated"] is True
+    _edit(
+        world,
+        "INSERT INTO conversations (tenant_id, conversation_id, created_at) "
+        "VALUES ('comercio_b', 'conv_b_inter', 'now') ON CONFLICT DO NOTHING",
+    )
+    _edit(
+        world,
+        "INSERT INTO messages (tenant_id, conversation_id, run_id, role, content, created_at) "
+        "VALUES ('comercio_b', 'conv_b_inter', 'run-x', 'user', 'Soy Alex del comercio A', 'now')",
+    )
+
+    assert "files.contexts_separated" in _failed(scenario, output, world)
+
+
+def test_a_contact_of_one_company_stored_under_another_is_caught(tmp_path: Path) -> None:
+    scenario, output, world = _real_run(tmp_path, "T06")
+    _edit(
+        world,
+        "INSERT INTO contacts (tenant_id, contact_id, name) VALUES ('comercio_a', 'b_01', 'Alex')",
+    )
+
+    assert "files.contexts_separated" in _failed(scenario, output, world)
 
 
 FAILURE_RULE = "contract.a_failure_says_why_with_a_tool_event"
