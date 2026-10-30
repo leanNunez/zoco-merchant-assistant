@@ -27,6 +27,7 @@ Los 13 `examples/` son idénticos a `kit/scenarios.json`, y los dos PDF recibido
 | T13 mezcla "completó el alta" y "pidió la baja": no distingue qué regla cancela | Cada regla se prueba por separado y se registran todos los motivos que aplican | `tests/cortex/unit/test_followup.py::test_each_case_of_the_kit` |
 | Ningún fixture produce `CONTACTAR` | Se prueba el caso por defecto de la tabla de decisión | `tests/cortex/unit/test_followup.py::test_each_case_of_the_kit` |
 | E03 (reprogramar al 2026-11-06) depende de la fecha de hoy y el evento no la trae | Reloj fijo en la evaluación (`--now` lo cambia) | `tests/cortex/integration/test_chat.py::test_the_rescheduling_depends_on_the_fixed_clock_not_on_the_day_it_runs` |
+| DOC-12 es un archivo histórico (vigente hasta el 2026-08-31) que por palabras responde bien "comisión del plan pro" | La búsqueda aplica la política de vigencia de la primera entrega con la fecha del reloj inyectado; una consulta sobre un período pasado sigue encontrando lo vigente entonces | `tests/cortex/integration/test_docs.py::test_a_rule_that_is_no_longer_valid_is_not_returned` |
 
 ## C. Contradicciones entre documentos
 
@@ -34,7 +35,7 @@ Los 13 `examples/` son idénticos a `kit/scenarios.json`, y los dos PDF recibido
 |---|---|---|
 | El PDF pide bloquear "respuestas y acciones"; la política del kit solo habla de la salida | Manda el PDF: tras una toma de control no se ejecuta ni una escritura ya solicitada | `tests/cortex/integration/test_chat.py::test_a_takeover_after_a_tool_request_stops_the_write` |
 | El PDF da motivos de fin "por ejemplo"; el contrato los da como lista cerrada | Se usan exactamente los cinco; la causa fina va en un campo aparte (`finish_detail`) | `tests/cortex/unit/test_finish.py::test_every_detail_implies_exactly_one_of_the_five_reasons` |
-| El ejemplo del contrato muestra una respuesta final con `customer_messages_sent: 0`, pero T12 y T13 usan ese campo para detectar que se envió el "OK" | Una respuesta entregada cuenta como mensaje al cliente; el ejemplo es ilustrativo | `tests/cortex/integration/test_kit_scenarios.py::test_t01_a_plain_answer_completes_in_one_step` |
+| El ejemplo del contrato muestra una respuesta entregada con `customer_messages_sent: 0`, y T12 y T13 esperan 0 en un seguimiento | El ejemplo es exactamente la salida de T01 (comercio_a, conv_t01, `COMPLETED`, un paso, `final_answer`): responder al mensaje del usuario no es contactar al cliente. `customer_messages_sent` cuenta solo lo que el sistema envía por iniciativa propia (un seguimiento, un evento), y vale 1 si un seguimiento llega a enviar algo; las respuestas entregadas van en `ai_replies_delivered` | `tests/cortex/integration/test_kit_scenarios.py::test_t01_a_plain_answer_completes_in_one_step` |
 | En la primera entrega un cambio de control invalida lo pendiente; T10 pide que el pendiente se conserve | Se conserva visible para el operador (`SUSPENDED`) pero no se puede ejecutar | `tests/cortex/integration/test_chat.py::test_t10_a_restart_keeps_the_human_in_control_and_the_pending_action` |
 | Una herramienta pide confirmación y la política global también | Gana la más estricta: toda escritura se confirma | `tests/cortex/unit/test_catalog.py::test_a_write_tool_without_confirmation_cannot_even_be_declared` |
 | Un mismo dato con nombres distintos: `initial_state`, `current_state`, `conversation_mode`; `current_version` y `control_version`; `operator_took_over` y `operator_takeover`; `pending_action.type: "reclamo"` y `crear_reclamo` | El adaptador acepta todos los nombres. Si dos nombres del mismo dato traen valores distintos, o aparece una clave desconocida, falla en voz alta | `tests/cortex/unit/test_preconditions.py::test_two_names_of_a_fact_that_disagree_are_refused` |
@@ -46,7 +47,10 @@ Los 13 `examples/` son idénticos a `kit/scenarios.json`, y los dos PDF recibido
 |---|---|---|
 | Qué es un "paso" | Una llamada al modelo (el ejemplo del contrato da `step_count: 1` con una sola respuesta) | `tests/cortex/integration/test_kit_scenarios.py::test_t01_a_plain_answer_completes_in_one_step` |
 | Dónde busca IT las claves de `expected` (`executed_tools`, `retry_count`...), que no están en la salida mínima | Todas se emiten siempre, calculadas desde la base y la traza, nunca copiadas de `expected` | `tests/cortex/integration/test_kit_scenarios.py::test_the_contract_fields_are_always_present` |
-| Qué significa "respetando permisos" en un seguimiento (los fixtures no traen permisos) | El permiso es el consentimiento de contacto; si no se sabe, no se contacta | `tests/cortex/unit/test_followup.py::test_unknown_consent_never_allows_contact` |
+| Qué significa "respetando permisos" en un seguimiento (los fixtures no traen permisos) | El permiso es el consentimiento de contacto; si no se sabe, no se contacta, ni siquiera para reprogramar | `tests/cortex/unit/test_followup.py::test_unknown_consent_never_allows_contact` |
+| Qué hacer con un estado de oportunidad que no es abierto ni cerrado (`EXPIRED`, `SIGNED_UP`) | Tarea interna con motivo `UNKNOWN_OPPORTUNITY_STATUS`: lo desconocido nunca lleva a contactar | `tests/cortex/unit/test_followup.py::test_an_unknown_opportunity_status_never_allows_contact` |
+| Un evento del kit (E02, E03) nombra una conversación distinta de la del escenario, de la misma empresa | El evento y el escenario actúan sobre la conversación que nombra el evento, y la salida la informa; un evento de otra empresa sigue siendo `scope_violation` | `tests/cortex/integration/test_chat.py::test_a_kit_event_pasted_verbatim_acts_on_the_conversation_it_names` |
+| Una toma de control con la misma versión que la guardada | Si la conversación está en AUTO se aplica (gana la persona) y la versión sube en uno; si ya está en HUMAN es un duplicado. Ignorarla por error dejaría a la IA hablando encima de una persona | `tests/cortex/integration/test_tenant_store.py::test_the_same_version_while_the_agent_has_it_is_a_conflict_that_hands_it_over` |
 | A qué empresa pertenece el corpus de documentos | Comercio A usa el de la primera entrega; Comercio B no tiene y nunca ve el de A | `tests/cortex/integration/test_docs.py::test_a_company_without_documents_gets_nothing_never_somebody_elses` |
 | Cómo reiniciar el proceso en T10 | El adaptador arma objetos nuevos sobre los mismos archivos; otro test lo repite con procesos reales | `tests/cortex/integration/test_chat.py::test_three_separate_processes_file_one_claim` |
 
@@ -56,7 +60,7 @@ La consigna pide reutilizar los componentes; varios del motor anterior hacen hoy
 
 | Qué hacía | Decisión | Prueba |
 |---|---|---|
-| Tomar el control exigía horario de atención y, al cerrar, devolvía la conversación al agente: T10 y T11 habrían dependido de la hora | La toma de control es un hecho informado por Zoco Chat; no hay guarda de horario | `tests/cortex/integration/test_chat.py::test_the_takeover_scenarios_do_not_depend_on_the_time_of_day` |
+| La máquina de estados (`transition`) recibe el horario como parámetro, pero la regla AUTO + `OPERATOR_TAKEOVER` exige horario abierto (habría que pasar `True` fijo para saltear una regla de negocio), no hay regla HUMAN + `OPERATOR_TAKEOVER` (una segunda toma lanza `InvalidTransition`) y no maneja versiones | La toma de control es un hecho informado por Zoco Chat, con versión y compare-and-set en una transacción. Del módulo se reutilizan los estados y `capabilities_for` | `tests/cortex/integration/test_tenant_store.py::test_a_newer_takeover_is_applied_at_its_version` |
 | El ejecutor reintentaba las escrituras a ciegas | Las escrituras no pasan por los reintentos: se buscan por su id | `tests/cortex/unit/test_retry.py::test_only_transient_failures_are_ever_retried` |
 | La clave de idempotencia salía del texto y la conversación, sin empresa | Sale de la empresa y el `operation_id` | `tests/cortex/integration/test_tenancy.py::test_every_query_on_company_data_filters_by_company` |
 | El estado vivía en memoria y la confirmación no se podía serializar | Todo en SQLite, con una acción pendiente propia | `tests/cortex/integration/test_writes.py::test_the_same_command_after_a_restart_still_files_one_claim` |
@@ -64,13 +68,14 @@ La consigna pide reutilizar los componentes; varios del motor anterior hacen hoy
 
 Se reutilizan por importación los componentes puros: el contrato de fechas y el modelo de ventas,
 los argumentos estrictos y la guarda de argumentos, la huella de los valores, el repositorio de
-reclamos, el buscador BM25 y las capacidades por modo. Un contrato de arquitectura impide importar
+reclamos, el buscador BM25 con su política de vigencia, y los estados y las capacidades por modo. Un contrato de arquitectura impide importar
 el motor de turnos, la consola o el armado de la primera entrega.
 
 ## F. Preguntas que se le podrían hacer a IT
 
 Ninguna bloquea el trabajo (todo quedó decidido arriba), pero confirmarlas quitaría supuestos:
 
-1. ¿`customer_messages_sent` cuenta las respuestas de la IA entregadas, como en T12 y T13?
+1. ¿`customer_messages_sent` cuenta solo los mensajes que el sistema inicia, como sugiere el
+   ejemplo del contrato (que es T01)? Aquí sí; las respuestas entregadas van en `ai_replies_delivered`.
 2. ¿Qué motivo de fin corresponde a una escritura que espera la confirmación del usuario?
    Aquí es `NEEDS_HUMAN` con `finish_detail: awaiting_confirmation`.
