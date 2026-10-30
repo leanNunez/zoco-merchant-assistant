@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import tzinfo
 from types import MappingProxyType
 
-from cortex.config import RunLimits
+from cortex.config import MAX_ANSWER_CHARS, MAX_MESSAGE_CHARS, RunLimits
 from cortex.identity import AuthContext
 from cortex.memory.database import Database
 from cortex.memory.ledger import PendingAction, PendingStatus
@@ -56,7 +56,6 @@ from cortex.tools.policy import (
     Approved,
     PolicyContext,
     Rejected,
-    RejectionCode,
     display_name,
     review,
 )
@@ -78,6 +77,12 @@ from merchant_assistant.control.states import State
 from merchant_assistant.shared.clock import Clock, business_today
 
 _LOG = logging.getLogger(__name__)
+
+# Tool attempts run in a pool of this many worker threads per run, so that each can be abandoned
+# at its time limit. An abandoned attempt cannot be killed (Python has no way): it keeps its
+# thread until it returns on its own, so abandoned attempts stay in this pool. The pool does not
+# grow; an attempt that has to wait for a free thread is still bound by its own time limit.
+MAX_TOOL_WORKERS = 4
 
 # Written by the code, not by the model: the answer to an attempt to reach another company.
 SCOPE_REFUSAL = "No puedo acceder a información de otra empresa."
@@ -173,7 +178,9 @@ class _Run:
         self.budget = Budget(request.limits, runner.ticker)
         self.store: TenantStore = runner.database.for_tenant(request.auth)
         # Tool attempts run in worker threads so that each one can be abandoned at its time limit.
-        self.executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix=request.run_id)
+        self.executor = ThreadPoolExecutor(
+            max_workers=MAX_TOOL_WORKERS, thread_name_prefix=request.run_id
+        )
         # A tool outside the request's list is not even bound: the policy then rejects it as
         # not allowed, and nothing can reach its adapter.
         self.adapters: dict[str, ToolAdapter] = {
@@ -232,6 +239,9 @@ class _Run:
 
     def _loop(self, conversation: ConversationState) -> RunResult:
         conversation_id = self.request.conversation_id
+        if len(self.request.message) > MAX_MESSAGE_CHARS:
+            # Refused at admission: the text is neither stored nor shown to the model.
+            return self._finish(FinishDetail.MESSAGE_TOO_LONG)
         expected = self.request.expected_control_version
         if expected is not None and expected != conversation.control_version:
             # The caller acted on a control state that is no longer current: its message is
@@ -292,6 +302,7 @@ class _Run:
             turn = self.runner.model.next_turn(
                 self._prompt(), timeout_ms=self.budget.remaining_ms()
             )
+            _check_answer_length(turn)
         except (ScriptExhausted, InvalidModelOutput, ModelUnavailable) as failure:
             self._trace("model_failed", code=failure.code)
             return _MODEL_FAILURES[type(failure)]
@@ -458,7 +469,7 @@ class _Run:
                 return FinishDetail.AWAITING_CONFIRMATION
             return FinishDetail.OPERATOR_TOOK_OVER
         if isinstance(outcome, Refused):
-            return self._reject(Rejected(name, RejectionCode(outcome.code), outcome.detail))
+            return self._reject(Rejected(name, outcome.code, outcome.detail))
         if isinstance(outcome, Failed):
             self._record_result(outcome.result)
             return None
@@ -570,6 +581,13 @@ class _Run:
 
     def _trace(self, type_: str, **attributes: str | int | bool | None) -> None:
         self.tracer.emit(type_, step=self.budget.steps_taken, **attributes)
+
+
+def _check_answer_length(turn: ModelTurn) -> None:
+    """A final answer longer than a message can be is invalid output, like any other the harness
+    cannot use: it ends the run and nothing is delivered."""
+    if isinstance(turn, FinalAnswer) and len(turn.text) > MAX_ANSWER_CHARS:
+        raise InvalidModelOutput("the final answer is longer than the limit")
 
 
 def _starting_at_a_user_message(history: tuple[StoredMessage, ...]) -> tuple[StoredMessage, ...]:

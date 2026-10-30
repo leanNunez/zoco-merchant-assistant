@@ -19,7 +19,8 @@ from types import MappingProxyType
 
 from pydantic import BaseModel
 
-from cortex.identity import IDENTIFIER, AuthContext
+from cortex.identifiers import IDENTIFIER
+from cortex.identity import AuthContext
 from merchant_assistant.agent.domain.tools import BuscarDocumentacionArgs
 from merchant_assistant.knowledge.adapters.filesystem import load_documents
 from merchant_assistant.knowledge.bm25 import BM25Index

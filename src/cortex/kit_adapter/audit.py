@@ -11,11 +11,13 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+from cortex.tools.adapters.claims import ClaimsDesk
+
 
 class Audit:
-    def __init__(self, database_path: Path, claims_directory: Path) -> None:
+    def __init__(self, database_path: Path, claims: ClaimsDesk) -> None:
         self._uri = _read_only(database_path)
-        self._claims = claims_directory
+        self._claims = claims
 
     def rows_written_outside(self, tenant_id: str, run_id: str) -> int:
         """Rows this run wrote under any company other than its own."""
@@ -29,7 +31,7 @@ class Audit:
 
     def claims(self, tenant_id: str) -> tuple[int, int]:
         """(claims, distinct idempotency keys) in a company's claims file."""
-        path = self._claims / f"{tenant_id}.db"
+        path = self._claims.path_for(tenant_id)
         if not path.exists():
             return (0, 0)
         with closing(sqlite3.connect(_read_only(path), uri=True)) as db:
@@ -42,7 +44,7 @@ class Audit:
         """Claims filed under any company other than this one."""
         return sum(
             self.claims(path.stem)[0]
-            for path in sorted(self._claims.glob("*.db"))
+            for path in sorted(self._claims.directory.glob("*.db"))
             if path.stem != tenant_id
         )
 

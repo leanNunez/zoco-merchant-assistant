@@ -1,4 +1,4 @@
-"""What may appear in a trace (brief section 7): an allowlist, a scrubber and a salted principal.
+"""What may appear in a trace (brief section 7): an allowlist, a scrubber and a keyed pseudonym.
 
 Traces must not carry secrets or full sensitive data. Three layers, applied where the event is
 written so that nothing unfiltered reaches any destination:
@@ -8,7 +8,8 @@ written so that nothing unfiltered reaches any destination:
 2. Scrubber: whatever string passes is stripped of API keys, bearer tokens, e-mail addresses,
    phone numbers, card numbers, CUIT and DNI. Values come from the code (names, codes, ids), but
    an id chosen by the model could still carry a secret.
-3. Principal: only a salted hash of who acted is traced, never the id itself.
+3. Principal: only a keyed pseudonym of who acted is traced, never the id itself. It is an
+   HMAC-SHA-256 of company and principal under a key the entry point chooses.
 
 Message text never enters a trace; only its length does.
 """
@@ -16,6 +17,7 @@ Message text never enters a trace; only its length does.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import re
 from collections.abc import Mapping
 from types import MappingProxyType
@@ -25,22 +27,41 @@ Scalar = str | int | bool | None
 REDACTED = "[redacted]"
 MAX_VALUE_CHARS = 120
 
+# Every pattern runs in linear time on any input (tests/cortex/unit/test_redaction.py feeds each
+# one hostile 200 KB strings). A backtracking engine turns quadratic when a candidate that fails
+# is retried from each of its inner positions, so the two patterns that start on a run of
+# characters (the e-mail and the digit chain) end in a second alternative that eats the failed
+# run whole. That is not a shortcut: a later start inside a run that failed from its beginning
+# sees the same ending and fails the same way, so the matches are exactly those of the naive
+# pattern. The `hit` group tells the two alternatives apart.
+#
 # Order matters: the specific number formats go before the generic digit runs.
-_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"\b(?:sk|pk|rk|ghp|gho|xox[abp])[-_][A-Za-z0-9_-]{8,}"),  # provider API keys
-    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
-    re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"),  # e-mail
-    re.compile(r"\d{9,}"),  # a long run of digits, even glued to letters (card, CUIT, phone)
-    re.compile(r"\b\d{2}-\d{8}-\d\b"),  # CUIT with dashes
-    re.compile(r"(?<![\w-])\d(?:[ .-]?\d){6,}(?![\w-])"),  # card, phone, CUIT, DNI: 7+ digits
-    re.compile(r"(?<![\w-])[A-Za-z0-9_-]{32,}(?![\w-])"),  # any other long opaque token
-)
+_KEYS = re.compile(r"\b(?:sk|pk|rk|ghp|gho|xox[abp])[-_][A-Za-z0-9_-]{8,}")  # provider API keys
+_BEARER = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE)
+_EMAIL = re.compile(r"(?:(?P<hit>[\w.+-]+@[\w-]+(?:\.[\w-]+)+)|[\w.+-]++)")
+_LONG_DIGITS = re.compile(r"\d{9,}")  # a long run of digits, even glued to letters
+_CUIT = re.compile(r"\b\d{2}-\d{8}-\d\b")
+# Card, phone, CUIT, DNI: 7+ digits that may be separated by one space, dot or dash.
+_DIGIT_CHAIN = re.compile(r"(?<![\w-])(?:(?P<hit>\d(?:[ .-]?\d){6,}(?![\w-]))|\d(?:[ .-]?\d)*+)")
+_OPAQUE = re.compile(r"(?<![\w-])[A-Za-z0-9_-]{32,}(?![\w-])")  # any other long opaque token
+
+
+def _mask_hits(pattern: re.Pattern[str], text: str) -> str:
+    """Mask what the `hit` group matched and leave the runs the pattern only skipped over."""
+    return pattern.sub(lambda m: REDACTED if m.group("hit") is not None else m.group(0), text)
 
 
 def scrub(text: str, limit: int = MAX_VALUE_CHARS) -> str:
-    """The text without secrets or personal numbers, cut to `limit` characters."""
-    for pattern in _PATTERNS:
-        text = pattern.sub(REDACTED, text)
+    """The text without secrets or personal numbers, cut to `limit` characters.
+
+    The whole text is masked first and cut afterwards: cutting first could leave half a secret
+    visible. That is why the masking itself has to be linear.
+    """
+    text = _BEARER.sub(REDACTED, _KEYS.sub(REDACTED, text))
+    text = _mask_hits(_EMAIL, text)
+    text = _CUIT.sub(REDACTED, _LONG_DIGITS.sub(REDACTED, text))
+    text = _mask_hits(_DIGIT_CHAIN, text)
+    text = _OPAQUE.sub(REDACTED, text)
     return text[:limit]
 
 
@@ -100,13 +121,20 @@ ALLOWED_ATTRIBUTES: Mapping[str, frozenset[str]] = MappingProxyType(
 
 
 class TraceRedactor:
-    def __init__(self, salt: str) -> None:
-        if not salt:
-            raise ValueError("the principal hash needs a salt")
-        self._salt = salt
+    def __init__(self, key: str) -> None:
+        if not key.strip():
+            raise ValueError("the principal pseudonym needs a key")
+        self._key = key.encode("utf-8")
 
-    def principal(self, principal_id: str) -> str:
-        digest = hashlib.sha256(f"{self._salt}\n{principal_id}".encode()).hexdigest()
+    def principal(self, tenant_id: str, principal_id: str) -> str:
+        """A stable pseudonym of who acted, in that company.
+
+        The company is part of the message, so the same principal id in two companies gets two
+        pseudonyms. The NUL byte that joins them cannot appear in an identifier (their alphabet
+        is closed), so no two (company, principal) pairs encode to the same message.
+        """
+        message = f"{tenant_id}\0{principal_id}".encode()
+        digest = hmac.new(self._key, message, hashlib.sha256).hexdigest()
         return f"p_{digest[:10]}"
 
     def clean(

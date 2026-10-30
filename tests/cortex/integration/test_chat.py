@@ -12,13 +12,15 @@ import pytest
 from cortex.chat.service import ChatEvents
 from cortex.kit_adapter.orchestrator import run_scenario_file
 from cortex.memory.tenant_store import TenantStore
-from cortex.tools.adapters.claims import ClaimsAdapter
+from cortex.tools.adapters.claims import ClaimsAdapter, ClaimsDesk
+from merchant_assistant.shared.clock import FixedClock
 
 pytestmark = pytest.mark.integration
 
 ROOT = Path(__file__).resolve().parents[3]
 EXAMPLES, KIT = ROOT / "examples", ROOT / "kit"
 CHAT_EVENTS = json.loads((KIT / "fixtures" / "chat_events.json").read_text(encoding="utf-8"))
+CLOCK = FixedClock(datetime(2026, 10, 28, 12, tzinfo=UTC))
 CLAIM = {"motivo": "demora", "descripcion": "No recibi comprobante", "operation_id": "op_claim_001"}
 
 
@@ -383,7 +385,8 @@ import sys
 from pathlib import Path
 from datetime import UTC, datetime
 from merchant_assistant.shared.clock import FixedClock
-from cortex.bootstrap import build_runner, load_harness_data, zoco_tool_binder
+from cortex.bootstrap import build_runner, zoco_tool_binder
+from cortex.kit_adapter.corpora import load_kit_data
 from cortex.memory.database import Database
 from cortex.runner.agent_runner import RunRequest
 from cortex.runner.scripted_model import ScriptedModel
@@ -393,7 +396,7 @@ import json
 
 kit, workdir, run_id, message, script = sys.argv[1:6]
 clock = FixedClock(datetime(2026, 10, 28, 12, tzinfo=UTC))
-data = load_harness_data(Path(kit))
+data = load_kit_data(Path(kit))
 database = Database(Path(workdir) / "cortex.db", clock)
 database.initialize()
 database.recover()
@@ -439,7 +442,9 @@ def test_three_separate_processes_file_one_claim(tmp_path: Path) -> None:
     assert asked["detail"] == "awaiting_confirmation"
     assert "confirmation_received" in confirmed["types"]
     assert "tool_deduplicated" in repeated["types"]
-    assert Audit(tmp_path / "cortex.db", tmp_path / "claims").claims("comercio_a") == (1, 1)
+    assert Audit(tmp_path / "cortex.db", ClaimsDesk(tmp_path / "claims", CLOCK)).claims(
+        "comercio_a"
+    ) == (1, 1)
 
 
 @pytest.mark.parametrize(

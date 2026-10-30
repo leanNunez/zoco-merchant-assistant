@@ -7,16 +7,13 @@ the user writes or from the model's tool arguments. An `AuthContext` can only be
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import ClassVar
 
+from cortex.identifiers import IDENTIFIER
 from merchant_assistant.shared.errors import DomainError
-
-# Identifiers end up in SQL parameters, file names and traces: a closed alphabet keeps them inert.
-IDENTIFIER = re.compile(r"[a-z0-9][a-z0-9_]{0,63}", re.ASCII)
 
 _PROOF = object()
 

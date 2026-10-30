@@ -31,6 +31,7 @@ class FinishDetail(StrEnum):
     CONVERSATION_BLOCKED = "conversation_blocked"
     STALE_VERSION = "stale_version"
     SCOPE_VIOLATION = "scope_violation"
+    MESSAGE_TOO_LONG = "message_too_long"
     HUMAN_IN_CONTROL = "human_in_control"
     OPERATOR_TOOK_OVER = "operator_took_over"
     AWAITING_CONFIRMATION = "awaiting_confirmation"
@@ -54,6 +55,7 @@ REASON_OF: Mapping[FinishDetail, FinishReason] = MappingProxyType(
         FinishDetail.CONVERSATION_BLOCKED: FinishReason.BLOCKED,
         FinishDetail.STALE_VERSION: FinishReason.BLOCKED,
         FinishDetail.SCOPE_VIOLATION: FinishReason.BLOCKED,
+        FinishDetail.MESSAGE_TOO_LONG: FinishReason.BLOCKED,
         FinishDetail.HUMAN_IN_CONTROL: FinishReason.NEEDS_HUMAN,
         FinishDetail.OPERATOR_TOOK_OVER: FinishReason.NEEDS_HUMAN,
         FinishDetail.AWAITING_CONFIRMATION: FinishReason.NEEDS_HUMAN,

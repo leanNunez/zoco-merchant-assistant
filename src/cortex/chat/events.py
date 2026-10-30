@@ -7,8 +7,8 @@
 The company an event names must be the trusted one of the call: an event for another company is
 refused, never applied. A conversation it names is the one it is about: when the company is the
 same, the caller acts on that conversation (`named_conversation`), and reading the event with any
-other conversation is refused. Keys that start with `expected` (the kit's fixtures carry them)
-are dropped unread; any other unknown key is refused.
+other conversation is refused. Any unknown key is refused (the `expected...` keys the kit's
+fixtures carry are dropped by the kit adapter when it loads the scenario, never seen here).
 """
 
 from __future__ import annotations
@@ -21,6 +21,8 @@ from datetime import date
 from types import MappingProxyType
 from typing import ClassVar, Literal
 
+from cortex.config import MAX_CONTROL_VERSION
+from cortex.tools.policy import RejectionCode
 from merchant_assistant.sales.contract import parse_iso_day
 from merchant_assistant.shared.errors import DomainError
 
@@ -49,7 +51,7 @@ class InvalidEvent(DomainError):  # noqa: N818 - named after the situation
 
 
 class EventOutOfScope(DomainError):  # noqa: N818 - named after the situation
-    code: ClassVar[str] = "scope_violation"
+    code: ClassVar[str] = RejectionCode.SCOPE_VIOLATION.value
     user_message: ClassVar[str] = "The event belongs to another company or conversation."
 
 
@@ -99,8 +101,10 @@ def named_conversation(raw: Mapping[str, object], *, tenant_id: str) -> str | No
 def read_takeover(raw: Mapping[str, object], *, tenant_id: str, conversation_id: str) -> Takeover:
     data = _checked(raw, _TAKEOVER_KEYS, tenant_id, conversation_id)
     version = data.get("version")
-    if type(version) is not int or version < 1:
-        raise InvalidEvent("a takeover needs a positive integer version")
+    if type(version) is not int or not 1 <= version <= MAX_CONTROL_VERSION:
+        raise InvalidEvent(
+            f"a takeover needs an integer version between 1 and {MAX_CONTROL_VERSION}"
+        )
     return Takeover(version=version, actor=_text(data, "actor"))
 
 
@@ -138,7 +142,7 @@ def read_followup(
 def _checked(
     raw: Mapping[str, object], allowed: frozenset[str], tenant_id: str, conversation_id: str
 ) -> dict[str, object]:
-    data = {key: value for key, value in raw.items() if not key.startswith("expected")}
+    data = dict(raw)
     unknown = set(data) - allowed
     if unknown:
         raise InvalidEvent(f"unknown event keys: {sorted(unknown)}")

@@ -6,10 +6,12 @@ import pytest
 from cortex.identity import PrincipalDirectory, PrincipalRecord
 from cortex.tools.policy import (
     REDACTED_NAME,
+    SCOPE_FIELDS,
     Approved,
     PolicyContext,
     Rejected,
     RejectionCode,
+    normalize_key,
     review,
 )
 from cortex.tools.zoco_catalog import zoco_catalog
@@ -68,6 +70,76 @@ def test_naming_a_company_or_a_role_is_a_scope_violation_that_ends_the_run(field
     assert isinstance(verdict, Rejected)
     assert verdict.code is RejectionCode.SCOPE_VIOLATION
     assert verdict.ends_run
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "tenantId",
+        "TenantID",
+        "tenant-id",
+        "Tenant Id",
+        "empresa_id",
+        "EmpresaId",
+        "company_id",
+        "companyId",
+        "comercioId",
+        "merchantId",
+        "merchant",
+        "principalId",
+        "isAdmin",
+        "is-admin",
+        "adminId",
+        "roleId",
+        "rol",
+        "\uff34\uff25\uff2e\uff21\uff2e\uff34",  # fullwidth "TENANT": NFKC turns it into ASCII
+        "ten\u200bant_id",  # a zero-width space inside the name
+    ],
+)
+def test_every_spelling_of_a_scope_field_is_the_same_scope_violation(field: str) -> None:
+    verdict = _review("consultar_ventas", {"fecha": "2026-10-15", field: "comercio_b"})
+
+    assert isinstance(verdict, Rejected)
+    assert verdict.code is RejectionCode.SCOPE_VIOLATION
+    assert verdict.ends_run
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"fecha": "2026-10-15", "filtros": {"tenantId": "comercio_b"}},
+        {"fecha": "2026-10-15", "filtros": [{"ok": 1}, {"deep": {"company_id": "comercio_b"}}]},
+        {"fecha": "2026-10-15", "lista": [[{"EMPRESA": "b"}]]},
+    ],
+)
+def test_a_scope_field_nested_in_an_object_or_a_list_is_a_scope_violation(
+    arguments: dict[str, object],
+) -> None:
+    assert _code(_review("consultar_ventas", arguments)) is RejectionCode.SCOPE_VIOLATION
+
+
+def test_the_rejection_names_the_field_in_its_plain_form_never_the_raw_key() -> None:
+    verdict = _review("consultar_ventas", {"fecha": "2026-10-15", "Tenant\u200b-ID!!": "b"})
+
+    assert isinstance(verdict, Rejected)
+    assert verdict.detail == "fields: ['tenantid']"
+
+
+def test_no_legitimate_argument_of_the_tools_is_a_scope_field() -> None:
+    legitimate = {"consulta", "fecha", "motivo", "descripcion", "operation_id"}
+    for name in CATALOG.names:
+        spec = CATALOG.get(name)
+        assert spec is not None
+        legitimate |= set(spec.args_model.model_fields)
+
+    assert {name for name in legitimate if normalize_key(name) in SCOPE_FIELDS} == set()
+
+
+def test_a_deeply_nested_payload_is_walked_without_recursion() -> None:
+    depth = 400
+    nested = '{"a":' * depth + '{"tenant_id":"b"}' + "}" * depth
+
+    assert _code(_review("consultar_ventas", nested)) is RejectionCode.SCOPE_VIOLATION
 
 
 @pytest.mark.parametrize("fecha", ["ayer", "15/10/2026", "2026-02-30", " 2026-10-15x"])

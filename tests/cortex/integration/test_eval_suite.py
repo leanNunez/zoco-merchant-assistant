@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 from evaluation.harness import suite
-from evaluation.harness.checker import EXPECTED_RULES, check_scenario
+from evaluation.harness.checker import EXPECTED_RULES, FILE_RULES, check_scenario
 from evaluation.harness.variants import build_variants
 
 from cortex.kit_adapter.orchestrator import run_scenario_file
@@ -52,7 +52,7 @@ def test_every_variant_asserts_only_what_the_checker_knows_how_to_check() -> Non
     kit = {c.name: c.scenario for c in suite.load_kit_cases()}
 
     for case in build_variants(kit):
-        assert set(case.scenario["expected"]) <= set(EXPECTED_RULES), case.name
+        assert set(case.scenario["expected"]) <= set(EXPECTED_RULES) | set(FILE_RULES), case.name
 
 
 def test_a_variant_never_changes_the_kit_it_derives_from() -> None:

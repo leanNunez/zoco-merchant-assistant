@@ -7,10 +7,10 @@ construction, not by discipline.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from cortex.identifiers import EXTERNAL_ID
 from cortex.identity import AuthContext
 from cortex.memory.chat_records import ChatRecords
 from cortex.memory.ledger import TenantLedger
@@ -20,9 +20,6 @@ from merchant_assistant.control.states import State
 
 if TYPE_CHECKING:
     from cortex.memory.database import Database
-
-# Conversation and run ids come from Zoco Chat or the caller: a closed alphabet keeps them inert.
-EXTERNAL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", re.ASCII)
 
 MessageRole = Literal["user", "assistant", "tool"]
 

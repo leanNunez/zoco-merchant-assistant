@@ -26,6 +26,7 @@ def test_refusals_for_safety_block_and_hand_offs_need_a_human() -> None:
         FinishDetail.CONVERSATION_BLOCKED,
         FinishDetail.STALE_VERSION,
         FinishDetail.SCOPE_VIOLATION,
+        FinishDetail.MESSAGE_TOO_LONG,
     }
     assert human == {
         FinishDetail.HUMAN_IN_CONTROL,

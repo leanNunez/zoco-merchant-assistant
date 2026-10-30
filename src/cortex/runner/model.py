@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar, Literal, Protocol
 
+from cortex.runner.finish import FinishDetail
 from merchant_assistant.agent.domain.messages import ToolCall
 from merchant_assistant.shared.errors import DomainError
 
@@ -45,17 +46,17 @@ class ModelError(DomainError):
 
 
 class ModelUnavailable(ModelError):  # noqa: N818 - named after the situation
-    code: ClassVar[str] = "model_unavailable"
+    code: ClassVar[str] = FinishDetail.MODEL_UNAVAILABLE.value
     user_message: ClassVar[str] = "The model is not available right now."
 
 
 class InvalidModelOutput(ModelError):  # noqa: N818 - named after the situation
-    code: ClassVar[str] = "invalid_model_output"
+    code: ClassVar[str] = FinishDetail.INVALID_MODEL_OUTPUT.value
     user_message: ClassVar[str] = "The model answered something the harness cannot use."
 
 
 class ScriptExhausted(ModelError):  # noqa: N818 - named after the situation
-    code: ClassVar[str] = "script_exhausted"
+    code: ClassVar[str] = FinishDetail.SCRIPT_EXHAUSTED.value
     user_message: ClassVar[str] = "The simulated model has no more scripted turns."
 
 

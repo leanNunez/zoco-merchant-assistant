@@ -10,9 +10,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from cortex.memory.tenant_store import EXTERNAL_ID
+from cortex.identifiers import EXTERNAL_ID
 
 DROPPED_KEYS = frozenset({"id", "description", "expected"})
+# The kit's chat events carry fixtures of their own (`expected_decision` ...): dropped on load,
+# so the event reader sees only what an event really holds.
+DROPPED_EVENT_PREFIXES = ("expected",)
 KNOWN_KEYS = frozenset(
     {
         "tenant_id",
@@ -68,9 +71,15 @@ def load_scenario(raw: Mapping[str, object]) -> Scenario:
         model_script=tuple(script),
         preconditions=_object(data, "preconditions"),
         faults=_object(data, "faults"),
-        incoming_event=incoming,
+        incoming_event=None if incoming is None else _without_fixture_keys(incoming),
         run_id=_run_id(data["run_id"]) if "run_id" in data else None,
     )
+
+
+def _without_fixture_keys(event: Mapping[str, object]) -> dict[str, object]:
+    return {
+        key: value for key, value in event.items() if not key.startswith(DROPPED_EVENT_PREFIXES)
+    }
 
 
 def conversation_id(value: str) -> str:

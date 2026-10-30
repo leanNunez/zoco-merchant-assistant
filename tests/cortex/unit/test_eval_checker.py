@@ -2,15 +2,22 @@
 
 import ast
 import copy
+import json
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
 import pytest
 from evaluation.harness.checker import (
+    ALLOWED_FINISH_REASONS,
     EXPECTED_RULES,
+    FILE_RULES,
     Check,
+    RealState,
     check_refusal,
     check_scenario,
+    read_allowed_finish_reasons,
 )
 
 CHECKER = Path(__file__).resolve().parents[3] / "evaluation" / "harness" / "checker.py"
@@ -82,8 +89,6 @@ def test_an_expected_key_nobody_checks_fails_loudly() -> None:
 
 
 def test_every_key_the_kit_uses_has_a_rule() -> None:
-    import json
-
     kit = json.loads((Path(CHECKER).parents[2] / "kit" / "scenarios.json").read_text())
     used = {key for scenario in kit["scenarios"] for key in scenario["expected"]}
 
@@ -162,3 +167,109 @@ def test_the_checker_does_not_depend_on_the_harness() -> None:
 
 def test_a_check_is_a_plain_value() -> None:
     assert Check("a", True) == Check("a", True, "")
+
+
+def _world_with_messages(folder: Path, stored: int) -> Path:
+    with closing(sqlite3.connect(folder / "cortex.db")) as db:
+        db.execute("CREATE TABLE messages (tenant_id TEXT, conversation_id TEXT)")
+        db.executemany("INSERT INTO messages VALUES (?, ?)", [("comercio_a", "conv_1")] * stored)
+        db.execute("INSERT INTO messages VALUES ('comercio_b', 'conv_1')")  # another company's
+        db.commit()
+    return folder
+
+
+def test_messages_stored_is_read_from_the_files_of_that_company(tmp_path: Path) -> None:
+    rule = FILE_RULES["messages_stored"]
+    output = {"tenant_id": "comercio_a", "conversation_id": "conv_1"}
+
+    assert rule(2, output, RealState(_world_with_messages(tmp_path, 2))).ok
+    assert not rule(0, output, RealState(tmp_path)).ok
+
+
+def test_messages_stored_needs_the_kept_world() -> None:
+    check = FILE_RULES["messages_stored"](0, GOOD, RealState(None))
+
+    assert not check.ok
+    assert "no world" in check.detail or "none" in check.detail
+
+
+# --------------------------------------------------------------------------- finish reasons
+
+
+def test_the_allowed_finish_reasons_are_the_ones_in_the_kits_config() -> None:
+    config = json.loads((CHECKER.parents[2] / "kit" / "harness_config.json").read_text())
+
+    assert set(config["allowed_finish_reasons"]) == ALLOWED_FINISH_REASONS
+
+
+def test_the_allowed_finish_reasons_are_read_from_the_file_given(tmp_path: Path) -> None:
+    config = tmp_path / "harness_config.json"
+    config.write_text(json.dumps({"allowed_finish_reasons": ["DONE", "OOPS"]}), encoding="utf-8")
+
+    assert read_allowed_finish_reasons(config) == frozenset({"DONE", "OOPS"})
+
+
+@pytest.mark.parametrize("content", ['{"allowed_finish_reasons": "DONE"}', "{}", "[1]", "nope"])
+def test_a_config_without_a_list_of_reasons_is_refused_loudly(tmp_path: Path, content: str) -> None:
+    config = tmp_path / "harness_config.json"
+    config.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="allowed_finish_reasons"):
+        read_allowed_finish_reasons(config)
+
+
+# --------------------------------------------------------------------------- secrets
+
+
+def _leaks(text: str) -> bool:
+    output = _with(events=[{"seq": 1, "type": "final_answer", "timestamp": STAMP, "note": text}])
+    return "rule.no_secrets_in_the_output" in _failed(output)
+
+
+@pytest.mark.parametrize(
+    "canary",
+    [
+        "sk-live-AbCdEf1234567890",
+        "pk_test_AbCdEf1234567890",
+        "ghp_AbCdEf1234567890xyz",
+        "xoxb-AbCdEf1234567890",
+        "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.abc",
+        "authorization: bearer abcdefgh12345678",
+        "juana.perez@example.com",
+        "a+b@sub.example.co",
+        "4111 1111 1111 1111",
+        "4111-1111-1111-1111",
+        "4111.1111.1111.1111",
+        "4111111111111111",
+        "tarjeta4111111111111111",
+        "CUIT 20-12345678-9",
+        "30123456789",
+        "3f2a9c4e8b1d7a6f5e0c9b8a7d6e5f4a3b2c1d0e",
+    ],
+)
+def test_a_canary_of_each_kind_is_caught(canary: str) -> None:
+    assert _leaks(canary)
+
+
+@pytest.mark.parametrize(
+    "harmless",
+    [
+        "1234567",
+        "12345678",
+        "total 1234567 y neto 12345678",
+        "$ 1.234.567",
+        "ventas 123456 y 654321",
+        "2026-10-15",
+        "op_claim_001",
+        "consultar_ventas",
+        "run-conv_t09",
+    ],
+)
+def test_amounts_and_codes_are_not_taken_for_secrets(harmless: str) -> None:
+    assert not _leaks(harmless)
+
+
+def test_the_long_names_of_the_contracts_own_keys_are_not_taken_for_tokens() -> None:
+    # delivered_ai_messages_after_takeover is 36 characters of a token's alphabet.
+    assert "delivered_ai_messages_after_takeover" in GOOD
+    assert _failed(GOOD) == set()

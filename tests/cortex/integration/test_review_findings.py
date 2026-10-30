@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from cortex.bootstrap import BUSINESS_TIMEZONE, DEFAULT_TRACE_SALT, HarnessData, build_runner
+from cortex.bootstrap import BUSINESS_TIMEZONE, DEFAULT_TRACE_KEY, HarnessData, build_runner
 from cortex.chat.continuity import continuity_card
 from cortex.chat.events import FollowupFacts
 from cortex.chat.service import ChatEvents, RunIdConflict
@@ -137,7 +137,9 @@ class _Rig:
 
     @property
     def claims(self) -> int:
-        return Audit(self.database.path, self.workdir / "claims").claims("comercio_a")[0]
+        return Audit(self.database.path, ClaimsDesk(self.workdir / "claims", CLOCK)).claims(
+            "comercio_a"
+        )[0]
 
     def types(self, result: RunResult) -> list[str]:
         return [event.type for event in result.events]
@@ -414,7 +416,7 @@ def test_the_same_follow_up_handled_twice_is_decided_once(make_rig: Callable[...
         rig.data.directory,
         CLOCK,
         BUSINESS_TIMEZONE,
-        TraceRedactor(DEFAULT_TRACE_SALT),
+        TraceRedactor(DEFAULT_TRACE_KEY),
     )
     facts = FollowupFacts(pending_on="ZOCO", responsible="Benjamin", contact_allowed=True)
 
@@ -564,7 +566,7 @@ def _chat(rig: _Rig) -> ChatEvents:
         rig.data.directory,
         CLOCK,
         BUSINESS_TIMEZONE,
-        TraceRedactor(DEFAULT_TRACE_SALT),
+        TraceRedactor(DEFAULT_TRACE_KEY),
     )
 
 

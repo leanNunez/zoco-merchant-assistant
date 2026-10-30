@@ -1,4 +1,4 @@
-{"seq": 1, "type": "run_started", "run_id": "run-conv_t07", "tenant_id": "comercio_a", "conversation_id": "conv_t07", "step": 0, "timestamp": "2026-10-28T12:00:00Z", "elapsed_ms": 0, "principal": "p_1d6076ea44"}
+{"seq": 1, "type": "run_started", "run_id": "run-conv_t07", "tenant_id": "comercio_a", "conversation_id": "conv_t07", "step": 0, "timestamp": "2026-10-28T12:00:00Z", "elapsed_ms": 0, "principal": "p_0dc1e94bd5"}
 {"seq": 2, "type": "model_called", "run_id": "run-conv_t07", "tenant_id": "comercio_a", "conversation_id": "conv_t07", "step": 1, "timestamp": "2026-10-28T12:00:00Z", "elapsed_ms": 0}
 {"seq": 3, "type": "model_replied", "run_id": "run-conv_t07", "tenant_id": "comercio_a", "conversation_id": "conv_t07", "step": 1, "timestamp": "2026-10-28T12:00:00Z", "elapsed_ms": 0, "kind": "tool_request"}
 {"seq": 4, "type": "tool_requested", "run_id": "run-conv_t07", "tenant_id": "comercio_a", "conversation_id": "conv_t07", "step": 1, "timestamp": "2026-10-28T12:00:00Z", "elapsed_ms": 0, "tool": "consultar_ventas"}

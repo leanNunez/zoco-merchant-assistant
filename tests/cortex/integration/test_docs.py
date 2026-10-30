@@ -132,7 +132,10 @@ def test_a_poisoned_document_cannot_cause_a_write(tmp_path: Path) -> None:
     assert seen["untrusted_data"] is True
     assert INJECTION in json.dumps(seen["data"], ensure_ascii=False)  # it reached the model as data
     assert result.finish_detail is FinishDetail.AWAITING_CONFIRMATION
-    assert Audit(database.path, tmp_path / "claims").claims("comercio_a") == (0, 0)
+    assert Audit(database.path, ClaimsDesk(tmp_path / "claims", CLOCK)).claims("comercio_a") == (
+        0,
+        0,
+    )
     assert "tool_executed" in [e.type for e in result.events]
     assert [e.attributes.get("tool") for e in result.events if e.type == "tool_executed"] == [
         "buscar_documentacion"

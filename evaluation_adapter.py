@@ -6,6 +6,10 @@ Runs one scenario in a fresh, isolated world and writes the contract's JSON outp
 means the scenario is malformed or uses something the harness does not support; it never
 produces a silent PASS. With --workdir the world (its SQLite files) is kept there, so the
 outcome can be checked against the real state and not only against this output.
+
+The one environment variable, read here and nowhere else, is CORTEX_TRACE_KEY: the key of the
+principal pseudonym in the traces. Without it the demo's public default is used, which keeps the
+outputs reproducible.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+TRACE_KEY_VARIABLE = "CORTEX_TRACE_KEY"
 
 
 def _use_the_project_interpreter() -> None:
@@ -42,16 +47,26 @@ def _use_the_project_interpreter() -> None:
 
 _use_the_project_interpreter()
 
-from cortex.config import ConfigError  # noqa: E402 - only after the interpreter check
+from cortex.bootstrap import DEFAULT_TRACE_KEY  # noqa: E402 - only after the interpreter check
+from cortex.config import ConfigError  # noqa: E402
 from cortex.kit_adapter.orchestrator import DEFAULT_NOW, run_scenario_file  # noqa: E402
 from cortex.kit_adapter.scenario import UnsupportedScenario  # noqa: E402
+
+
+def _is_occupied(path: Path) -> bool:
+    """Something is already there: a file, or a directory with anything in it."""
+    return path.exists() and (not path.is_dir() or any(path.iterdir()))
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--scenario", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--workdir", type=Path, help="keep the scenario's world in this directory")
+    parser.add_argument(
+        "--workdir",
+        type=Path,
+        help="keep the scenario's world in this directory (it must be empty or not exist yet)",
+    )
     parser.add_argument(
         "--now",
         type=datetime.fromisoformat,
@@ -62,9 +77,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.now.utcoffset() is None:
         parser.error("--now needs a timezone offset, for example 2026-10-28T12:00:00+00:00")
 
+    if args.workdir is not None and _is_occupied(args.workdir):
+        # A world left by another scenario would be reused silently, and its claims counted.
+        parser.error("--workdir must be empty or not exist yet")
+
+    trace_key = os.environ.get(TRACE_KEY_VARIABLE, DEFAULT_TRACE_KEY)
+    if not trace_key.strip():
+        parser.error(f"{TRACE_KEY_VARIABLE} must not be empty or blank (unset it for the default)")
+
     try:
         output = run_scenario_file(
-            args.scenario, kit_dir=ROOT / "kit", now=args.now, workdir=args.workdir
+            args.scenario,
+            kit_dir=ROOT / "kit",
+            now=args.now,
+            workdir=args.workdir,
+            trace_key=trace_key,
         )
     except UnsupportedScenario as unsupported:
         sys.stderr.write(f"unsupported scenario: {unsupported}\n")

@@ -8,22 +8,9 @@ from cortex.chat.events import (
     read_followup,
     read_takeover,
 )
+from cortex.config import MAX_CONTROL_VERSION
 
 SCOPE = {"tenant_id": "comercio_a", "conversation_id": "conv_1"}
-
-
-def test_the_kits_expected_keys_are_dropped_unread() -> None:
-    facts = read_followup(
-        {
-            "type": "followup_due",
-            "pending_on": "ZOCO",
-            "expected_decision": "CONTACTAR",
-            "expected": "anything",
-        },
-        **SCOPE,
-    )
-
-    assert facts.pending_on == "ZOCO"
 
 
 def test_an_unknown_key_is_refused() -> None:
@@ -41,6 +28,17 @@ def test_an_unknown_key_is_refused() -> None:
 def test_an_event_for_another_company_or_conversation_is_refused(raw: dict[str, object]) -> None:
     with pytest.raises(EventOutOfScope):
         read_takeover(raw, **SCOPE)
+
+
+def test_a_takeover_version_is_bounded_above() -> None:
+    event = {"type": "operator_took_over"}
+
+    assert read_takeover({**event, "version": MAX_CONTROL_VERSION}, **SCOPE).version == (
+        MAX_CONTROL_VERSION
+    )
+    for version in (MAX_CONTROL_VERSION + 1, 2**70):
+        with pytest.raises(InvalidEvent, match="version"):
+            read_takeover({**event, "version": version}, **SCOPE)
 
 
 @pytest.mark.parametrize("version", [0, -1, "2", True, None])

@@ -86,7 +86,8 @@ class Tracer:
         self._sink: EventSink | None = None
 
     def principal(self, principal_id: str) -> str:
-        return self._redactor.principal(principal_id)
+        """The pseudonym of a principal of this run's company."""
+        return self._redactor.principal(self._ids[1], principal_id)
 
     def attach(self, sink: EventSink) -> None:
         """Start writing through to `sink`, beginning with what was traced so far."""

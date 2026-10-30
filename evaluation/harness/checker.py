@@ -14,15 +14,28 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-ALLOWED_FINISH_REASONS = frozenset(
-    {"COMPLETED", "BLOCKED", "NEEDS_HUMAN", "LIMIT_REACHED", "FAILED"}
-)
+KIT_CONFIG = Path(__file__).resolve().parents[2] / "kit" / "harness_config.json"
+
+
+def read_allowed_finish_reasons(config: Path) -> frozenset[str]:
+    """The finish reasons the contract allows, as the kit's own configuration lists them. The
+    checker keeps no copy of its own that could drift from the file."""
+    try:
+        reasons = json.loads(config.read_text(encoding="utf-8")).get("allowed_finish_reasons")
+    except (OSError, ValueError, AttributeError):
+        reasons = None
+    if not isinstance(reasons, list) or not all(isinstance(reason, str) for reason in reasons):
+        raise ValueError(f"{config.name} has no list of allowed_finish_reasons")
+    return frozenset(reasons)
+
+
+ALLOWED_FINISH_REASONS = read_allowed_finish_reasons(KIT_CONFIG)
 REQUIRED_OUTPUT = (
     "run_id",
     "tenant_id",
@@ -34,9 +47,25 @@ REQUIRED_OUTPUT = (
 # Fault tokens that make nothing fail: a plain success, and the same command arriving twice
 # (the external system absorbs it by its key). Every other token is a failure the run must report.
 NON_FAILING_FAULTS = frozenset({"SUCCESS", "REPEAT_SAME_OPERATION_ID"})
+# What a secret or a personal identifier looks like. This is the checker's own copy, written for
+# the same shapes the trace scrubber masks (API keys, bearer tokens, e-mails, long digit runs,
+# cards, CUIT) and not shared with it: the checker must not import the system it judges.
+# A bare number of 6 to 8 digits is NOT a secret here, because outputs carry amounts.
 SECRET = re.compile(
-    r"sk-[A-Za-z0-9_-]{8,}|[\w.+-]+@[\w-]+\.[\w.-]+|\b(?:\d[ -]?){13,19}\b|Bearer\s+\S{8,}"
+    "|".join(
+        (
+            r"\b(?:sk|pk|rk|ghp|gho|xox[abp])[-_][A-Za-z0-9_-]{8,}",  # provider API keys
+            r"(?i:\bBearer)\s+[A-Za-z0-9._~+/=-]{8,}",
+            r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+",  # e-mail
+            r"\d{9,}",  # a long run of digits, even glued to letters
+            r"\b\d{2}-\d{8}-\d\b",  # CUIT with dashes
+            r"(?<![\w-])\d(?:[ .-]?\d){12,18}(?![\w-])",  # card-like groups of 13 to 19 digits
+        )
+    )
 )
+# Any other long opaque token. Only the values are searched for it: the contract's own keys
+# (delivered_ai_messages_after_takeover) are as long as a token.
+OPAQUE_TOKEN = re.compile(r"(?<![\w-])[A-Za-z0-9_-]{32,}(?![\w-])")
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +154,15 @@ class RealState:
             total += int(rows[0][0])
         return total
 
+    def message_count(self, tenant: str, conversation: str) -> int:
+        """How many messages (of any role) the conversation holds."""
+        rows = self._query(
+            "SELECT COUNT(*) FROM messages WHERE tenant_id = ? AND conversation_id = ?",
+            tenant,
+            conversation,
+        )
+        return int(rows[0][0])
+
     def mode(self, tenant: str, conversation: str) -> str | None:
         rows = self._query(
             "SELECT mode FROM conversations WHERE tenant_id = ? AND conversation_id = ?",
@@ -203,14 +241,33 @@ EXPECTED_RULES: Mapping[str, Callable[[object, Mapping[str, object]], Check]] = 
 }
 
 
-def _check_expected(expected: Mapping[str, object], output: Mapping[str, object]) -> list[Check]:
+def _stored_messages(wanted: object, output: Mapping[str, object], real: RealState) -> Check:
+    name = "expected.messages_stored"
+    if not real.available:
+        return Check(name, False, "this key is read from the kept world, and there is none")
+    got = real.message_count(str(output["tenant_id"]), str(output["conversation_id"]))
+    return _equal(name, wanted, got)
+
+
+# The keys that are read from the SQLite files instead of the adapter's output.
+FILE_RULES: Mapping[str, Callable[[object, Mapping[str, object], RealState], Check]] = {
+    "messages_stored": _stored_messages,
+}
+
+
+def _check_expected(
+    expected: Mapping[str, object], output: Mapping[str, object], real: RealState
+) -> list[Check]:
     checks = []
     for key, wanted in expected.items():
         rule = EXPECTED_RULES.get(key)
-        if rule is None:
-            checks.append(Check(f"expected.{key}", False, "the checker has no rule for this key"))
-        else:
+        file_rule = FILE_RULES.get(key)
+        if rule is not None:
             checks.append(rule(wanted, output))
+        elif file_rule is not None:
+            checks.append(file_rule(wanted, output, real))
+        else:
+            checks.append(Check(f"expected.{key}", False, "the checker has no rule for this key"))
     return checks
 
 
@@ -280,6 +337,18 @@ def _failure_says_why(scenario: Mapping[str, object], output: Mapping[str, objec
     )
 
 
+def _string_values(node: object) -> Iterator[str]:
+    """Every string stored as a value anywhere in the output (never a key)."""
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, Mapping):
+        for value in node.values():
+            yield from _string_values(value)
+    elif isinstance(node, list | tuple):
+        for item in node:
+            yield from _string_values(item)
+
+
 def _rules(output: Mapping[str, object]) -> list[Check]:
     """Rules that hold for every scenario, whatever it expects."""
     raw_events = output.get("events")
@@ -316,7 +385,8 @@ def _rules(output: Mapping[str, object]) -> list[Check]:
         ),
         Check(
             "rule.no_secrets_in_the_output",
-            SECRET.search(json.dumps(output, ensure_ascii=False)) is None,
+            SECRET.search(json.dumps(output, ensure_ascii=False)) is None
+            and not any(OPAQUE_TOKEN.search(text) for text in _string_values(output)),
             "the output contains something that looks like a secret",
         ),
     ]
@@ -404,12 +474,13 @@ def check_scenario(
     checks = _contract(output)
     if not all(check.ok for check in checks):
         return checks  # the rest reads fields that are not there
+    real = RealState(workdir)
     return [
         *checks,
         _failure_says_why(scenario, output),
         *_rules(output),
-        *_against_files(output, RealState(workdir)),
-        *_check_expected(expected, output),
+        *_against_files(output, real),
+        *_check_expected(expected, output, real),
     ]
 
 

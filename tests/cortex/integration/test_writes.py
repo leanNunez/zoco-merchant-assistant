@@ -76,7 +76,7 @@ class Rig:
 
     @property
     def claims(self) -> int:
-        return Audit(self.database.path, self.desk.directory).claims("comercio_a")[0]
+        return Audit(self.database.path, self.desk).claims("comercio_a")[0]
 
     def types(self, result: RunResult) -> list[str]:
         return [event.type for event in result.events]

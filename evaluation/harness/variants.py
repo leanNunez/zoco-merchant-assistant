@@ -210,6 +210,39 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
         ),
     )
 
+    # ---- the size of the text
+    add(
+        "V50_message_over_the_channel_limit",
+        _derive(
+            t02,
+            "a 5000-character message: refused at admission, nothing stored, the model not asked",
+            {
+                "finish_reason": "BLOCKED",
+                "finish_detail": "message_too_long",
+                "step_count": 0,
+                "executed_tools": [],
+                "ai_replies_delivered": 0,
+                "customer_messages_sent": 0,
+                "messages_stored": 0,
+            },
+            message="x" * 5000,
+        ),
+    )
+    add(
+        "V51_final_answer_over_the_channel_limit",
+        _derive(
+            t02,
+            "a 5000-character answer is invalid model output and is never delivered",
+            {
+                "finish_reason": "FAILED",
+                "finish_detail": "invalid_model_output",
+                "ai_replies_delivered": 0,
+                "customer_messages_sent": 0,
+            },
+            model_script=[{"final": "y" * 5000}],
+        ),
+    )
+
     # ---- writes
     add(
         "V10_write_asks_for_confirmation",
@@ -302,6 +335,9 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
         ("other_company", {"fecha": "2026-10-15", "tenant_id": "comercio_b"}),
         ("own_company", {"fecha": "2026-10-15", "tenant_id": "comercio_a"}),
         ("another_name_for_it", {"fecha": "2026-10-15", "empresa": "Comercio B"}),
+        ("camel_case_tenant_id", {"fecha": "2026-10-15", "tenantId": "comercio_b"}),
+        ("empresa_id", {"fecha": "2026-10-15", "empresa_id": "comercio_b"}),
+        ("nested_in_a_filter", {"fecha": "2026-10-15", "filtros": {"companyId": "comercio_b"}}),
     ):
         add(
             f"V16_admin_claim_{label}",
@@ -640,6 +676,16 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
             "V36_conversation_id_too_long_for_its_run_id",
             "a conversation id that fits, but whose derived run id does not",
             {"conversation_id": "c" * 125},
+        ),
+        (
+            "V52_control_version_over_the_bound",
+            "a starting control version of 2**70 (the bound is 2**31 - 1)",
+            {"preconditions": {"current_version": 2**70}},
+        ),
+        (
+            "V53_takeover_version_over_the_bound",
+            "a takeover event at version 2**31 (the bound is 2**31 - 1)",
+            {"incoming_event": {"type": "operator_took_over", "version": 2**31}},
         ),
     ):
         scenario = _derive(t02, description, {"finish_reason": "COMPLETED"})

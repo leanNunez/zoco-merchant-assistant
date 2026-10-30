@@ -14,7 +14,7 @@ from pathlib import Path
 
 from cortex.bootstrap import (
     BUSINESS_TIMEZONE,
-    DEFAULT_TRACE_SALT,
+    DEFAULT_TRACE_KEY,
     HarnessData,
     build_runner,
     zoco_tool_binder,
@@ -59,8 +59,10 @@ class World:
         now: datetime,
         faults: Mapping[str, tuple[FaultKind, ...]],
         limits: RunLimits,
+        trace_key: str = DEFAULT_TRACE_KEY,
     ) -> None:
         self.data = data
+        self.trace_key = trace_key
         self.clock = FixedClock(now)
         # One clock for the whole scenario: simulated timeouts and waits move it.
         self.ticker = ManualTicker()
@@ -72,7 +74,7 @@ class World:
         self.claims = ClaimsDesk(workdir / "claims", self.clock)
         self.counter = CallCounter()
         self.database = self._open(recover=False)
-        self.audit = Audit(self._path, self.claims.directory)
+        self.audit = Audit(self._path, self.claims)
         self._load_contacts()
 
     def _load_contacts(self) -> None:
@@ -89,7 +91,7 @@ class World:
             self.data.directory,
             self.clock,
             BUSINESS_TIMEZONE,
-            TraceRedactor(DEFAULT_TRACE_SALT),
+            TraceRedactor(self.trace_key),
         )
 
     def restart(self) -> None:
@@ -121,6 +123,7 @@ class World:
             ),
             clock=self.clock,
             ticker=self.ticker,
+            trace_key=self.trace_key,
         )
         # The kit's scenarios give no tool list and no expected control version: the whole
         # catalog, and the version found in the database.

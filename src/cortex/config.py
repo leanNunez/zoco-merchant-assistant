@@ -17,6 +17,17 @@ from merchant_assistant.shared.errors import DomainError
 
 SCHEMA_VERSION = "2.0"
 
+# The longest text the harness takes in or lets out. 4096 is WhatsApp's limit for one text
+# message: a longer user message is refused at admission, before it is stored or the model is
+# asked, and a longer final answer is invalid model output (it could not be delivered anyway).
+MAX_MESSAGE_CHARS = 4096
+MAX_ANSWER_CHARS = 4096
+
+# The largest control version the harness accepts, from a scenario or from an event. Versions are
+# counters of takeovers; the bound is the largest 32-bit signed integer, far beyond any real
+# conversation, and keeps a hostile value away from the storage layer.
+MAX_CONTROL_VERSION = 2**31 - 1
+
 # The only accepted value of each policy: the safe one.
 REQUIRED_POLICIES: Mapping[str, bool] = MappingProxyType(
     {

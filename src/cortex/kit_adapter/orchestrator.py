@@ -12,13 +12,15 @@ it or, through the model, in the middle of it.
 from __future__ import annotations
 
 import json
+import os
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from cortex.bootstrap import load_harness_data
+from cortex.bootstrap import DEFAULT_TRACE_KEY
 from cortex.chat.events import (
     FOLLOWUP,
     EventOutOfScope,
@@ -32,6 +34,7 @@ from cortex.chat.followup import FollowupDecision
 from cortex.chat.service import RunIdConflict
 from cortex.config import RunLimits
 from cortex.identity import AuthContext, AuthenticationFailed
+from cortex.kit_adapter.corpora import load_kit_data
 from cortex.kit_adapter.observables import ScenarioFacts, build_output, refused_observables
 from cortex.kit_adapter.preconditions import Setup, read_faults, read_preconditions
 from cortex.kit_adapter.scenario import (
@@ -52,10 +55,30 @@ from cortex.runner.scripted_model import ScriptedModel
 DEFAULT_NOW = datetime(2026, 10, 28, 12, 0, tzinfo=UTC)
 
 
+@contextmanager
+def private_files() -> Iterator[None]:
+    """Everything created inside is readable by its owner only (SQLite files and directories).
+
+    The umask belongs to the process, so it is restored on the way out even when the run fails:
+    tests call the adapter in-process and must not inherit a stricter one.
+    """
+    previous = os.umask(0o077)
+    try:
+        yield
+    finally:
+        os.umask(previous)
+
+
 def run_scenario_file(
-    path: Path, *, kit_dir: Path, now: datetime = DEFAULT_NOW, workdir: Path | None = None
+    path: Path,
+    *,
+    kit_dir: Path,
+    now: datetime = DEFAULT_NOW,
+    workdir: Path | None = None,
+    trace_key: str = DEFAULT_TRACE_KEY,
 ) -> dict[str, object]:
-    """Run a scenario file. With `workdir`, the world stays there for inspection afterwards."""
+    """Run a scenario file. With `workdir`, the world stays there for inspection afterwards.
+    `trace_key` keys the principal pseudonym of the traces."""
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as unreadable:
@@ -63,23 +86,38 @@ def run_scenario_file(
     if not isinstance(raw, dict):
         raise UnsupportedScenario("a scenario must be a JSON object")
     scenario = load_scenario(raw)
-    if workdir is not None:
-        workdir.mkdir(parents=True, exist_ok=True)
-        return run_scenario(scenario, kit_dir=kit_dir, workdir=workdir, now=now)
-    with tempfile.TemporaryDirectory(prefix="cortex-") as temporary:
-        return run_scenario(scenario, kit_dir=kit_dir, workdir=Path(temporary), now=now)
+    with private_files():
+        if workdir is not None:
+            workdir.mkdir(parents=True, exist_ok=True)
+            return run_scenario(
+                scenario, kit_dir=kit_dir, workdir=workdir, now=now, trace_key=trace_key
+            )
+        with tempfile.TemporaryDirectory(prefix="cortex-") as temporary:
+            return run_scenario(
+                scenario, kit_dir=kit_dir, workdir=Path(temporary), now=now, trace_key=trace_key
+            )
 
 
 def run_scenario(
-    scenario: Scenario, *, kit_dir: Path, workdir: Path, now: datetime
+    scenario: Scenario,
+    *,
+    kit_dir: Path,
+    workdir: Path,
+    now: datetime,
+    trace_key: str = DEFAULT_TRACE_KEY,
 ) -> dict[str, object]:
     conversation_id = _acting_conversation(scenario)
     # The scenario's own run id for the main run; interleaved runs keep their derived ids.
     run_id = scenario.run_id or run_id_for(conversation_id)
-    data = load_harness_data(kit_dir)
+    data = load_kit_data(kit_dir)
     setup = read_preconditions(scenario.preconditions, data.config.limits)
     world = World(
-        data, workdir, now, read_faults(scenario.faults, data.catalog.names), setup.limits
+        data,
+        workdir,
+        now,
+        read_faults(scenario.faults, data.catalog.names),
+        setup.limits,
+        trace_key,
     )
     try:
         auth = data.directory.authenticate(scenario.tenant_id, scenario.principal_id)
@@ -181,7 +219,7 @@ def _takeover(
         try:
             outcome = world.chat.take_over(auth, conversation_id, takeover)
         except AuthenticationFailed:
-            log.append({"type": "chat_event_rejected", "reason": "auth_invalid"})
+            log.append({"type": "chat_event_rejected", "reason": AuthenticationFailed.code})
             return
         entry: dict[str, object] = {
             "type": "chat_event_applied" if outcome.applied else "chat_event_ignored",
@@ -213,7 +251,7 @@ def _follow_up(
         facts = read_followup(raw, tenant_id=auth.tenant_id, conversation_id=conversation_id)
     except EventOutOfScope:
         # The denial's tool_rejected is added at the end, like for any run that ends BLOCKED.
-        tracer.emit("chat_event_rejected", step=0, reason="scope_violation")
+        tracer.emit("chat_event_rejected", step=0, reason=EventOutOfScope.code)
         detail = FinishDetail.SCOPE_VIOLATION
     except InvalidEvent as invalid:
         raise UnsupportedScenario(invalid.detail) from None
@@ -259,8 +297,8 @@ def _unauthenticated(
         "run_id": run_id,
         "tenant_id": scenario.tenant_id,
         "conversation_id": conversation_id,
-        "finish_reason": "BLOCKED",
-        "finish_detail": "auth_invalid",
+        "finish_reason": FinishReason.BLOCKED.value,
+        "finish_detail": FinishDetail.AUTH_INVALID.value,
         "step_count": 0,
         "max_steps": limits.max_steps,
         "events": events,

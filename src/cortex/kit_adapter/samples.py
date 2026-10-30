@@ -4,7 +4,8 @@
 
 Both run through the same entry point as any scenario, on the fixed clock, so the files are
 reproducible and a test keeps them current. They are anonymous by construction: a trace carries
-no message text, only codes, names, counts and a salted hash of who acted.
+no message text, only codes, names, counts and a keyed pseudonym of who acted (the demo's
+default key, so the files are reproducible).
 
 - success: T07, a read that times out once, is retried and answers.
 - failure: a confirmed write whose outcome stays unknown after reconciliation (`FAILED`),
@@ -21,6 +22,8 @@ from pathlib import Path
 
 from cortex.kit_adapter.orchestrator import DEFAULT_NOW, run_scenario
 from cortex.kit_adapter.scenario import load_scenario
+from cortex.tools.adapters.faults import FaultKind
+from merchant_assistant.agent.domain.tools import CREAR_RECLAMO
 
 ROOT = Path(__file__).resolve().parents[3]
 KIT = ROOT / "kit"
@@ -46,7 +49,7 @@ def sample_scenarios() -> Mapping[str, dict[str, object]]:
     failure["model_script"] = [script[0], script[-1]]  # one request, then the answer
     # The write times out twice: the answer is lost, the lookup finds nothing, and the one more
     # attempt times out as well. Nothing can be said about the claim, so nothing is repeated.
-    failure["faults"] = {"crear_reclamo": ["TIMEOUT", "TIMEOUT"]}
+    failure["faults"] = {CREAR_RECLAMO: [FaultKind.TIMEOUT.value, FaultKind.TIMEOUT.value]}
     return {SUCCESS_FILE: _example("T07"), FAILURE_FILE: failure}
 
 

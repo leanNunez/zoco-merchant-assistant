@@ -37,7 +37,7 @@ from cortex.tools.confirmation import (
 )
 from cortex.tools.failures import FailureKind, ToolFailure, UncertainOutcome
 from cortex.tools.gateway import ToolResult, WriteAdapter
-from cortex.tools.policy import Approved
+from cortex.tools.policy import Approved, RejectionCode
 from merchant_assistant.shared.errors import DomainError
 
 
@@ -69,7 +69,7 @@ class NeedsConfirmation:
 
 @dataclass(frozen=True, slots=True)
 class Refused:
-    code: Literal["operation_id_conflict", "operation_in_progress", "confirmation_missing"]
+    code: RejectionCode
     detail: str
 
 
@@ -102,20 +102,26 @@ def write(approved: Approved, adapter: WriteAdapter, context: WriteContext) -> W
     existing = ledger.operation(operation_id)
     if existing is not None:
         if existing.fingerprint != values:
-            return Refused("operation_id_conflict", "the id was already used with other values")
+            return Refused(
+                RejectionCode.OPERATION_ID_CONFLICT, "the id was already used with other values"
+            )
         if existing.status is OperationStatus.COMMITTED:
             stored = json.loads(existing.result) if existing.result else {}
             return Done(_ok(name, adapter, stored), "deduplicated")
         if not _owned_by(ledger, operation_id, context.conversation_id):
             # Only the conversation that owns an unsettled command may look it up: a lookup that
             # finds it would journal the effect, and consume the owner's pending action, here.
-            return Refused("operation_id_conflict", "the id belongs to another conversation")
+            return Refused(
+                RejectionCode.OPERATION_ID_CONFLICT, "the id belongs to another conversation"
+            )
         if existing.status is OperationStatus.STARTED and ledger.owner_has_finished(operation_id):
             # Its run ended without settling it (a crash in the middle): its outcome is unknown.
             ledger.abandon_started(operation_id)
             existing = ledger.operation(operation_id)
         if existing is not None and existing.status is OperationStatus.STARTED:
-            return Refused("operation_in_progress", "another run is executing this command")
+            return Refused(
+                RejectionCode.OPERATION_IN_PROGRESS, "another run is executing this command"
+            )
         if existing is not None and existing.status is OperationStatus.UNCERTAIN:
             found = _look_up(approved, adapter, context, operation_id)
             if found is not None:
@@ -124,7 +130,9 @@ def write(approved: Approved, adapter: WriteAdapter, context: WriteContext) -> W
 
     pending = ledger.pending_action(operation_id)
     if pending is not None and pending.conversation_id != context.conversation_id:
-        return Refused("operation_id_conflict", "the id belongs to another conversation")
+        return Refused(
+            RejectionCode.OPERATION_ID_CONFLICT, "the id belongs to another conversation"
+        )
     if not is_confirmed(pending, values, context.control_version):
         proposed = ledger.propose(
             PendingAction(
@@ -174,10 +182,11 @@ def _execute(
         return ControlChanged(operation_id)
     if started is StartResult.NOT_CONFIRMED:
         return Refused(
-            "confirmation_missing", "the confirmation of these values is no longer valid"
+            RejectionCode.CONFIRMATION_MISSING,
+            "the confirmation of these values is no longer valid",
         )
     if started is StartResult.IN_PROGRESS:
-        return Refused("operation_in_progress", "another run is executing this command")
+        return Refused(RejectionCode.OPERATION_IN_PROGRESS, "another run is executing this command")
     try:
         data = adapter(approved.arguments, conversation_id=context.conversation_id)
     except DomainError as failure:

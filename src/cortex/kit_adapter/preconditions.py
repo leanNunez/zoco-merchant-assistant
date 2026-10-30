@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields, replace
 from types import MappingProxyType
 
-from cortex.config import ConfigError, RunLimits
+from cortex.config import MAX_CONTROL_VERSION, ConfigError, RunLimits
 from cortex.kit_adapter.scenario import UnsupportedScenario, conversation_id
 from cortex.tools.adapters.faults import FaultKind
 from merchant_assistant.agent.domain.tools import CREAR_RECLAMO
@@ -102,8 +102,10 @@ def _mode(setup: Setup, value: object) -> Setup:
 
 
 def _version(setup: Setup, value: object) -> Setup:
-    if type(value) is not int or value < 0:
-        raise UnsupportedScenario("current_version must be a non-negative integer")
+    if type(value) is not int or not 0 <= value <= MAX_CONTROL_VERSION:
+        raise UnsupportedScenario(
+            f"current_version must be an integer between 0 and {MAX_CONTROL_VERSION}"
+        )
     if setup.control_version is not None and setup.control_version != value:
         raise UnsupportedScenario("the names of the control version disagree")
     return replace(setup, control_version=value)

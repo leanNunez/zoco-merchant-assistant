@@ -39,9 +39,10 @@ from merchant_assistant.shared.clock import Clock, business_today
 
 BUSINESS_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
 
-# Salt of the principal hash in traces. Not a secret in this demo (principals are fixtures);
-# a deployment passes its own to `build_runner`.
-DEFAULT_TRACE_SALT = "cortex-trace-v1"
+# Key of the principal pseudonym in traces. Not a secret in this demo (principals are fixtures),
+# which keeps the sample traces reproducible; a deployment passes its own to `build_runner`
+# (the entry point reads it from CORTEX_TRACE_KEY).
+DEFAULT_TRACE_KEY = "cortex-trace-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,12 +58,9 @@ class HarnessData:
     contacts: Mapping[str, tuple[Contact, ...]]
 
 
-def default_corpora(root: Path) -> Mapping[str, Path]:
-    """Comercio A keeps the documents of the first delivery; Comercio B has none."""
-    return MappingProxyType({"comercio_a": root / "docs"})
-
-
-def load_harness_data(kit_dir: Path, corpora: Mapping[str, Path] | None = None) -> HarnessData:
+def load_harness_data(kit_dir: Path, corpora: Mapping[str, Path]) -> HarnessData:
+    """Load and check the kit's fixtures. `corpora` maps each company to the directory of the
+    documents it may search; a company that is not in it has none."""
     config = load_harness_config(_read_json(kit_dir / "harness_config.json"))
     if config.allowed_finish_reasons != {reason.value for reason in FinishReason}:
         raise ConfigError("the kit's finish reasons differ from the harness's")
@@ -93,7 +91,7 @@ def load_harness_data(kit_dir: Path, corpora: Mapping[str, Path] | None = None) 
         directory=directory,
         test_principals=MappingProxyType({r.tenant_id: r.principal_id for r in records}),
         sales=sales,
-        docs=DocsLibrary(default_corpora(kit_dir.parent) if corpora is None else corpora),
+        docs=DocsLibrary(corpora),
         catalog=catalog,
         contacts=MappingProxyType(contacts),
     )
@@ -124,7 +122,7 @@ def build_runner(
     bind_tools: ToolBinder,
     clock: Clock,
     ticker: Ticker,
-    trace_salt: str = DEFAULT_TRACE_SALT,
+    trace_key: str = DEFAULT_TRACE_KEY,
 ) -> AgentRunner:
     return AgentRunner(
         database=database,
@@ -134,7 +132,7 @@ def build_runner(
         clock=clock,
         ticker=ticker,
         business_tz=BUSINESS_TIMEZONE,
-        redactor=TraceRedactor(trace_salt),
+        redactor=TraceRedactor(trace_key),
     )
 
 

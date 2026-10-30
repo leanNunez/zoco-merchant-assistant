@@ -15,13 +15,14 @@ never reaches the tool's adapter.
 from __future__ import annotations
 
 import json
-import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
 
 from pydantic import BaseModel
 
+from cortex.identifiers import PLAIN_TOOL_NAME
 from cortex.identity import AuthContext
 from cortex.tools.catalog import Catalog, ToolKind, ToolSpec
 from cortex.tools.schema_guard import validate_arguments
@@ -32,24 +33,27 @@ from merchant_assistant.control.capabilities import capabilities_for
 from merchant_assistant.control.states import State
 from merchant_assistant.shared.errors import DomainError
 
-SCOPE_FIELDS = frozenset(
+# What the arguments may never name: who is asking or for which company. The names are compared
+# in a normal form (see `normalize_key`), so `tenantId`, `Tenant-ID` and `tenant_id` are one
+# field. The list stays in code on purpose: a configuration file could loosen it.
+SCOPE_BASES = frozenset(
     {
-        "tenant_id",
         "tenant",
         "empresa",
         "company",
         "comercio",
-        "merchant_id",
-        "principal_id",
+        "merchant",
+        "principal",
         "role",
         "rol",
-        "is_admin",
         "admin",
+        "isadmin",
     }
 )
+# A normalized key is a scope field when it is a base name or a base name followed by "id".
+SCOPE_FIELDS = SCOPE_BASES | frozenset(f"{base}id" for base in SCOPE_BASES)
 
 # A tool name the model invented is untrusted text: it is shown only when it is a plain name.
-_PLAIN_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}", re.ASCII)
 REDACTED_NAME = "<redacted>"
 
 
@@ -89,7 +93,7 @@ class PolicyContext:
 
 
 def display_name(name: str) -> str:
-    return name if _PLAIN_NAME.fullmatch(name) else REDACTED_NAME
+    return name if PLAIN_TOOL_NAME.fullmatch(name) else REDACTED_NAME
 
 
 def review(call: ToolCall, catalog: Catalog, context: PolicyContext) -> Approved | Rejected:
@@ -98,9 +102,9 @@ def review(call: ToolCall, catalog: Catalog, context: PolicyContext) -> Approved
     if spec is None or not _mode_allows(context.mode, spec):
         return Rejected(tool, RejectionCode.TOOL_NOT_ALLOWED, "not offered in this conversation")
 
-    scope_fields = _argument_names(call.arguments) & SCOPE_FIELDS
+    scope_fields = _scope_fields_named(call.arguments)
     if scope_fields:
-        return Rejected(tool, RejectionCode.SCOPE_VIOLATION, f"fields: {sorted(scope_fields)}")
+        return Rejected(tool, RejectionCode.SCOPE_VIOLATION, f"fields: {scope_fields}")
 
     if not context.auth.can(spec.permission):
         return Rejected(tool, RejectionCode.PERMISSION_DENIED, f"requires {spec.permission}")
@@ -126,16 +130,34 @@ def _mode_allows(mode: State, spec: ToolSpec) -> bool:
     return capabilities.effect_tools and not capabilities.effects_need_operator_approval
 
 
-def _argument_names(raw: str) -> frozenset[str]:
-    """The top-level keys, if the payload is a JSON object. The schema check handles the rest."""
+def normalize_key(key: str) -> str:
+    """The key in the form it is compared in: NFKC (fullwidth letters become plain ones), case
+    folded, and only letters and digits left, so separators and invisible characters do not
+    make a different name."""
+    folded = unicodedata.normalize("NFKC", key).casefold()
+    return "".join(character for character in folded if character.isalnum())
+
+
+def _scope_fields_named(raw: str) -> list[str]:
+    """The scope fields the payload names at any depth, in their normal form, sorted.
+
+    Only the normal form is returned, never the raw key: the model chose that text. The walk is
+    iterative, so a deeply nested payload cannot exhaust the stack. A payload that is not JSON
+    is left to the schema check.
+    """
     if len(raw) > MAX_ARGUMENTS_CHARS:
-        return frozenset()
+        return []
     try:
         parsed = json.loads(raw)
     except (ValueError, RecursionError):
-        return frozenset()
-    return (
-        frozenset(str(key).casefold() for key in parsed)
-        if isinstance(parsed, dict)
-        else frozenset()
-    )
+        return []
+    found: set[str] = set()
+    pending = [parsed]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, dict):
+            found.update(name for name in map(normalize_key, node) if name in SCOPE_FIELDS)
+            pending.extend(node.values())
+        elif isinstance(node, list):
+            pending.extend(node)
+    return sorted(found)

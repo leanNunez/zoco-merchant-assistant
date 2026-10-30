@@ -12,6 +12,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field, StringConstraints
 
+from cortex.identifiers import OPERATION_ID_PATTERN
 from cortex.tools.catalog import Catalog, ToolKind, ToolSpec
 from merchant_assistant.agent.domain.tools import (
     BUSCAR_DOCUMENTACION,
@@ -23,8 +24,6 @@ from merchant_assistant.agent.domain.tools import (
     CrearReclamoArgs,
 )
 from merchant_assistant.sales.contract import parse_sales_date
-
-OPERATION_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
 
 
 class CrearReclamoOperationArgs(CrearReclamoArgs):

@@ -1,8 +1,13 @@
 import ast
+import hashlib
+import hmac
+import re
+import time
 from pathlib import Path
 
 import pytest
 
+from cortex.bootstrap import DEFAULT_TRACE_KEY
 from cortex.observability.redaction import (
     ALLOWED_ATTRIBUTES,
     REDACTED,
@@ -42,6 +47,53 @@ def test_the_names_and_codes_the_traces_are_made_of_survive(harmless: str) -> No
     assert scrub(harmless) == harmless
 
 
+# Adversarial shapes for a backtracking engine. 200 KB each: a quadratic pattern needs tens of
+# seconds on any of them, a linear one a few milliseconds, so the 2 s bound is far from both.
+_HOSTILE_SIZE = 200_000
+_HOSTILE_INPUTS = {
+    "one long word": "a" * _HOSTILE_SIZE,
+    "a long run of digits": "1" * _HOSTILE_SIZE,
+    "a@ repeated": "a@" * (_HOSTILE_SIZE // 2),
+    "a domain that never ends": "a@b" + ".b" * (_HOSTILE_SIZE // 2),
+    "dot, plus and dash runs": ".+-" * (_HOSTILE_SIZE // 3),
+    "Bearer repeated": "Bearer " * (_HOSTILE_SIZE // 7),
+    "Bearer then spaces": "Bearer" + " " * _HOSTILE_SIZE,
+    "dashes between digits": "1" + "-" * _HOSTILE_SIZE + "1",
+    "digits joined by dashes": "1-" * (_HOSTILE_SIZE // 2) + "x",
+    "digits joined by spaces, then a dash": "1 " * (_HOSTILE_SIZE // 2) + "-",
+    "digits joined by dots, then a letter": "1." * (_HOSTILE_SIZE // 2) + "x",
+    "key prefix repeated": "sk-" * (_HOSTILE_SIZE // 3),
+    "a token that ends in a non-ASCII letter": "a" * _HOSTILE_SIZE + "\u00e9",
+}
+
+
+@pytest.mark.parametrize("shape", list(_HOSTILE_INPUTS))
+def test_masking_is_linear_on_hostile_input(shape: str) -> None:
+    text = _HOSTILE_INPUTS[shape]
+
+    started = time.perf_counter()
+    scrub(text)
+    scrub(text, limit=len(text))
+
+    assert time.perf_counter() - started < 2.0
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # A chain of digits whose end is glued to a dash or a letter cannot be masked from its
+        # start, but the part that ends at a space still is.
+        ("1 2 3 4 5 6 7 8-", f"{REDACTED} 8-"),
+        ("a4111 1111 1111 1111", f"a4111 {REDACTED}"),
+        ("tel 11 5555 1234 fin", f"tel {REDACTED} fin"),
+        ("1-2-3-4-5-6-7-x", "1-2-3-4-5-6-7-x"),
+        ("pedido 12-34-56", "pedido 12-34-56"),
+    ],
+)
+def test_digit_chains_keep_their_masking_boundaries(text: str, expected: str) -> None:
+    assert scrub(text) == expected
+
+
 def test_a_value_is_cut_to_its_limit() -> None:
     sentence = "una frase normal " * 40
     assert len(scrub(sentence)) == 120
@@ -55,7 +107,7 @@ def test_masking_reaches_into_nested_values() -> None:
 
 
 def test_only_allowlisted_attributes_are_kept_and_the_rest_is_counted() -> None:
-    redactor = TraceRedactor("salt")
+    redactor = TraceRedactor("key")
 
     kept, dropped = redactor.clean(
         "tool_requested", {"tool": "consultar_ventas", "arguments": "fecha=2026", "x": 1}
@@ -66,31 +118,60 @@ def test_only_allowlisted_attributes_are_kept_and_the_rest_is_counted() -> None:
 
 
 def test_an_event_type_nobody_allowed_carries_nothing() -> None:
-    assert TraceRedactor("salt").clean("brand_new_event", {"anything": "at all"}) == ({}, 1)
+    assert TraceRedactor("key").clean("brand_new_event", {"anything": "at all"}) == ({}, 1)
 
 
 def test_strings_are_scrubbed_but_numbers_and_flags_pass() -> None:
-    kept, _ = TraceRedactor("salt").clean("write_lookup", {"tool": "crear_reclamo", "found": False})
+    kept, _ = TraceRedactor("key").clean("write_lookup", {"tool": "crear_reclamo", "found": False})
     assert kept == {"tool": "crear_reclamo", "found": False}
 
-    kept, _ = TraceRedactor("salt").clean(
+    kept, _ = TraceRedactor("key").clean(
         "tool_rejected", {"tool": "x", "reason": "r", "detail": "a@b.co"}
     )
     assert kept["detail"] == REDACTED
 
 
-def test_the_principal_is_a_stable_salted_hash() -> None:
-    first, again, other_salt = TraceRedactor("a"), TraceRedactor("a"), TraceRedactor("b")
+def test_the_principal_is_a_stable_keyed_pseudonym() -> None:
+    first, again, other_key = TraceRedactor("a"), TraceRedactor("a"), TraceRedactor("b")
+    pseudonym = first.principal("comercio_a", "operador_a")
 
-    assert first.principal("operador_a") == again.principal("operador_a")
-    assert first.principal("operador_a") != other_salt.principal("operador_a")
-    assert first.principal("operador_a") != first.principal("operador_b")
-    assert "operador" not in first.principal("operador_a")
+    assert pseudonym == again.principal("comercio_a", "operador_a")
+    assert pseudonym != other_key.principal("comercio_a", "operador_a")
+    assert pseudonym != first.principal("comercio_a", "operador_b")
+    assert re.fullmatch(r"p_[0-9a-f]{10}", pseudonym)
+    assert "operador" not in pseudonym
 
 
-def test_a_salt_is_required() -> None:
-    with pytest.raises(ValueError, match="salt"):
-        TraceRedactor("")
+def test_the_same_principal_id_in_two_companies_gets_two_pseudonyms() -> None:
+    redactor = TraceRedactor("a")
+
+    assert redactor.principal("comercio_a", "admin") != redactor.principal("comercio_b", "admin")
+
+
+def test_the_tenant_and_the_principal_cannot_be_shifted_into_each_other() -> None:
+    redactor = TraceRedactor("a")
+
+    assert redactor.principal("ab", "c") != redactor.principal("a", "bc")
+
+
+def test_the_pseudonym_is_an_hmac_sha256_of_tenant_and_principal_under_the_key() -> None:
+    expected = hmac.new(b"the-key", b"comercio_a\0operador_a", hashlib.sha256).hexdigest()
+
+    assert TraceRedactor("the-key").principal("comercio_a", "operador_a") == f"p_{expected[:10]}"
+
+
+def test_the_default_key_gives_stable_pseudonyms() -> None:
+    first, again = TraceRedactor(DEFAULT_TRACE_KEY), TraceRedactor(DEFAULT_TRACE_KEY)
+
+    assert first.principal("comercio_a", "operador_a") == again.principal(
+        "comercio_a", "operador_a"
+    )
+
+
+@pytest.mark.parametrize("key", ["", " ", "\t\n  "])
+def test_a_key_is_required(key: str) -> None:
+    with pytest.raises(ValueError, match="key"):
+        TraceRedactor(key)
 
 
 def _emitted() -> list[tuple[str, set[str]]]:

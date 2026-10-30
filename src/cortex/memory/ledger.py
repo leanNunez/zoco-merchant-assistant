@@ -15,6 +15,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from cortex.identity import AuthContext
+from merchant_assistant.control.states import State
 
 if TYPE_CHECKING:
     from cortex.memory.database import Database
@@ -343,4 +344,4 @@ def _in_control(
         "WHERE tenant_id = ? AND conversation_id = ?",
         (tenant_id, conversation_id),
     ).fetchone()
-    return row is not None and row[0] == "AUTO" and row[1] == control_version
+    return row is not None and row[0] == State.AUTO.value and row[1] == control_version

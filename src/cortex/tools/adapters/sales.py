@@ -13,7 +13,8 @@ from types import MappingProxyType
 
 from pydantic import BaseModel
 
-from cortex.identity import IDENTIFIER, AuthContext
+from cortex.identifiers import IDENTIFIER
+from cortex.identity import AuthContext
 from merchant_assistant.agent.domain.tools import ConsultarVentasArgs
 from merchant_assistant.sales.contract import parse_iso_day
 from merchant_assistant.sales.models import DailySales
