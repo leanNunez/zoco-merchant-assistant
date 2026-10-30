@@ -120,7 +120,7 @@ La consigna descarta una entrega que permita alguna de estas tres cosas.
 
 ## Resultados y trazas
 
-- Resultados fechados, con el commit evaluado: `evaluation/results/harness/2026-10-29/report.md`.
+- Resultados fechados, con el commit evaluado: `evaluation/results/harness/2026-10-30/report.md`.
 - Dos trazas anonimizadas, un éxito y un fallo: `evaluation/results/harness/traces/`
   (se regeneran con `python -m cortex.kit_adapter.samples`).
 - El verificador no importa el harness: recalcula los efectos leyendo los archivos SQLite en solo
@@ -153,6 +153,8 @@ campo en la pregunta de confirmación), con sus tests en el mismo archivo.
 - **Un comando interrumpido por un crash no se vuelve a ejecutar con el mismo `run_id`** (podría
   haber respondido antes de caerse): termina `FAILED` con `run_interrupted` y se reintenta con un
   `run_id` nuevo. Una escritura que quedó en vuelo se concilia por su `operation_id`.
+- **Sin migraciones de esquema.** Cada mundo se crea con el esquema vigente; un `--workdir` que
+  quedó de una versión anterior hay que borrarlo antes de reutilizarlo.
 - **Autenticación simulada.** El principal y la empresa son fixtures confiables del evaluador;
   no hay login, emisión ni vencimiento de credenciales.
 - **Un solo proceso y SQLite local.** Los candados (una ejecución por conversación, escrituras con
