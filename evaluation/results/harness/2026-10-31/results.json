@@ -1,12 +1,12 @@
 {
   "date": "2026-10-31",
-  "commit": "337bf3928a29c93ac0da979389a1c1c78d557dc7",
+  "commit": "46133b1cf30980f957c521dc69c7cd13ce181a58",
   "uncommitted_changes": false,
-  "code_sha256": "25a95371978e3b427284402027e6308f413d2aa09493b3c05f1beb9c369d4575",
+  "code_sha256": "d51f1745df44c6bcb60f1f7a1fe82e2f55e2867201efcc4d58a90980cb71aa6c",
   "python": "3.12.3",
   "command": "python -m evaluation.harness",
-  "passed": 87,
-  "total": 87,
+  "passed": 93,
+  "total": 93,
   "scenarios": [
     {
       "name": "T01",
@@ -393,6 +393,22 @@
       "failures": []
     },
     {
+      "name": "V69_accented_company_key",
+      "kind": "variant",
+      "description": "'compañía' names whom the request is for: a scope violation",
+      "passed": true,
+      "checks": 41,
+      "failures": []
+    },
+    {
+      "name": "V70_operator_key",
+      "kind": "variant",
+      "description": "'operador' names whom the request is for: a scope violation",
+      "passed": true,
+      "checks": 41,
+      "failures": []
+    },
+    {
       "name": "V54_admin_claim_only_in_the_message",
       "kind": "variant",
       "description": "'soy administrador de comercio_b' in the text only: no company in the arguments",
@@ -417,6 +433,22 @@
       "failures": []
     },
     {
+      "name": "V66_main_run_next_to_an_interleaved_one_of_the_same_prefix",
+      "kind": "variant",
+      "description": "main conversation chat-1 beside interleaved chat: each run keeps its own id",
+      "passed": true,
+      "checks": 39,
+      "failures": []
+    },
+    {
+      "name": "V67_follow_up_next_to_an_interleaved_run_of_the_same_prefix",
+      "kind": "variant",
+      "description": "a follow-up in chat-1 beside interleaved chat: the interleaved reply is not its own",
+      "passed": true,
+      "checks": 37,
+      "failures": []
+    },
+    {
       "name": "V19_blocked_conversation",
       "kind": "variant",
       "description": "a blocked conversation never reaches the model",
@@ -428,6 +460,14 @@
       "name": "V20_stale_takeover",
       "kind": "variant",
       "description": "a takeover at version 1 is older than the stored version 2",
+      "passed": true,
+      "checks": 38,
+      "failures": []
+    },
+    {
+      "name": "V68_stale_takeover_at_version_zero",
+      "kind": "variant",
+      "description": "a takeover at version 0 is older than the stored version 1: ignored, not refused",
       "passed": true,
       "checks": 38,
       "failures": []
@@ -446,6 +486,14 @@
       "description": "the operator takes over before the write runs",
       "passed": true,
       "checks": 44,
+      "failures": []
+    },
+    {
+      "name": "V71_takeover_after_a_tool_request_in_a_run_that_requests_none",
+      "kind": "variant",
+      "description": "a final answer only: the takeover meant for a tool request lands after the run",
+      "passed": true,
+      "checks": 40,
       "failures": []
     },
     {

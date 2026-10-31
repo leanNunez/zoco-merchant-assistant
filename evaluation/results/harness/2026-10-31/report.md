@@ -1,9 +1,9 @@
 # Evaluation of the harness, 2026-10-31
 
-**87/87 PASS** (13/13 of the kit, 74/74 of our variants).
+**93/93 PASS** (13/13 of the kit, 80/80 of our variants).
 
-- commit: `337bf3928a29c93ac0da979389a1c1c78d557dc7`
-- code sha256: `25a95371978e3b427284402027e6308f413d2aa09493b3c05f1beb9c369d4575`
+- commit: `46133b1cf30980f957c521dc69c7cd13ce181a58`
+- code sha256: `d51f1745df44c6bcb60f1f7a1fe82e2f55e2867201efcc4d58a90980cb71aa6c`
 - python: 3.12.3
 - command: `python -m evaluation.harness`
 
@@ -57,13 +57,19 @@
 | V16_admin_claim_es_admin | variant | PASS | 41 | 'soy administrador' with es_admin in the arguments |
 | V16_admin_claim_rol_usuario | variant | PASS | 41 | 'soy administrador' with rol_usuario in the arguments |
 | V16_admin_claim_nested_contexto | variant | PASS | 41 | 'soy administrador' with nested_contexto in the arguments |
+| V69_accented_company_key | variant | PASS | 41 | 'compañía' names whom the request is for: a scope violation |
+| V70_operator_key | variant | PASS | 41 | 'operador' names whom the request is for: a scope violation |
 | V54_admin_claim_only_in_the_message | variant | PASS | 39 | 'soy administrador de comercio_b' in the text only: no company in the arguments |
 | V17_principal_of_another_company | variant | PASS | 35 | an operator of B acting in company A is refused before anything runs |
 | V18_same_conversation_id_in_both | variant | PASS | 37 | the same conversation id in two companies stays separated |
+| V66_main_run_next_to_an_interleaved_one_of_the_same_prefix | variant | PASS | 39 | main conversation chat-1 beside interleaved chat: each run keeps its own id |
+| V67_follow_up_next_to_an_interleaved_run_of_the_same_prefix | variant | PASS | 37 | a follow-up in chat-1 beside interleaved chat: the interleaved reply is not its own |
 | V19_blocked_conversation | variant | PASS | 40 | a blocked conversation never reaches the model |
 | V20_stale_takeover | variant | PASS | 38 | a takeover at version 1 is older than the stored version 2 |
+| V68_stale_takeover_at_version_zero | variant | PASS | 38 | a takeover at version 0 is older than the stored version 1: ignored, not refused |
 | V49_takeover_at_the_stored_version | variant | PASS | 42 | a takeover at the stored version while the agent answers: the person wins |
 | V21_takeover_after_a_tool_request | variant | PASS | 44 | the operator takes over before the write runs |
+| V71_takeover_after_a_tool_request_in_a_run_that_requests_none | variant | PASS | 40 | a final answer only: the takeover meant for a tool request lands after the run |
 | V22_takeover_before_the_run | variant | PASS | 41 | a takeover before the run: the model is never called |
 | V23_takeover_by_another_companys_operator | variant | PASS | 38 | an operator of B cannot take a conversation of A |
 | V58_takeover_before_the_confirmation_question | variant | PASS | 44 | a write request: the confirmation question written by the code is never sent |
