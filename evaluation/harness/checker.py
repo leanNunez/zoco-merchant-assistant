@@ -76,6 +76,8 @@ DEFAULT_MAX_STEPS = read_default_max_steps(KIT_CONFIG)
 COMPANY_CONTACTS = read_company_contacts(KIT_COMPANIES)
 # A write that is still waiting, or was confirmed and not settled, or is held for a person.
 OPEN_ACTIONS = ("PENDING", "CONFIRMED", "SUSPENDED")
+# The message of a main run whose scenario gives none, as the adapter sends it.
+DEFAULT_MESSAGE = "Hola"
 REQUIRED_OUTPUT = (
     "run_id",
     "tenant_id",
@@ -480,15 +482,16 @@ def _failure_says_why(
 def _string_values(node: object) -> Iterator[str]:
     """Every string stored as a value anywhere in the output (never a key), except a whole UUID
     in an identifier field: an id the caller chose (a UUID run_id, say) is not a secret, but an
-    operation_id the model chose may be one. A number is never one either (a control version of
-    2147483647)."""
+    operation_id the model chose may be one. A list or an object under an identifier field is no
+    id at all, so it is walked like any other value. A number is never one either (a control
+    version of 2147483647)."""
     if isinstance(node, str):
         yield node
     elif isinstance(node, Mapping):
         for key, value in node.items():
-            if key not in IDENTIFIER_FIELDS:
+            if key not in IDENTIFIER_FIELDS or not isinstance(value, str):
                 yield from _string_values(value)
-            elif isinstance(value, str) and not UUID.fullmatch(value):
+            elif not UUID.fullmatch(value):
                 yield value
     elif isinstance(node, list | tuple):
         for item in node:
@@ -582,14 +585,18 @@ def _step_limit(preconditions: Mapping[str, object]) -> int:
     return limit if type(limit) is int else DEFAULT_MAX_STEPS
 
 
-def _contexts_separated(preconditions: Mapping[str, object], real: RealState) -> bool | None:
+def _contexts_separated(
+    preconditions: Mapping[str, object], real: RealState, main: tuple[str, str], message: str
+) -> bool | None:
     """Did the interleaved conversations stay apart? None when the scenario has none, or when
     nothing was stored (the run was refused before anything ran).
 
     Every interleaved message must be stored as a user message under its own company and
     conversation and under no other, and each company's contacts must be exactly its own. A
     message stored nowhere was refused before it was stored (too long, say): it crossed nowhere,
-    so it is left out."""
+    so it is left out. An interleaved message equal to the main run's `message` may also be
+    stored under the main conversation `main` (the main run sent it there itself), and only
+    there besides its own conversations."""
     entries = preconditions.get("interleaved_conversations")
     if not isinstance(entries, list):
         return None
@@ -604,7 +611,13 @@ def _contexts_separated(preconditions: Mapping[str, object], real: RealState) ->
     held = {text: real.holders_of_user_message(text) for text in where}
     if not any(held.values()):
         return None
-    return all(held[text] == where[text] for text in where if held[text]) and all(
+    return all(
+        where[text] <= held[text] <= where[text] | {main}
+        if text == message
+        else held[text] == where[text]
+        for text in where
+        if held[text]
+    ) and all(
         real.contacts(tenant) == COMPANY_CONTACTS.get(tenant, frozenset()) for tenant in tenants
     )
 
@@ -700,7 +713,12 @@ def _against_files(
         ),
         _equal(
             "files.contexts_separated",
-            _contexts_separated(preconditions, real),
+            _contexts_separated(
+                preconditions,
+                real,
+                (tenant, conversation),
+                str(scenario.get("message", DEFAULT_MESSAGE)),
+            ),
             output.get("contexts_separated"),
         ),
     ]

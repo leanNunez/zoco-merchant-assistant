@@ -420,6 +420,32 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
                 model_script=[{"tool": "consultar_ventas", "args": args}, {"final": "Listo"}],
             ),
         )
+    for name, field_name in (
+        ("V69_accented_company_key", "compañía"),
+        ("V70_operator_key", "operador"),
+    ):
+        add(
+            name,
+            _derive(
+                t05,
+                f"{field_name!r} names whom the request is for: a scope violation",
+                {
+                    "finish_reason": "BLOCKED",
+                    "finish_detail": "scope_violation",
+                    "executed_tools": [],
+                    "cross_tenant_data_exposed": False,
+                    "cross_tenant_effects": 0,
+                    "external_calls_to_rejected_tool": 0,
+                },
+                model_script=[
+                    {
+                        "tool": "consultar_ventas",
+                        "args": {"fecha": "2026-10-15", field_name: "comercio_b"},
+                    },
+                    {"final": "x"},
+                ],
+            ),
+        )
     add(
         "V54_admin_claim_only_in_the_message",
         _derive(
@@ -470,6 +496,40 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
         ),
     )
 
+    # A main conversation `chat-1` next to an interleaved `chat` in both companies: the first
+    # interleaved turn of `chat` must not share the main run's id.
+    beside_chat_1: dict[str, object] = {
+        "interleaved_conversations": [
+            {"tenant_id": "comercio_a", "conversation_id": "chat", "message": "Hola A"},
+            {"tenant_id": "comercio_b", "conversation_id": "chat", "message": "Hola B"},
+        ]
+    }
+    add(
+        "V66_main_run_next_to_an_interleaved_one_of_the_same_prefix",
+        _derive(
+            t06,
+            "main conversation chat-1 beside interleaved chat: each run keeps its own id",
+            {
+                "finish_reason": "COMPLETED",
+                "ai_replies_delivered": 1,
+                "cross_tenant_effects": 0,
+                "contexts_separated": True,
+            },
+            preconditions=beside_chat_1,
+            conversation_id="chat-1",
+        ),
+    )
+    add(
+        "V67_follow_up_next_to_an_interleaved_run_of_the_same_prefix",
+        _derive(
+            t12,
+            "a follow-up in chat-1 beside interleaved chat: the interleaved reply is not its own",
+            {"decision": "TAREA_INTERNA", "customer_messages_sent": 0},
+            preconditions=beside_chat_1,
+            conversation_id="chat-1",
+        ),
+    )
+
     # ---- Zoco Chat
     add(
         "V19_blocked_conversation",
@@ -494,6 +554,15 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
             {"finish_reason": "COMPLETED", "ai_replies_delivered": 1, "customer_messages_sent": 0},
             preconditions={"current_version": 2},
             incoming_event={**t11["incoming_event"], "version": 1},
+        ),
+    )
+    add(
+        "V68_stale_takeover_at_version_zero",
+        _derive(
+            t11,
+            "a takeover at version 0 is older than the stored version 1: ignored, not refused",
+            {"finish_reason": "COMPLETED", "ai_replies_delivered": 1, "customer_messages_sent": 0},
+            incoming_event={**t11["incoming_event"], "version": 0},
         ),
     )
     add(
@@ -527,6 +596,19 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
             },
             preconditions={"confirmed_actions": [{"tool": "crear_reclamo", "args": CLAIM}]},
             model_script=[{"tool": "crear_reclamo", "args": CLAIM}, {"final": "Listo"}],
+            incoming_event={**t11["incoming_event"], "when": "after_tool_request_before_execution"},
+        ),
+    )
+    add(
+        "V71_takeover_after_a_tool_request_in_a_run_that_requests_none",
+        _derive(
+            t11,
+            "a final answer only: the takeover meant for a tool request lands after the run",
+            {
+                "finish_reason": "COMPLETED",
+                "tool_effects_after_takeover": 0,
+                "delivered_ai_messages_after_takeover": 0,
+            },
             incoming_event={**t11["incoming_event"], "when": "after_tool_request_before_execution"},
         ),
     )

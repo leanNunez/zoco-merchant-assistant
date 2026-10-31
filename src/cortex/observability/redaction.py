@@ -66,11 +66,12 @@ def scrub(text: str, limit: int = MAX_VALUE_CHARS) -> str:
 
 
 def scrub_tree(value: object, limit: int = 1000) -> object:
-    """The same masking applied to every string inside nested lists and dictionaries."""
+    """The same masking applied to every string inside nested lists and dictionaries, keys
+    included: a key cut to `MAX_VALUE_CHARS`, a value to `limit`."""
     if isinstance(value, str):
         return scrub(value, limit)
     if isinstance(value, Mapping):
-        return {key: scrub_tree(item, limit) for key, item in value.items()}
+        return {scrub(str(key)): scrub_tree(item, limit) for key, item in value.items()}
     if isinstance(value, list | tuple):
         return [scrub_tree(item, limit) for item in value]
     return value

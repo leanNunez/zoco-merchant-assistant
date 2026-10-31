@@ -450,3 +450,29 @@ def test_a_fault_reached_on_a_later_call_still_needs_its_failure_event(tmp_path:
     output["events"] = [e for e in output["events"] if e["type"] != "tool_error"]
 
     assert FAILURE_RULE in _failed(scenario, output, world)
+
+
+def test_k9_an_interleaved_message_equal_to_the_main_runs_is_not_taken_for_mixing(
+    tmp_path: Path,
+) -> None:
+    entries = _scenario("T06")["preconditions"]["interleaved_conversations"]
+    same_as_main = [entries[0], {**entries[1], "message": "Hola"}]  # the main run's default
+    scenario, output, world = _real_variant(
+        tmp_path, "T06", preconditions={"interleaved_conversations": same_as_main}
+    )
+
+    assert output["contexts_separated"] is True
+    assert _failed(scenario, output, world) == set()
+
+    # Stored in a third conversation, the same text is still caught.
+    _edit(
+        world,
+        "INSERT INTO conversations (tenant_id, conversation_id, created_at) "
+        "VALUES ('comercio_a', 'conv_other', 'now') ON CONFLICT DO NOTHING",
+    )
+    _edit(
+        world,
+        "INSERT INTO messages (tenant_id, conversation_id, run_id, role, content, created_at) "
+        "VALUES ('comercio_a', 'conv_other', 'run-x', 'user', 'Hola', 'now')",
+    )
+    assert "files.contexts_separated" in _failed(scenario, output, world)

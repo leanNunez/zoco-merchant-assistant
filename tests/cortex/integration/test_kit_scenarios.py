@@ -75,6 +75,34 @@ def test_t05_naming_another_company_ends_the_run_with_a_refusal() -> None:
     assert output["external_calls_to_rejected_tool"] == 0
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        "compañía",
+        "compañia",
+        "Compañía_ID",
+        "comerciante",
+        "usuario",
+        "operador",
+        "tenancy",
+        "inquilino",
+        "organización",
+        "org_id",
+        "cuenta",
+    ],
+)
+def test_k3_an_accented_or_other_scope_word_ends_the_run_with_a_refusal(
+    tmp_path: Path, field: str
+) -> None:
+    args = {"fecha": "2026-10-15", field: "comercio_b"}
+    script = [{"tool": "consultar_ventas", "args": args}, {"final": "x"}]
+
+    output = run_scenario_file(_scenario(tmp_path, model_script=script), kit_dir=KIT)
+
+    assert (output["finish_reason"], output["finish_detail"]) == ("BLOCKED", "scope_violation")
+    assert output["executed_tools"] == []
+
+
 def test_t08_the_scenario_step_limit_overrides_the_default() -> None:
     output = _run("T08")
 

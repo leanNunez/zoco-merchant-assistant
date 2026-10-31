@@ -77,10 +77,33 @@ SCOPE_WORDS = frozenset(
         "admins",
         "administrador",
         "administradores",
+        "operador",
+        "operadores",
+        "operator",
+        "operators",
+        "usuario",
+        "usuarios",
+        "user",
+        "users",
+        "organizacion",
+        "organizaciones",
+        "organization",
+        "organizations",
+        "org",
+        "orgs",
+        "cuenta",
+        "cuentas",
+        "account",
+        "accounts",
+        "comerciante",
+        "comerciantes",
+        "inquilino",
+        "inquilinos",
     }
 )
-# ...or when its normal form contains one of these stems anywhere (`administracion`, `companyName`).
-SCOPE_STEMS = ("tenant", "empresa", "compan", "comercio", "merchant", "principal", "admin")
+# ...or when its normal form contains one of these stems anywhere (`administracion`, `companyName`,
+# `tenancy`, `comerciante`).
+SCOPE_STEMS = ("tenan", "empresa", "compan", "comerci", "merchant", "principal", "admin", "organiz")
 
 # A tool name the model invented is untrusted text: it is shown only when it is a plain name.
 REDACTED_NAME = "<redacted>"
@@ -159,18 +182,25 @@ def _mode_allows(mode: State, spec: ToolSpec) -> bool:
     return capabilities.effect_tools and not capabilities.effects_need_operator_approval
 
 
+def fold_accents(text: str) -> str:
+    """NFKD with the combining marks dropped: `compañía` becomes `compania`, and fullwidth
+    letters become plain ones."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(character for character in decomposed if not unicodedata.combining(character))
+
+
 def normalize_key(key: str) -> str:
-    """The key in the form it is compared in: NFKC (fullwidth letters become plain ones), case
-    folded, and only letters and digits left, so separators and invisible characters do not
-    make a different name."""
-    folded = unicodedata.normalize("NFKC", key).casefold()
+    """The key in the form it is compared in: accents folded (`fold_accents`), case folded, and
+    only letters and digits left, so separators and invisible characters do not make a
+    different name."""
+    folded = fold_accents(key).casefold()
     return "".join(character for character in folded if character.isalnum())
 
 
 def key_words(key: str) -> list[str]:
-    """The words of a key: NFKC, split on every character that is not a letter or a digit and
-    where a camelCase word starts (`esAdmin`, `TenantID`), each word case folded."""
-    text = unicodedata.normalize("NFKC", key)
+    """The words of a key: accents folded, split on every character that is not a letter or a
+    digit and where a camelCase word starts (`esAdmin`, `TenantID`), each word case folded."""
+    text = fold_accents(key)
     words: list[str] = []
     current = ""
     for index, character in enumerate(text):
@@ -195,19 +225,28 @@ def key_words(key: str) -> list[str]:
 
 def names_a_scope(key: str) -> bool:
     """Whether a key names a company, a principal or a role, in any spelling the guard knows."""
+    return bool(scope_terms(key))
+
+
+def scope_terms(key: str) -> frozenset[str]:
+    """The guard's own vocabulary a key matches, never any text of the key: the scope field its
+    normal form is, otherwise the scope words among its words, otherwise the stems its normal
+    form contains. Empty when the key names no scope."""
     normal = normalize_key(key)
-    return (
-        normal in SCOPE_FIELDS
-        or any(word in SCOPE_WORDS for word in key_words(key))
-        or any(stem in normal for stem in SCOPE_STEMS)
-    )
+    if normal in SCOPE_FIELDS:
+        return frozenset({normal})
+    words = SCOPE_WORDS.intersection(key_words(key))
+    if words:
+        return frozenset(words)
+    return frozenset(stem for stem in SCOPE_STEMS if stem in normal)
 
 
 def _scope_fields_named(raw: str, declared: frozenset[str]) -> list[str]:
-    """The scope fields the payload names at any depth, in their normal form, sorted.
+    """The guard's vocabulary the payload's keys match at any depth (`scope_terms`), sorted.
 
-    A key that is one of the tool's declared arguments is never one. Only the normal form is
-    returned, never the raw key: the model chose that text. The walk is iterative, so a deeply
+    A key that is one of the tool's declared arguments is never one. Only fixed vocabulary is
+    returned, never the key nor any text derived from it: the model chose that text, and a
+    secret inside it would reach the trace. The walk is iterative, so a deeply
     nested payload cannot exhaust the stack. A payload that is not JSON is left to the schema
     check.
     """
@@ -222,9 +261,7 @@ def _scope_fields_named(raw: str, declared: frozenset[str]) -> list[str]:
     while pending:
         node = pending.pop()
         if isinstance(node, dict):
-            found.update(
-                normalize_key(key) for key in node if key not in declared and names_a_scope(key)
-            )
+            found.update(term for key in node if key not in declared for term in scope_terms(key))
             pending.extend(node.values())
         elif isinstance(node, list):
             pending.extend(node)

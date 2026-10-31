@@ -48,10 +48,15 @@ def test_a_takeover_version_is_bounded_above() -> None:
             read_takeover({**event, "version": version}, **SCOPE)
 
 
-@pytest.mark.parametrize("version", [0, -1, "2", True, None])
+@pytest.mark.parametrize("version", [-1, "2", True, None, 1.0])
 def test_a_takeover_needs_a_positive_integer_version(version: object) -> None:
     with pytest.raises(InvalidEvent):
         read_takeover({"type": "operator_took_over", "version": version}, **SCOPE)
+
+
+def test_k2_a_takeover_at_version_zero_is_read_like_any_other() -> None:
+    # 0 is the stored default: below a stored version it is stale, which the store decides.
+    assert read_takeover({"type": "operator_took_over", "version": 0}, **SCOPE).version == 0
 
 
 @pytest.mark.parametrize(

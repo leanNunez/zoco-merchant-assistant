@@ -367,3 +367,20 @@ def test_a_secret_in_an_operation_id_is_caught() -> None:
 )
 def test_a_uuid_or_an_ordinary_identifier_is_not_taken_for_a_secret(field: str, value: str) -> None:
     assert not _identifier_leaks(field, value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        ["sk-live-AbCdEf1234567890"],
+        {"inner": "juana.perez@example.com"},
+        [{"x": "4111111111111111"}],
+    ],
+    ids=["list", "object", "object_in_a_list"],
+)
+def test_k7_a_secret_inside_a_list_or_object_under_an_identifier_key_is_caught(
+    value: object,
+) -> None:
+    event = {"seq": 1, "type": "confirmation_received", "timestamp": STAMP, "operation_id": value}
+
+    assert "rule.no_secrets_in_the_output" in _failed(_with(events=[event]))

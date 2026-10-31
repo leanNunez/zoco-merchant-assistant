@@ -254,15 +254,7 @@ class World:
             [(auth, e.conversation_id, e.message) for e, auth in entries],
             [(auth, e.conversation_id, FOLLOW_UP) for e, auth in entries],
         ]
-        # Every run id is derived and checked before anything runs: an id that is too long is an
-        # unsupported scenario, not a crash in the middle of the second round.
-        run_ids: list[str] = []
-        counts: dict[tuple[str, str], int] = {}
-        for auth, conversation_id, _ in (*rounds[0], *rounds[1]):
-            key = (auth.tenant_id, conversation_id)
-            counts[key] = counts.get(key, 0) + 1
-            run_ids.append(run_id_for(conversation_id, counts[key]))
-        pending_run_ids = iter(run_ids)
+        pending_run_ids = iter(interleaved_run_ids(setup))
         for turn in rounds:
             for auth, conversation_id, message in turn:
                 key = (auth.tenant_id, conversation_id)
@@ -305,6 +297,21 @@ class World:
         return self.data.directory.authenticate(tenant_id, principal)
 
 
+def interleaved_run_ids(setup: Setup) -> list[str]:
+    """The run id of every interleaved turn, in the order they run: round one, then round two.
+
+    Every one is derived and checked before anything runs: an id that is too long is an
+    unsupported scenario, not a crash in the middle of the second round.
+    """
+    run_ids: list[str] = []
+    counts: dict[tuple[str, str], int] = {}
+    for entry in (*setup.interleaved, *setup.interleaved):
+        key = (entry.tenant_id, entry.conversation_id)
+        counts[key] = counts.get(key, 0) + 1
+        run_ids.append(run_id_for(entry.conversation_id, counts[key]))
+    return run_ids
+
+
 # The refusals of a confirmed action's values that the runtime itself decides when they are used.
 _SEEDED_AS_GIVEN = frozenset({RejectionCode.INVALID_ARGUMENTS, RejectionCode.SCOPE_VIOLATION})
 
@@ -335,7 +342,9 @@ def _as_given(tool: str, arguments: Mapping[str, object]) -> tuple[str, str]:
 class TakeoverDuringRun:
     """A model whose tool request an operator interrupts: the takeover lands right after the
     model asked for its first tool, before the harness acts on it. It is how the scenario
-    simulates a concurrent operator without adding any hook to the harness itself."""
+    simulates a concurrent operator without adding any hook to the harness itself. A run that
+    never asks for a tool gets it right after it ends (`land`). Either way it lands exactly
+    once."""
 
     def __init__(self, model: ModelPort, take_over: Callable[[], None]) -> None:
         self._model, self._take_over = model, take_over
@@ -343,10 +352,14 @@ class TakeoverDuringRun:
 
     def next_turn(self, prompt: Prompt, *, timeout_ms: int) -> ModelTurn:
         turn = self._model.next_turn(prompt, timeout_ms=timeout_ms)
-        if not self._done and not isinstance(turn, FinalAnswer):
+        if not isinstance(turn, FinalAnswer):
+            self.land()
+        return turn
+
+    def land(self) -> None:
+        if not self._done:
             self._done = True
             self._take_over()
-        return turn
 
 
 class TakeoverBeforeDelivery:

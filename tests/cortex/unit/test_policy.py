@@ -7,6 +7,8 @@ from cortex.identity import PrincipalDirectory, PrincipalRecord
 from cortex.tools.policy import (
     REDACTED_NAME,
     SCOPE_FIELDS,
+    SCOPE_STEMS,
+    SCOPE_WORDS,
     Approved,
     PolicyContext,
     Rejected,
@@ -149,7 +151,43 @@ def test_a_spanish_scope_key_nested_in_a_context_object_is_a_scope_violation() -
 
     assert _code(verdict) is RejectionCode.SCOPE_VIOLATION
     assert isinstance(verdict, Rejected)
-    assert verdict.detail == "fields: ['idempresa']"
+    assert verdict.detail == "fields: ['empresa']"
+
+
+# Keys that look like arguments and hold none of the guard's words or stems, even as a substring.
+LOOKALIKES = [
+    "fecha_desde",
+    "Fecha",
+    "consultas",
+    "descripción",
+    "operationId",
+    "op_id",
+    "profile",
+    "monto",
+    "periodo",
+    "moneda",
+    "nota",
+]
+
+
+@pytest.mark.parametrize("field", LOOKALIKES)
+def test_k3_a_lookalike_of_an_argument_is_not_a_scope_field(field: str) -> None:
+    vocabulary = (*SCOPE_FIELDS, *SCOPE_WORDS, *SCOPE_STEMS)
+    assert not any(term in normalize_key(field) for term in vocabulary)
+
+    assert not names_a_scope(field)
+    assert _code(_review("consultar_ventas", {"fecha": "2026-10-15", field: "x"})) is (
+        RejectionCode.INVALID_ARGUMENTS
+    )
+
+
+def test_k4_the_rejection_names_only_the_guards_own_words_never_text_of_the_key() -> None:
+    arguments = {"fecha": "2026-10-15", "admin_pw_hunter2": True, "empresa_juan.perez@gmail.com": 1}
+
+    verdict = _review("consultar_ventas", arguments)
+
+    assert isinstance(verdict, Rejected)
+    assert verdict.detail == "fields: ['admin', 'empresa']"
 
 
 def test_the_rejection_names_the_field_in_its_plain_form_never_the_raw_key() -> None:

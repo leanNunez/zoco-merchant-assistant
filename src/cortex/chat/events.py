@@ -111,9 +111,10 @@ def named_conversation(raw: Mapping[str, object], *, tenant_id: str) -> str | No
 def read_takeover(raw: Mapping[str, object], *, tenant_id: str, conversation_id: str) -> Takeover:
     data = _checked(raw, _TAKEOVER_KEYS, tenant_id, conversation_id)
     version = data.get("version")
-    if type(version) is not int or not 1 <= version <= MAX_CONTROL_VERSION:
+    # 0 is the stored default: a report at 0 is read, and the store finds it stale or not.
+    if type(version) is not int or not 0 <= version <= MAX_CONTROL_VERSION:
         raise InvalidEvent(
-            f"a takeover needs an integer version between 1 and {MAX_CONTROL_VERSION}"
+            f"a takeover needs an integer version between 0 and {MAX_CONTROL_VERSION}"
         )
     return Takeover(version=version, actor=_text(data, "actor"))
 

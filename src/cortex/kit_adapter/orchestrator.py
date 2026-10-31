@@ -7,7 +7,7 @@ running the same scenario twice gives the same output.
 The order follows the scenario: interleaved conversations, the starting state, the restart, and
 then either a follow-up decision (no model involved) or a run, with the takeover applied before
 it, after the model's first tool request, or right before the run's first delivery attempt (right
-after the run when it tried none).
+after the run when it requested no tool or tried no delivery).
 """
 
 from __future__ import annotations
@@ -52,6 +52,7 @@ from cortex.kit_adapter.world import (
     TakeoverBeforeDelivery,
     TakeoverDuringRun,
     World,
+    interleaved_run_ids,
 )
 from cortex.runner.agent_runner import RunResult
 from cortex.runner.finish import REASON_OF, FinishDetail, FinishReason, missing_failure_event
@@ -122,6 +123,8 @@ def run_scenario(
     if unknown_tools:
         raise UnsupportedScenario(f"tools names unknown tools: {sorted(unknown_tools)}")
     setup = read_preconditions(scenario.preconditions, data.config.limits)
+    if scenario.run_id is not None and scenario.run_id in interleaved_run_ids(setup):
+        raise UnsupportedScenario(f"the run_id {scenario.run_id!r} is an interleaved run's id")
     world = World(
         data,
         workdir,
@@ -165,6 +168,8 @@ def run_scenario(
         )
         if landing is not None:
             landing.land()  # the run never tried to deliver: the takeover lands after it
+        if isinstance(model, TakeoverDuringRun):
+            model.land()  # the run never asked for a tool: the takeover lands after it
         result = _with_refused_events(world, auth, result, chat_log)
 
     store = world.database.for_tenant(auth)

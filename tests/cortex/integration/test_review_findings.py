@@ -489,7 +489,7 @@ def test_an_interleaved_conversation_whose_run_id_is_too_long_is_an_unsupported_
 ) -> None:
     data = json.loads((ROOT / "examples" / "T06.json").read_text())
     interleaved = data["preconditions"]["interleaved_conversations"]
-    interleaved[0]["conversation_id"] = "c" * 123  # "run-" + it + "-1" is 129 characters
+    interleaved[0]["conversation_id"] = "c" * 121  # "inter-" + it + "-1" is 129 characters
     path = _scenario_file(tmp_path, "T06.json", preconditions=data["preconditions"])
 
     with pytest.raises(UnsupportedScenario):
@@ -767,3 +767,105 @@ def test_f6_the_responsible_of_a_commitment_is_scrubbed_and_capped(
         assert "@" not in responsible
         assert responsible.startswith("[redacted]")
         assert len(responsible) <= 120
+
+
+# --------------------------------------------------------------------------- last round
+
+
+def _main_next_to_interleaved(tmp_path: Path, example: str, **changes: Any) -> dict[str, Any]:
+    """A main conversation `chat-1` next to an interleaved conversation `chat` of both companies:
+    the first turn of `chat` must not share the main run's id."""
+    interleaved = [
+        {"tenant_id": "comercio_a", "conversation_id": "chat", "message": "Hola A"},
+        {"tenant_id": "comercio_b", "conversation_id": "chat", "message": "Hola B"},
+    ]
+    data = json.loads((ROOT / "examples" / example).read_text())
+    preconditions = {**data.get("preconditions", {}), "interleaved_conversations": interleaved}
+    path = _scenario_file(
+        tmp_path, example, conversation_id="chat-1", preconditions=preconditions, **changes
+    )
+    return run_scenario_file(path, kit_dir=ROOT / "kit", workdir=tmp_path / "world")
+
+
+def test_k1_an_interleaved_run_never_shares_the_main_runs_id(tmp_path: Path) -> None:
+    output = _main_next_to_interleaved(tmp_path, "T01.json")
+
+    assert (output["finish_reason"], output["finish_detail"]) == ("COMPLETED", "answered")
+    assert output["ai_replies_delivered"] == 1
+    assert output["cross_tenant_effects"] == 0
+    assert output["contexts_separated"] is True
+
+
+def test_k1_a_follow_up_next_to_an_interleaved_run_contacts_nobody(tmp_path: Path) -> None:
+    output = _main_next_to_interleaved(tmp_path, "T12.json")
+
+    assert output["decision"] == "TAREA_INTERNA"
+    assert output["customer_messages_sent"] == 0
+    assert output["cross_tenant_effects"] == 0
+
+
+def test_k1_a_confirmed_write_next_to_an_interleaved_run_still_runs(tmp_path: Path) -> None:
+    output = _main_next_to_interleaved(tmp_path, "T09.json")
+
+    assert output["finish_reason"] == "COMPLETED"
+    assert output["claims_created"] == output["unique_claims_created"] == 1
+    assert output["cross_tenant_effects"] == 0
+
+
+def test_k1_a_run_id_equal_to_a_derived_interleaved_id_is_refused(tmp_path: Path) -> None:
+    # The second turn of T06's interleaved conversation of company B.
+    path = _scenario_file(tmp_path, "T06.json", run_id="inter-conv_b_inter-2")
+
+    with pytest.raises(UnsupportedScenario, match="run_id"):
+        run_scenario_file(path, kit_dir=ROOT / "kit")
+
+    assert _adapter_exit_code(path, tmp_path / "out.json") == 2
+    assert not (tmp_path / "out.json").exists()
+
+
+def test_k4_a_scope_refusal_never_carries_text_of_the_key(tmp_path: Path) -> None:
+    script = [
+        {
+            "tool": "consultar_ventas",
+            "args": {
+                "fecha": "2026-10-15",
+                "admin_pw_hunter2": True,
+                "empresa_juan.perez@gmail.com": "x",
+            },
+        },
+        {"final": "x"},
+    ]
+    path = _scenario_file(tmp_path, "T05.json", model_script=script)
+
+    output: dict[str, Any] = run_scenario_file(
+        path, kit_dir=ROOT / "kit", workdir=tmp_path / "world"
+    )
+
+    assert output["finish_detail"] == "scope_violation"
+    with sqlite3.connect(tmp_path / "world" / "cortex.db") as db:
+        stored = str(db.execute("SELECT * FROM trace_events").fetchall())
+    rejection = next(e for e in output["events"] if e["type"] == "tool_rejected")
+    # The guard's own word is kept.
+    assert "admin" in str(rejection)
+    assert "admin" in stored
+    for leaked in ("hunter2", "perez", "gmail"):
+        assert leaked not in json.dumps(output)
+        assert leaked not in stored
+
+
+def test_k5_the_keys_of_a_seeded_confirmed_action_are_scrubbed_in_the_card(tmp_path: Path) -> None:
+    args = {**CLAIM, "sk-live_ABCDEFGH12345678": "x", "juan.perez@gmail.com": "y"}
+    path = _scenario_file(
+        tmp_path,
+        "T09.json",
+        preconditions={"confirmed_actions": [{"tool": "crear_reclamo", "args": args}]},
+        # The same values again: refused by the schema, so the confirmed row stays open.
+        model_script=[{"tool": "crear_reclamo", "args": args}, {"final": "Listo"}],
+    )
+
+    output: dict[str, Any] = run_scenario_file(path, kit_dir=ROOT / "kit")
+    pending = output["state"]["continuity_card"]["pending_actions"]
+
+    assert [action["operation_id"] for action in pending] == ["op_claim_001"]
+    assert "ABCDEFGH12345678" not in json.dumps(pending)
+    assert "juan.perez@gmail.com" not in json.dumps(pending)

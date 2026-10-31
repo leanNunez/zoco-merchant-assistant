@@ -185,8 +185,10 @@ def test_a_healthy_model_still_answers_after_hung_tool_attempts_fill_the_tool_po
         return adapters
 
     model = ScriptedModel([READ_SALES, {"final": "No pude consultar las ventas."}])
-    # One attempt and three retries, each abandoned at 20 ms: the four tool workers stay taken.
-    limits = {"max_read_retries": 3, "tool_timeout_ms": 20, "total_timeout_ms": 3000}
+    # One attempt and three retries, each abandoned at 300 ms: the four tool workers stay taken.
+    # 300 ms of real time, so that a loaded machine still starts each worker before its attempt
+    # is abandoned; the simulated total only pays the backoffs, well under 3000 ms.
+    limits = {"max_read_retries": 3, "tool_timeout_ms": 300, "total_timeout_ms": 3000}
     try:
         result = rig.runner(model, bind).run(rig.request("run-1", **limits))
     finally:

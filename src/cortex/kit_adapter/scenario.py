@@ -149,10 +149,13 @@ def _control_version(value: object) -> int:
 def run_id_for(conversation_id: str, turn: int | None = None) -> str:
     """The id of the run the harness derives from a conversation (and, interleaved, a turn).
 
-    Derived in one place so the result is held to the same closed alphabet and length as any
-    run id: a conversation id that fits but whose run id does not is an unsupported scenario.
+    The main run is `run-<conversation>` and an interleaved turn `inter-<conversation>-<turn>`:
+    the two sets never meet, and inside the interleaved one the right-most `-<digits>` gives the
+    turn back, so no two (conversation, turn) pairs share an id. Derived in one place so the
+    result is held to the same closed alphabet and length as any run id: a conversation id that
+    fits but whose run id does not is an unsupported scenario.
     """
-    run_id = f"run-{conversation_id}" if turn is None else f"run-{conversation_id}-{turn}"
+    run_id = f"run-{conversation_id}" if turn is None else f"inter-{conversation_id}-{turn}"
     if EXTERNAL_ID.fullmatch(run_id) is None:
         raise UnsupportedScenario(f"the run id derived from {conversation_id[:40]!r} is invalid")
     return run_id

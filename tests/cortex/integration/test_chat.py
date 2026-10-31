@@ -124,6 +124,27 @@ def test_a_takeover_after_a_tool_request_stops_the_write(tmp_path: Path) -> None
     assert [p["status"] for p in pending] == ["SUSPENDED"]  # kept for the operator, not runnable
 
 
+def test_k6_a_takeover_after_a_tool_request_lands_after_a_run_that_requests_none(
+    tmp_path: Path,
+) -> None:
+    output = _run(
+        tmp_path,
+        "T11",
+        incoming_event={
+            "type": "operator_took_over",
+            "version": 2,
+            "when": "after_tool_request_before_execution",
+        },
+    )
+
+    assert [e["type"] for e in output["chat_events"]] == ["chat_event_applied"]
+    assert (output["state"]["conversation_mode"], output["state"]["control_version"]) == (
+        "HUMAN",
+        2,
+    )
+    assert output["tool_effects_after_takeover"] == 0
+
+
 def test_a_takeover_after_a_tool_request_is_a_control_change_not_a_rejected_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -236,6 +257,23 @@ def test_a_stale_takeover_changes_nothing(tmp_path: Path) -> None:
     assert output["chat_events"][0]["type"] == "chat_event_ignored"
     assert (output["finish_reason"], output["ai_replies_delivered"]) == ("COMPLETED", 1)
     assert output["customer_messages_sent"] == 0
+
+
+def test_k2_a_takeover_at_version_zero_below_the_stored_one_is_ignored(tmp_path: Path) -> None:
+    output = _run(
+        tmp_path,
+        "T11",
+        preconditions={"current_state": "AUTO", "current_version": 1},
+        incoming_event={
+            "type": "operator_took_over",
+            "version": 0,
+            "when": "after_response_generation_before_delivery",
+        },
+    )
+
+    assert output["chat_events"][0]["type"] == "chat_event_ignored"
+    assert (output["finish_reason"], output["ai_replies_delivered"]) == ("COMPLETED", 1)
+    assert output["state"]["conversation_mode"] == "AUTO"
 
 
 def test_a_takeover_at_the_stored_version_while_the_agent_answers_is_applied(
