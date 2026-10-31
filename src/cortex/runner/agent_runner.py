@@ -78,11 +78,12 @@ from merchant_assistant.shared.clock import Clock, business_today
 
 _LOG = logging.getLogger(__name__)
 
-# Tool attempts and model calls run in a pool of this many worker threads per run, so that each
-# can be abandoned at its time limit (a model call's limit is the time the run has left). An
-# abandoned call cannot be killed (Python has no way): it keeps its thread until it returns on
-# its own, so abandoned calls stay in this pool. The pool does not grow; a call that has to wait
-# for a free thread is still bound by its own time limit.
+# Tool attempts run in a pool of this many worker threads per run, so that each can be abandoned
+# at its time limit. An abandoned call cannot be killed (Python has no way): it keeps its thread
+# until it returns on its own, so abandoned calls stay in this pool. The pool does not grow; a
+# call that has to wait for a free thread is still bound by its own time limit. The model call
+# has its own single worker thread, also abandoned at its limit (the time the run has left), so
+# hung tool attempts can never keep a healthy model from answering.
 MAX_TOOL_WORKERS = 4
 
 # Written by the code, not by the model: the answer to an attempt to reach another company.
@@ -187,6 +188,10 @@ class _Run:
         self.executor = ThreadPoolExecutor(
             max_workers=MAX_TOOL_WORKERS, thread_name_prefix=request.run_id
         )
+        # The model call runs apart from the tool attempts (see MAX_TOOL_WORKERS).
+        self.model_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix=f"{request.run_id}-model"
+        )
         # A tool outside the request's list is not even bound: the policy then rejects it as
         # not allowed, and nothing can reach its adapter.
         self.adapters: dict[str, ToolAdapter] = {
@@ -242,6 +247,7 @@ class _Run:
         finally:
             # A call abandoned at its time limit may still be running; nothing waits for it.
             self.executor.shutdown(wait=False, cancel_futures=True)
+            self.model_executor.shutdown(wait=False, cancel_futures=True)
         self.store.runs.finish(request.run_id, request.conversation_id, result.to_json())
         return result
 
@@ -307,9 +313,9 @@ class _Run:
         self.budget.take_step()
         self._trace("model_called")
         remaining_ms = self.budget.remaining_ms()
-        # In a worker thread, so the call is bound by the time the run has left: a model that
-        # does not answer by then is abandoned, like a tool attempt (see MAX_TOOL_WORKERS).
-        call = self.executor.submit(
+        # In its own worker thread, so the call is bound by the time the run has left: a model
+        # that does not answer by then is abandoned, like a tool attempt (see MAX_TOOL_WORKERS).
+        call = self.model_executor.submit(
             self.runner.model.next_turn, self._prompt(), timeout_ms=remaining_ms
         )
         answered, _ = wait(

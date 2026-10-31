@@ -332,7 +332,7 @@ def test_identifiers_and_numbers_are_not_taken_for_secrets() -> None:
         "type": "confirmation_received",
         "timestamp": STAMP,
         "run_id": run_id,
-        "operation_id": "3f2a9c4e8b1d7a6f5e0c9b8a7d6e5f4a3b2c1d0e",
+        "operation_id": "op_claim_001",
         "elapsed_ms": 2147483647,
     }
     output = _with(
@@ -346,3 +346,24 @@ def test_identifiers_and_numbers_are_not_taken_for_secrets() -> None:
     # The same values in free text are still caught.
     assert _leaks(f"the run {run_id}")
     assert _leaks("version 2147483647")
+
+
+def _identifier_leaks(field: str, value: str) -> bool:
+    event = {"seq": 1, "type": "confirmation_received", "timestamp": STAMP, field: value}
+    return "rule.no_secrets_in_the_output" in _failed(_with(events=[event]))
+
+
+def test_a_secret_in_an_operation_id_is_caught() -> None:
+    assert _identifier_leaks("operation_id", "sk-live-AbCdEf1234567890")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("run_id", "123e4567-e89b-12d3-a456-426614174000"),
+        ("run_id", "123E4567-E89B-12D3-A456-426614174000"),
+        ("operation_id", "op_claim_001"),
+    ],
+)
+def test_a_uuid_or_an_ordinary_identifier_is_not_taken_for_a_secret(field: str, value: str) -> None:
+    assert not _identifier_leaks(field, value)

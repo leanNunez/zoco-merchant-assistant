@@ -769,6 +769,26 @@ def build_variants(kit: Mapping[str, Scenario]) -> list[Case]:
                 incoming_event=event,
             ),
         )
+    add(
+        "V65_agreed_moment_outside_the_representable_range",
+        _derive(
+            t12,
+            "an agreed moment at the edge of the calendar cannot be read: an internal task",
+            {
+                "decision": "TAREA_INTERNA",
+                "decision_reasons": ["AGREED_DATE_UNREADABLE"],
+                "customer_messages_sent": 0,
+                "ai_replies_delivered": 0,
+                "step_count": 0,
+            },
+            incoming_event={
+                "type": "followup_due",
+                "pending_on": "CUSTOMER",
+                "agreed_contact_date": "9999-12-31T23:59:59-03:00",
+                "contact_allowed": True,
+            },
+        ),
+    )
     for name, event_id, decision in (
         ("V47_kit_event_e02_pasted_verbatim", "E02", "TAREA_INTERNA"),
         ("V48_kit_event_e03_pasted_verbatim", "E03", "REPROGRAMAR"),

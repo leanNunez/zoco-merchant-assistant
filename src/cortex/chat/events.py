@@ -167,7 +167,10 @@ def _agreed_date(value: object, business_tz: tzinfo) -> tuple[date | None, bool]
         return None, True
     if moment.utcoffset() is None:
         return None, True  # a moment without an offset could be any day
-    return moment.astimezone(business_tz).date(), False
+    try:
+        return moment.astimezone(business_tz).date(), False
+    except OverflowError:
+        return None, True  # at the edge of the calendar the business day cannot be represented
 
 
 def _checked(

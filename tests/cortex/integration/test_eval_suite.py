@@ -289,6 +289,21 @@ def test_data_of_another_company_in_the_stored_trace_is_caught_when_the_output_h
     assert "files.cross_tenant_data_exposed" in _failed(scenario, output, world)
 
 
+def test_data_of_another_company_in_a_stored_deduplicated_result_is_caught(
+    tmp_path: Path,
+) -> None:
+    scenario, output, world = _real_run(tmp_path, "T09")
+    assert _failed(scenario, output, world) == set()  # the honest output passes
+    _edit(
+        world,
+        "UPDATE trace_events SET attributes = json_set(attributes, '$.data_tenant', 'comercio_b') "
+        "WHERE type = 'tool_deduplicated'",
+    )
+
+    assert output["cross_tenant_data_exposed"] is False
+    assert "files.cross_tenant_data_exposed" in _failed(scenario, output, world)
+
+
 def test_a_pending_action_the_files_no_longer_hold_is_caught(tmp_path: Path) -> None:
     scenario, output, world = _real_run(tmp_path, "T10")
     _edit(world, "UPDATE pending_actions SET status = 'CANCELLED'")

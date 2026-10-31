@@ -3,6 +3,7 @@
 - The per-conversation lease (`AND active_run_id IS NULL` in `RunJournal.admit`).
 - Checkpoint A, the control check before every model call.
 - The bound of a model call by the time the run has left.
+- The model's own worker thread, which hung tool attempts cannot take.
 """
 
 import threading
@@ -58,6 +59,21 @@ class _TakesOverWhileItRuns:
 
     def __call__(self, arguments: BaseModel, *, conversation_id: str) -> Mapping[str, object]:
         self._database.for_tenant(self._auth).chat.apply_takeover(conversation_id, 1, "operador_a")
+        return self._adapter(arguments, conversation_id=conversation_id)
+
+
+class _HangsUntilReleased:
+    """A read adapter whose every attempt hangs until it is released, and counts the attempts."""
+
+    def __init__(self, adapter: ToolAdapter) -> None:
+        self.tenant_id = adapter.tenant_id
+        self._adapter = adapter
+        self.release = threading.Event()
+        self.attempts = 0
+
+    def __call__(self, arguments: BaseModel, *, conversation_id: str) -> Mapping[str, object]:
+        self.attempts += 1
+        self.release.wait(WAIT_SECONDS)
         return self._adapter(arguments, conversation_id=conversation_id)
 
 
@@ -155,3 +171,31 @@ def test_a_model_slower_than_the_time_left_ends_the_run_at_its_total_time(rig: _
     )
     failed: list[Any] = [e.attributes for e in result.events if e.type == "model_failed"]
     assert failed == [{"code": "total_timeout"}]
+
+
+def test_a_healthy_model_still_answers_after_hung_tool_attempts_fill_the_tool_pool(
+    rig: _Rig,
+) -> None:
+    hung: list[_HangsUntilReleased] = []
+
+    def bind(auth: AuthContext) -> Mapping[str, ToolAdapter]:
+        adapters = dict(rig.binder(auth))
+        hung.append(_HangsUntilReleased(adapters[CONSULTAR_VENTAS]))
+        adapters[CONSULTAR_VENTAS] = hung[-1]
+        return adapters
+
+    model = ScriptedModel([READ_SALES, {"final": "No pude consultar las ventas."}])
+    # One attempt and three retries, each abandoned at 20 ms: the four tool workers stay taken.
+    limits = {"max_read_retries": 3, "tool_timeout_ms": 20, "total_timeout_ms": 3000}
+    try:
+        result = rig.runner(model, bind).run(rig.request("run-1", **limits))
+    finally:
+        for adapter in hung:
+            adapter.release.set()
+
+    assert hung[0].attempts == 4
+    assert (result.finish_reason, result.finish_detail) == (
+        FinishReason.COMPLETED,
+        FinishDetail.ANSWERED,
+    )
+    assert len(model.prompts) == 2

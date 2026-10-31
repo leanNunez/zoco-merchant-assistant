@@ -138,6 +138,15 @@ def test_an_agreed_date_that_cannot_be_read_is_kept_as_unreadable(agreed: object
     assert (facts.agreed_contact_date, facts.agreed_date_unreadable) == (None, True)
 
 
+@pytest.mark.parametrize("agreed", ["9999-12-31T23:59:59-03:00", "0001-01-01T00:00:00+23:59"])
+def test_an_agreed_moment_outside_the_representable_range_is_unreadable(agreed: str) -> None:
+    raw = {"type": "followup_due", "agreed_contact_date": agreed}
+
+    facts = read_followup(raw, **SCOPE, business_tz=BUSINESS_TZ)
+
+    assert (facts.agreed_contact_date, facts.agreed_date_unreadable) == (None, True)
+
+
 @pytest.mark.parametrize("raw", ["OPERATOR_TOOK_OVER", "Operator_Takeover", "FollowUp_Due"])
 def test_the_event_type_is_read_in_any_letter_case(raw: str) -> None:
     assert event_type({"type": raw}) in {"operator_took_over", "followup_due"}

@@ -103,10 +103,12 @@ SECRET = re.compile(
         )
     )
 )
-# The fields that hold an identifier: their values are ids, not text, and are not scanned.
+# The fields that hold an identifier. A value of theirs that is a whole UUID is an id, not a
+# secret, and is not scanned; any other value is scanned like any other string.
 IDENTIFIER_FIELDS = frozenset(
     {"run_id", "conversation_id", "tenant_id", "principal_id", "operation_id"}
 )
+UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
 # Any other long opaque token. Only the values are searched for it: the contract's own keys
 # (delivered_ai_messages_after_takeover) are as long as a token.
 OPAQUE_TOKEN = re.compile(r"(?<![\w-])[A-Za-z0-9_-]{32,}(?![\w-])")
@@ -327,6 +329,7 @@ EXPECTED_RULES: Mapping[str, Callable[[object, Mapping[str, object]], Check]] = 
         "delivered_ai_messages_after_takeover",
         "tool_effects_after_takeover",
         "decision",
+        "decision_reasons",
         "customer_messages_sent",
         "ai_replies_delivered",
         "finish_detail",
@@ -475,15 +478,18 @@ def _failure_says_why(
 
 
 def _string_values(node: object) -> Iterator[str]:
-    """Every string stored as a value anywhere in the output (never a key), except the values of
-    the identifier fields: an id the caller chose (a UUID run_id, say) is not a secret. A number
-    is never one either (a control version of 2147483647)."""
+    """Every string stored as a value anywhere in the output (never a key), except a whole UUID
+    in an identifier field: an id the caller chose (a UUID run_id, say) is not a secret, but an
+    operation_id the model chose may be one. A number is never one either (a control version of
+    2147483647)."""
     if isinstance(node, str):
         yield node
     elif isinstance(node, Mapping):
         for key, value in node.items():
             if key not in IDENTIFIER_FIELDS:
                 yield from _string_values(value)
+            elif isinstance(value, str) and not UUID.fullmatch(value):
+                yield value
     elif isinstance(node, list | tuple):
         for item in node:
             yield from _string_values(item)
@@ -736,11 +742,10 @@ def _against_files(
 
 
 def _foreign_data(events: list[tuple[str, dict[str, Any]]], tenant: str) -> bool:
-    """Did a stored tool result carry data of a company other than the scenario's own?"""
-    return any(
-        kind == "tool_executed" and attributes.get("data_tenant") not in (None, tenant)
-        for kind, attributes in events
-    )
+    """Did any stored event tagged with `data_tenant` carry data of a company other than the
+    scenario's own? Not only `tool_executed`: errors, deduplicated and reconciled results carry
+    the tag too."""
+    return any(attributes.get("data_tenant") not in (None, tenant) for _, attributes in events)
 
 
 # --------------------------------------------------------------------------- the entry point
