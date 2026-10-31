@@ -1,7 +1,7 @@
 [project]
 name = "merchant-assistant"
 version = "0.1.0"
-description = "Conversational assistant for a ZocoTickets merchant: from-scratch hybrid retrieval, tool calling with code-enforced policies, and an AI-human control state machine."
+description = "Conversational assistant for a ZocoTickets merchant (first delivery) and Zoco Cortex, a multi-tenant agent harness with permissions, idempotent writes and a verified evaluation adapter (second delivery)."
 authors = [
     { name = "lean", email = "lean.p.dev@gmail.com" }
 ]

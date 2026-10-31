@@ -8,7 +8,7 @@ import pytest
 DOCUMENT = Path(__file__).resolve().parents[3] / "DESIGN_DECISIONS.md"
 CASE = DOCUMENT.read_text(encoding="utf-8").split("## Caso: Zoco Canchas")[1]
 # A page of prose, roughly: the brief allows "máximo una página adicional".
-MAX_WORDS = 550
+MAX_WORDS = 470
 
 
 def test_the_canchas_case_fits_in_one_page() -> None:
