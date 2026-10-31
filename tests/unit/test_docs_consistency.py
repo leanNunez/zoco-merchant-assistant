@@ -26,10 +26,15 @@ from merchant_assistant import bootstrap
 from merchant_assistant.shared.config import Settings
 
 ROOT = Path(__file__).resolve().parents[2]
-README = ROOT / "README.md"
+# The first delivery's documentation. It moved from README.md when the harness got its own.
+README = ROOT / "PRUEBA_1.md"
+HARNESS_README = ROOT / "README.md"
+REVISION = ROOT / "REVISION_CONSIGNA.md"
+DESIGN = ROOT / "DESIGN_DECISIONS.md"
+SECURITY = ROOT / "SEGURIDAD.md"
 SPEC_REVIEW = ROOT / "SPEC_REVIEW.md"
 ADRS = tuple(sorted((ROOT / "design" / "adr").glob("*.md")))
-DOCUMENTS = (README, SPEC_REVIEW, *ADRS)
+DOCUMENTS = (README, HARNESS_README, REVISION, DESIGN, SECURITY, SPEC_REVIEW, *ADRS)
 CONVERSATIONS = ROOT / "evaluation" / "results" / "conversations"
 RETRIEVAL = ROOT / "evaluation" / "results" / "retrieval"
 
@@ -228,15 +233,21 @@ def _makefile_targets() -> dict[str, bool]:
     return targets
 
 
+def _mentioned_make_targets() -> set[str]:
+    """Every `make <target>` that either README mentions."""
+    text = read(README) + read(HARNESS_README)
+    return set(re.findall(r"\bmake ([a-z][a-z-]*)", text))
+
+
 def test_every_make_target_the_readme_mentions_exists() -> None:
-    mentioned = set(re.findall(r"\bmake ([a-z][a-z-]*)", read(README)))
+    mentioned = _mentioned_make_targets()
     missing = sorted(mentioned - set(_makefile_targets()))
 
     assert not missing, f"the README mentions `make` targets that the Makefile lacks: {missing}"
 
 
 def test_every_documented_make_target_is_in_the_readme() -> None:
-    mentioned = set(re.findall(r"\bmake ([a-z][a-z-]*)", read(README)))
+    mentioned = _mentioned_make_targets()
     documented = {name for name, has_help in _makefile_targets().items() if has_help}
 
     assert not documented - mentioned, (
@@ -742,9 +753,28 @@ def test_the_template_asks_for_no_secret() -> None:
     assert all(variables[name] == (False, "") for name in secrets), "secrets must stay empty"
 
 
+# A line a dotenv loader would read as setting a variable (a commented-out one sets nothing).
+_ACTIVE_ASSIGNMENT = re.compile(r"^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=")
+
+
 def test_env_example_is_the_readme_template() -> None:
     path = ROOT / ".env.example"
     if not path.exists():
         pytest.skip("create .env.example from the README template (see the Configuración section)")
+    content = read(path).strip()
+    template = "\n".join(template_lines()).strip()
 
-    assert read(path).strip() == "\n".join(template_lines()).strip()
+    # The file may open with a header of its own: comment and blank lines only, so it assigns
+    # nothing a dotenv loader would read. After it, the template exactly. Only booleans are
+    # asserted, so a failure never prints the file.
+    ends_with_template = content.endswith(template)
+    header = content[: len(content) - len(template)] if ends_with_template else ""
+    header_lines = header.splitlines()
+    header_ends_a_line = header == "" or header.endswith("\n")
+    header_is_comments = all(not line.strip() or line.startswith("#") for line in header_lines)
+    header_assigns_nothing = not any(_ACTIVE_ASSIGNMENT.match(line) for line in header_lines)
+
+    assert ends_with_template, ".env.example should end with the README template, exactly"
+    assert header_ends_a_line, "the template should start on a line of its own"
+    assert header_is_comments, "the header of .env.example should hold only comments"
+    assert header_assigns_nothing, "the header of .env.example should assign no variable"

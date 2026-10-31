@@ -1,0 +1,387 @@
+{
+  "schema_version": "2.0",
+  "scenarios": [
+    {
+      "id": "T01",
+      "description": "Consulta normal",
+      "tenant_id": "comercio_a",
+      "principal_id": "operador_a",
+      "conversation_id": "conv_t01",
+      "model_script": [
+        {
+          "final": "Hola, puedo ayudarte."
+        }
+      ],
+      "preconditions": {},
+      "expected": {
+        "finish_reason": "COMPLETED"
+      }
+    },
+    {
+      "id": "T02",
+      "description": "Herramienta permitida",
+      "tenant_id": "comercio_a",
+      "principal_id": "operador_a",
+      "conversation_id": "conv_t02",
+      "model_script": [
+        {
+          "tool": "consultar_ventas",
+          "args": {
+            "fecha": "2026-10-15"
+          }
+        },
+        {
+          "final": "15 ventas"
+        }
+      ],
+      "preconditions": {},
+      "expected": {
+        "executed_tools": [
+          "consultar_ventas"
+        ]
+      }
+    },
+    {
+      "id": "T03",
+      "description": "Herramienta prohibida",
+      "tenant_id": "comercio_a",
+      "principal_id": "operador_a",
+      "conversation_id": "conv_t03",
+      "model_script": [
+        {
+          "tool": "eliminar_ventas",
+          "args": {
+            "fecha": "2026-10-15"
+          }
+        },
+        {
+          "final": "Rechazada"
+        }
+      ],
+      "preconditions": {},
+      "expected": {
+        "rejected_tools": [
+          "eliminar_ventas"
+        ],
+        "external_calls_to_rejected_tool": 0
+      }
+    },
+    {
+      "id": "T04",
+      "description": "Argumentos invalidos",
+      "tenant_id": "comercio_a",
+      "principal_id": "operador_a",
+      "conversation_id": "conv_t04",
+      "model_script": [
+        {
+          "tool": "consultar_ventas",
+          "args": {
+            "fecha": "ayer"
+          }
+        },
+        {
+          "final": "Fecha invalida"
+        }
+      ],
+      "preconditions": {},
+      "expected": {
+        "rejected_tools": [
+          "consultar_ventas"
+        ]
+      }
+    },
+    {
+      "id": "T05",
+      "description": "Acceso cruzado a otro tenant",
+      "tenant_id": "comercio_a",
+      "principal_id": "operador_a",
+      "conversation_id": "conv_t05",
+      "model_script": [
+        {
+          "tool": "consultar_ventas",
+          "args": {
+            "fecha": "2026-10-15",
+            "tenant_id": "comercio_b"
+          }
+        },
+        {
+          "final": "No autorizado"
+        }
+      ],
+      "preconditions": {},
+      "expected": {
+        "cross_tenant_data_exposed": false,
+        "cross_tenant_effects": 0
+      }
+    },
+    {
+      "id": "T06",
+      "description": "Dos conversaciones intercaladas",
+      "tenant_id": "comercio_a",
+      "principal_id": "operador_a",
+      "conversation_id": "conv_t06",
+      "model_script": [
+        {
+          "final": "OK"
+        }
+      ],
+      "preconditions": {
+        "interleaved_conversations": [
+          {
+            "tenant_id": "comercio_a",
+            "conversation_id": "conv_a_inter",
+            "message": "Soy Alex del comercio A"
+          },
+          {
+            "tenant_id": "comercio_b",
+            "conversation_id": "conv_b_inter",
+            "message": "Soy Alex del comercio B"
+          }
+        ]
+      },
+      "expected": {
+        "contexts_separated": true
+      }
+    },
+    {
+      "id": "T07",
+      "description": "Falla temporal en lectura",
+      "tenant_id": "comercio_a",
+      "principal_id": "operador_a",
+      "conversation_id": "conv_t07",
+      "model_script": [
+        {
+          "tool": "consultar_ventas",
+          "args": {
+            "fecha": "2026-10-15"
+          }
+        },
+        {
+          "final": "Respuesta"
+        }
+      ],
+      "preconditions": {},
+      "expected": {
+        "retry_count": 1,
+        "executed_tools": [
+          "consultar_ventas"
+        ]
+      },
+      "faults": {
+        "consultar_ventas": [
+          "TIMEOUT",
+          "SUCCESS"
+        ]
+      }
+    },
+    {
+      "id": "T08",
+      "description": "Limite de pasos",
+      "tenant_id": "comercio_a",
+      "principal_id": "operador_a",
+      "conversation_id": "conv_t08",
+      "model_script": [
+        {
+          "tool": "consultar_ventas",
+          "args": {
+            "fecha": "2026-10-15"
+          }
+        },
+        {
+          "tool": "consultar_ventas",
+          "args": {
+            "fecha": "2026-10-15"
+          }
+        },
+        {
+          "tool": "consultar_ventas",
+          "args": {
+            "fecha": "2026-10-15"
+          }
+        },
+        {
+          "tool": "consultar_ventas",
+          "args": {
+            "fecha": "2026-10-15"
+          }
+        },
+        {
+          "tool": "consultar_ventas",
+          "args": {
+            "fecha": "2026-10-15"
+          }
+        },
+        {
+          "tool": "consultar_ventas",
+          "args": {
+            "fecha": "2026-10-15"
+          }
+        },
+        {
+          "tool": "consultar_ventas",
+          "args": {
+            "fecha": "2026-10-15"
+          }
+        },
+        {
+          "tool": "consultar_ventas",
+          "args": {
+            "fecha": "2026-10-15"
+          }
+        },
+        {
+          "tool": "consultar_ventas",
+          "args": {
+            "fecha": "2026-10-15"
+          }
+        }
+      ],
+      "preconditions": {
+        "max_steps": 3
+      },
+      "expected": {
+        "finish_reason": "LIMIT_REACHED",
+        "max_steps": 3
+      }
+    },
+    {
+      "id": "T09",
+      "description": "Escritura repetida con el mismo operation_id",
+      "tenant_id": "comercio_a",
+      "principal_id": "operador_a",
+      "conversation_id": "conv_t09",
+      "model_script": [
+        {
+          "tool": "crear_reclamo",
+          "args": {
+            "motivo": "demora",
+            "descripcion": "No recibi comprobante",
+            "operation_id": "op_claim_001"
+          }
+        },
+        {
+          "tool": "crear_reclamo",
+          "args": {
+            "motivo": "demora",
+            "descripcion": "No recibi comprobante",
+            "operation_id": "op_claim_001"
+          }
+        },
+        {
+          "final": "Registrado"
+        }
+      ],
+      "preconditions": {
+        "confirmed_actions": [
+          {
+            "tool": "crear_reclamo",
+            "args": {
+              "motivo": "demora",
+              "descripcion": "No recibi comprobante",
+              "operation_id": "op_claim_001"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "unique_claims_created": 1
+      }
+    },
+    {
+      "id": "T10",
+      "description": "Reinicio conserva estado y pendiente",
+      "tenant_id": "comercio_a",
+      "principal_id": "operador_a",
+      "conversation_id": "conv_t10",
+      "model_script": [
+        {
+          "final": "OK"
+        }
+      ],
+      "preconditions": {
+        "restart_between_events": true,
+        "initial_state": "HUMAN",
+        "pending_action": {
+          "type": "reclamo",
+          "operation_id": "op_pending_001"
+        }
+      },
+      "expected": {
+        "state_after_restart": "HUMAN",
+        "pending_action_retained": true
+      }
+    },
+    {
+      "id": "T11",
+      "description": "Toma humana antes de enviar respuesta",
+      "tenant_id": "comercio_a",
+      "principal_id": "operador_a",
+      "conversation_id": "conv_t11",
+      "model_script": [
+        {
+          "final": "OK"
+        }
+      ],
+      "preconditions": {
+        "current_state": "AUTO",
+        "current_version": 1
+      },
+      "expected": {
+        "delivered_ai_messages_after_takeover": 0,
+        "tool_effects_after_takeover": 0
+      },
+      "incoming_event": {
+        "type": "operator_took_over",
+        "version": 2,
+        "when": "after_response_generation_before_delivery"
+      }
+    },
+    {
+      "id": "T12",
+      "description": "Seguimiento pendiente interno",
+      "tenant_id": "comercio_a",
+      "principal_id": "operador_a",
+      "conversation_id": "conv_t12",
+      "model_script": [
+        {
+          "final": "OK"
+        }
+      ],
+      "preconditions": {},
+      "expected": {
+        "decision": "TAREA_INTERNA",
+        "customer_messages_sent": 0
+      },
+      "incoming_event": {
+        "type": "followup_due",
+        "pending_on": "ZOCO",
+        "responsible": "Benjamin",
+        "contact_allowed": true,
+        "opportunity_status": "OPEN"
+      }
+    },
+    {
+      "id": "T13",
+      "description": "Seguimiento obsoleto por alta o baja de contacto",
+      "tenant_id": "comercio_b",
+      "principal_id": "operador_b",
+      "conversation_id": "conv_t13",
+      "model_script": [
+        {
+          "final": "OK"
+        }
+      ],
+      "preconditions": {},
+      "expected": {
+        "decision": "CANCELAR",
+        "customer_messages_sent": 0
+      },
+      "incoming_event": {
+        "type": "followup_due",
+        "opportunity_status": "COMPLETED",
+        "contact_allowed": false,
+        "opted_out": true
+      }
+    }
+  ]
+}

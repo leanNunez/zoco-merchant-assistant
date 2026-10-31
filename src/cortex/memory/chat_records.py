@@ -1,0 +1,258 @@
+"""What Zoco Chat needs to remember about a conversation (brief section 6), for one company.
+
+The control of the conversation changes here when an operator takes over: one write
+transaction checks the version, hands the conversation to the person, and suspends every pending
+write, so none of them can run while somebody else is in control.
+
+A takeover fails closed. Ignoring one by mistake lets the agent talk over a person, while
+applying one by mistake only hands a chat to a person, so only a report that is provably old or
+repeated is ignored:
+
+| reported version         | stored mode    | outcome                                          |
+|--------------------------|----------------|--------------------------------------------------|
+| lower than the stored    | any            | STALE: ignored                                   |
+| equal to the stored      | not AUTO       | DUPLICATE: ignored, a person already has it      |
+| equal to the stored      | AUTO           | CONFLICT: applied at the stored version plus one |
+| higher than the stored   | any            | APPLIED at the reported version                  |
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import TYPE_CHECKING, Literal
+
+from cortex.identity import AuthContext
+from cortex.observability.redaction import scrub
+from merchant_assistant.control.states import State
+
+if TYPE_CHECKING:
+    from cortex.memory.database import Database
+
+JournalKind = Literal["takeover", "delivery", "effect"]
+
+
+class TakeoverOutcome(StrEnum):
+    APPLIED = "applied"
+    CONFLICT = "conflict"  # the same version while the agent had it: applied, at a new version
+    STALE = "stale"
+    DUPLICATE = "duplicate"
+
+    @property
+    def applied(self) -> bool:
+        return self in (TakeoverOutcome.APPLIED, TakeoverOutcome.CONFLICT)
+
+
+@dataclass(frozen=True, slots=True)
+class Commitment:
+    kind: Literal["internal_task", "contact_date"]
+    responsible: str | None
+    due_date: str | None
+    # Read back from the store: a commitment is recorded on the opportunity of its decision.
+    opportunity_id: str | None = None
+
+    def view(self) -> dict[str, object]:
+        """The commitment for the operator and the model. `responsible` is free text from Zoco
+        Chat, so it is scrubbed and capped like every other text of the continuity card."""
+        return {
+            "kind": self.kind,
+            "responsible": None if self.responsible is None else scrub(self.responsible),
+            "due_date": self.due_date,
+            "opportunity_id": None if self.opportunity_id is None else scrub(self.opportunity_id),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class StoredDecision:
+    """A follow-up decision as stored: for which conversation and event, and what was decided."""
+
+    conversation_id: str
+    event_digest: str
+    decision: str
+    reasons: tuple[str, ...]
+
+
+class ChatRecords:
+    def __init__(self, database: Database, auth: AuthContext) -> None:
+        self._db = database
+        self.tenant_id = auth.tenant_id
+
+    # ------------------------------------------------------------------ control
+
+    def set_control(self, conversation_id: str, mode: State, version: int) -> None:
+        """Set who controls a conversation, as reported by a trusted system of record."""
+        with self._db.transaction() as tx:
+            tx.execute(
+                "UPDATE conversations SET mode = ?, control_version = ? "
+                "WHERE tenant_id = ? AND conversation_id = ?",
+                (mode, version, self.tenant_id, conversation_id),
+            )
+
+    def apply_takeover(
+        self, conversation_id: str, version: int, responsible: str
+    ) -> TakeoverOutcome:
+        """Hand the conversation to a person, unless the report is provably old or repeated.
+
+        A blocked conversation stays blocked (only a supervisor unblocks it), but it still
+        records the newer version and who is now responsible.
+        """
+        with self._db.transaction() as tx:
+            row = tx.execute(
+                "SELECT mode, control_version FROM conversations "
+                "WHERE tenant_id = ? AND conversation_id = ?",
+                (self.tenant_id, conversation_id),
+            ).fetchone()
+            if row is None:
+                raise LookupError("a takeover for a conversation that was never opened")
+            stored_mode, stored_version = State(row[0]), int(row[1])
+            outcome = _takeover_outcome(version, stored_mode, stored_version)
+            if not outcome.applied:
+                return outcome
+            # A conflict moves the version past the stored one: every checkpoint and the
+            # delivery's compare-and-set compare against it, so they all notice the change.
+            new_version = stored_version + 1 if outcome is TakeoverOutcome.CONFLICT else version
+            mode = State.BLOCKED if stored_mode is State.BLOCKED else State.HUMAN
+            tx.execute(
+                "UPDATE conversations SET mode = ?, control_version = ?, responsible = ? "
+                "WHERE tenant_id = ? AND conversation_id = ?",
+                (mode, new_version, responsible, self.tenant_id, conversation_id),
+            )
+            tx.execute(
+                "UPDATE pending_actions SET status = 'SUSPENDED', updated_at = ? "
+                "WHERE tenant_id = ? AND conversation_id = ? "
+                "AND status IN ('PENDING', 'CONFIRMED')",
+                (self._db.now(), self.tenant_id, conversation_id),
+            )
+            marker = ":conflict" if outcome is TakeoverOutcome.CONFLICT else ""
+            self._journal(tx, conversation_id, "takeover", f"v{new_version}{marker}")
+        return outcome
+
+    # ------------------------------------------------------------------ journal
+
+    def last_takeover_seq(self, conversation_id: str) -> int | None:
+        with self._db.reading() as db:
+            row = db.execute(
+                "SELECT MAX(seq) FROM journal "
+                "WHERE tenant_id = ? AND conversation_id = ? AND kind = 'takeover'",
+                (self.tenant_id, conversation_id),
+            ).fetchone()
+        return None if row[0] is None else int(row[0])
+
+    def count_after(self, conversation_id: str, kind: JournalKind, after_seq: int) -> int:
+        with self._db.reading() as db:
+            row = db.execute(
+                "SELECT COUNT(*) FROM journal "
+                "WHERE tenant_id = ? AND conversation_id = ? AND kind = ? AND seq > ?",
+                (self.tenant_id, conversation_id, kind, after_seq),
+            ).fetchone()
+        return int(row[0])
+
+    def record(self, conversation_id: str, kind: JournalKind, reference: str) -> None:
+        with self._db.transaction() as tx:
+            self._journal(tx, conversation_id, kind, reference)
+
+    def _journal(
+        self, tx: sqlite3.Connection, conversation_id: str, kind: JournalKind, reference: str
+    ) -> None:
+        tx.execute(
+            "INSERT INTO journal (tenant_id, conversation_id, kind, reference, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (self.tenant_id, conversation_id, kind, reference, self._db.now()),
+        )
+
+    # ------------------------------------------------------------------ follow-ups
+
+    def record_followup(
+        self,
+        conversation_id: str,
+        run_id: str,
+        event_digest: str,
+        decision: str,
+        reasons: tuple[str, ...],
+        commitment: Commitment | None,
+        *,
+        opportunity_id: str | None = None,
+    ) -> bool:
+        """Store the decision and keep the commitments of its opportunity in line with it, in one
+        transaction. The commitment, if any, is recorded on `opportunity_id`.
+
+        False: the run id already has a decision (someone decided it first), and nothing
+        changed. The caller reads that decision and replays it, or reports the conflict."""
+        now = self._db.now()
+        with self._db.transaction() as tx:
+            inserted = tx.execute(
+                "INSERT INTO followup_decisions (tenant_id, conversation_id, run_id, "
+                "opportunity_id, event_digest, decision, reasons, decided_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (tenant_id, run_id) DO NOTHING",
+                (
+                    self.tenant_id,
+                    conversation_id,
+                    run_id,
+                    opportunity_id,
+                    event_digest,
+                    decision,
+                    ",".join(reasons),
+                    now,
+                ),
+            ).rowcount
+            if inserted != 1:
+                return False
+            # A new decision replaces what was owed on the same opportunity, and only there. A
+            # decision without one replaces only what was owed without one (`IS` matches NULL).
+            tx.execute(
+                "UPDATE commitments SET status = 'CANCELLED' "
+                "WHERE tenant_id = ? AND conversation_id = ? AND opportunity_id IS ? "
+                "AND status = 'OPEN'",
+                (self.tenant_id, conversation_id, opportunity_id),
+            )
+            if commitment is not None:
+                tx.execute(
+                    "INSERT INTO commitments (tenant_id, conversation_id, opportunity_id, kind, "
+                    "responsible, due_date, status, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?)",
+                    (
+                        self.tenant_id,
+                        conversation_id,
+                        opportunity_id,
+                        commitment.kind,
+                        commitment.responsible,
+                        commitment.due_date,
+                        now,
+                    ),
+                )
+        return True
+
+    def decision_of(self, run_id: str) -> StoredDecision | None:
+        """The decision already taken for this run, if the same event was handled before."""
+        with self._db.reading() as db:
+            row = db.execute(
+                "SELECT conversation_id, event_digest, decision, reasons FROM followup_decisions "
+                "WHERE tenant_id = ? AND run_id = ?",
+                (self.tenant_id, run_id),
+            ).fetchone()
+        if row is None:
+            return None
+        reasons = tuple(reason for reason in str(row[3]).split(",") if reason)
+        return StoredDecision(str(row[0]), str(row[1]), str(row[2]), reasons)
+
+    def open_commitments(self, conversation_id: str) -> tuple[Commitment, ...]:
+        with self._db.reading() as db:
+            rows = db.execute(
+                "SELECT kind, responsible, due_date, opportunity_id FROM commitments "
+                "WHERE tenant_id = ? AND conversation_id = ? AND status = 'OPEN' "
+                "ORDER BY commitment_id",
+                (self.tenant_id, conversation_id),
+            ).fetchall()
+        return tuple(
+            Commitment(kind, responsible, due, opportunity)
+            for kind, responsible, due, opportunity in rows
+        )
+
+
+def _takeover_outcome(version: int, stored_mode: State, stored_version: int) -> TakeoverOutcome:
+    if version < stored_version:
+        return TakeoverOutcome.STALE
+    if version > stored_version:
+        return TakeoverOutcome.APPLIED
+    return TakeoverOutcome.CONFLICT if stored_mode is State.AUTO else TakeoverOutcome.DUPLICATE
