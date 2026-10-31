@@ -4,7 +4,10 @@ Un motor pequeño para correr agentes con permisos, memoria, control humano y se
 comercial, con cada empresa completamente separada de las demás. Es la segunda prueba técnica de
 Zoco y reutiliza los componentes de la primera (ventas, reclamos, buscador, contratos de fechas).
 
-El comando que lo prueba todo, sin claves ni internet: `make eval`.
+El comando de pruebas es `make check`: toda la suite (lint, tipos estrictos, contratos de
+arquitectura y tests, con `make test` incluido). `make eval` es el comando de evaluación: corre los
+13 escenarios del kit y las variantes propias contra el estado real. Ninguno necesita claves ni
+internet.
 
 ## Empezá acá
 
@@ -67,6 +70,7 @@ flowchart LR
     end
     subgraph chat["Zoco Chat"]
         EV["operator_took_over<br/>followup_due"]
+        TABLE["tabla pura de decisión del seguimiento<br/>CONTACTAR, TAREA_INTERNA, REPROGRAMAR, CANCELAR"]
         CARD["ficha de continuidad"]
     end
     subgraph ext["Sistemas externos (simulados)"]
@@ -88,7 +92,10 @@ flowchart LR
     WR --> CLAIMS
     LOOP <--> DB
     WR <--> DB
-    EV --> DB
+    AUTH --> EV
+    EV -->|followup_due| TABLE
+    TABLE --> DB
+    EV -->|operator_took_over| DB
     DB --> CARD
     LOOP --> OBS
     OBS --> DB
@@ -111,14 +118,14 @@ flowchart LR
 | 2. Sin estado global y aislamiento de ejecuciones | todo `src/cortex/`; el candado por conversación en `src/cortex/memory/runs.py` | `tests/cortex/unit/test_harness_invariants.py::test_no_module_holds_mutable_global_state`, `tests/cortex/integration/test_runner_guards.py::test_a_second_run_on_a_busy_conversation_is_refused_without_calling_the_model` |
 | 3. Permisos y alcance | `src/cortex/tools/policy.py`, `src/cortex/identity.py` | `tests/cortex/integration/test_tenancy.py::test_claiming_to_be_an_administrator_does_not_open_another_company` |
 | 3. Confirmación exacta | `src/cortex/tools/confirmation.py` | `tests/cortex/integration/test_writes.py::test_changed_values_after_a_confirmation_need_a_new_one` |
-| 4. Persistencia y reinicio | `src/cortex/memory/` | `tests/cortex/integration/test_chat.py::test_three_separate_processes_file_one_claim` |
+| 4. Persistencia y reinicio | `src/cortex/memory/` | `tests/cortex/integration/test_chat.py::test_t10_a_restart_keeps_the_human_in_control_and_the_pending_action` (T10: modo HUMAN y acción pendiente), `tests/cortex/integration/test_chat.py::test_three_separate_processes_file_one_claim` (procesos reales, para una escritura), `tests/cortex/integration/test_writes.py::test_the_same_command_after_a_restart_still_files_one_claim` |
 | 4. Historial acotado | `src/cortex/runner/agent_runner.py` | `tests/cortex/integration/test_runner.py::test_the_history_sent_to_the_model_is_bounded_but_critical_state_is_not_summarized` |
 | 4. Dos empresas, mismo nombre | `src/cortex/memory/tenant_store.py` | `tests/cortex/integration/test_tenancy.py::test_t06_interleaved_conversations_of_two_companies_stay_separated` |
 | 5. Reintentos y fallas | `src/cortex/tools/retry.py`, `src/cortex/tools/failures.py` | `tests/cortex/integration/test_failures.py::test_t07_a_transient_read_failure_is_retried_once_and_counted_once` |
-| 5. Escritura incierta | `src/cortex/tools/writes.py` | `tests/cortex/integration/test_writes.py::test_a_write_committed_before_a_timeout_is_reconciled_not_repeated` |
+| 5. Escritura incierta | `src/cortex/tools/writes.py` | `tests/cortex/integration/test_writes.py::test_a_write_committed_before_a_timeout_is_reconciled_not_repeated`, `tests/cortex/integration/test_traces.py::test_a_failed_run_leaves_its_whole_story_behind` (la búsqueda va antes del segundo intento) |
 | 6. Toma de control | `src/cortex/memory/chat_records.py` (compare-and-set por versión) y `src/cortex/chat/service.py` (la aplica) | `tests/cortex/integration/test_chat.py::test_t11_a_reply_generated_before_the_takeover_is_never_delivered`, `tests/cortex/integration/test_chat.py::test_a_takeover_before_delivery_is_applied_whatever_the_run_delivers` |
 | 6. Seguimiento | `src/cortex/chat/followup.py` | `tests/cortex/unit/test_followup.py::test_each_case_of_the_kit` |
-| 7. Trazas sin secretos | `src/cortex/observability/` | `tests/cortex/integration/test_traces.py::test_no_secret_reaches_a_trace_a_result_a_log_or_the_operators_card` |
+| 7. Trazas sin secretos | `src/cortex/observability/` | `tests/cortex/integration/test_traces.py::test_no_secret_reaches_a_trace_a_result_a_log_or_the_operators_card`, `tests/cortex/integration/test_traces.py::test_a_trace_has_the_ids_the_times_the_tools_and_the_final_reason` (campos de cada evento) |
 | 7. Evaluación sobre estado real | `evaluation/harness/` | `tests/cortex/integration/test_eval_suite.py::test_an_adapter_that_reports_a_message_that_was_not_sent_is_caught` |
 | 8. Caso de diseño (Zoco Canchas) | [DESIGN_DECISIONS.md](DESIGN_DECISIONS.md) | `tests/cortex/unit/test_design_decisions.py::test_the_canchas_case_fits_in_one_page`, `tests/cortex/unit/test_design_decisions.py::test_it_answers_each_point_the_brief_asks_for` |
 | 9. Entregables y documentación | este README (diagrama, resultados y limitaciones), `evaluation_adapter.py`, `.env.example`, `kit/fixtures`, `evaluation/results/harness/`, [SEGURIDAD.md](SEGURIDAD.md) | `tests/cortex/integration/test_entry_point.py::test_the_literal_command_works_with_the_system_python_from_another_directory`, `tests/unit/test_docs_consistency.py::test_every_test_function_the_document_cites_exists` |
@@ -129,9 +136,9 @@ La consigna descarta una entrega que permita alguna de estas tres cosas.
 
 | Condición | Cómo se impide | Prueba |
 |---|---|---|
-| Acceso entre empresas | La empresa sale del contexto autenticado; los repositorios están atados a ella; cada consulta SQL filtra por empresa | `tests/cortex/integration/test_tenancy.py::test_every_query_on_company_data_filters_by_company` |
-| Herramienta o escritura no autorizada | Cadena que deniega por defecto; las escrituras exigen confirmación exacta | `tests/cortex/unit/test_policy.py::test_naming_a_company_or_a_role_is_a_scope_violation_that_ends_the_run`, `tests/cortex/integration/test_kit_scenarios.py::test_t03_an_unknown_tool_is_rejected_without_any_external_call`, `tests/cortex/unit/test_policy.py::test_a_principal_without_the_permission_is_denied`, `tests/cortex/integration/test_writes.py::test_without_a_confirmation_nothing_is_written_and_the_user_is_asked` |
-| Escritura duplicada al reintentar | Registro por (empresa, `operation_id`), clave única en el sistema de reclamos y conciliación antes de reintentar | `tests/cortex/integration/test_writes.py::test_concurrent_executions_of_one_command_have_one_effect` |
+| Acceso entre empresas | La empresa sale del contexto autenticado; los repositorios están atados a ella; cortex.db filtra cada consulta SQL por empresa y los reclamos de cada empresa viven en su propio archivo (`src/cortex/tools/adapters/claims.py`) | `tests/cortex/integration/test_tenancy.py::test_every_query_on_company_data_filters_by_company`, `tests/cortex/integration/test_kit_scenarios.py::test_t05_naming_another_company_ends_the_run_with_a_refusal`, `tests/cortex/integration/test_tenancy.py::test_t06_interleaved_conversations_of_two_companies_stay_separated`, `tests/cortex/integration/test_docs.py::test_a_company_without_documents_gets_nothing_never_somebody_elses`, `tests/cortex/integration/test_chat.py::test_an_event_for_another_company_is_refused` |
+| Herramienta o escritura no autorizada | Cadena que deniega por defecto; las escrituras exigen confirmación exacta | `tests/cortex/unit/test_policy.py::test_naming_a_company_or_a_role_is_a_scope_violation_that_ends_the_run`, `tests/cortex/integration/test_kit_scenarios.py::test_t05_naming_another_company_ends_the_run_with_a_refusal` (el adaptador no se llama), `tests/cortex/integration/test_kit_scenarios.py::test_t03_an_unknown_tool_is_rejected_without_any_external_call`, `tests/cortex/unit/test_policy.py::test_a_principal_without_the_permission_is_denied`, `tests/cortex/integration/test_writes.py::test_without_a_confirmation_nothing_is_written_and_the_user_is_asked` |
+| Escritura duplicada al reintentar | Registro por (empresa, `operation_id`), clave única en el sistema de reclamos y conciliación antes de reintentar | `tests/cortex/integration/test_writes.py::test_concurrent_executions_of_one_command_have_one_effect`, `tests/cortex/integration/test_writes.py::test_t09_the_same_operation_id_twice_files_one_claim`, `tests/cortex/integration/test_writes.py::test_the_same_command_after_a_restart_still_files_one_claim`, `tests/cortex/integration/test_writes.py::test_a_write_committed_before_a_timeout_is_reconciled_not_repeated`, `tests/cortex/integration/test_chat.py::test_three_separate_processes_file_one_claim` |
 
 ## Resultados y trazas
 
@@ -139,8 +146,10 @@ La consigna descarta una entrega que permita alguna de estas tres cosas.
   código que corrió; el último commit del repositorio solo agrega esos resultados.
 - Dos trazas anonimizadas, un éxito y un fallo: `evaluation/results/harness/traces/`
   (se regeneran con `uv run python -m cortex.kit_adapter.samples`). El éxito es T07 del kit. El
-  fallo es T09 con dos TIMEOUT inyectados en la escritura: queda incierta y la búsqueda no
-  encuentra nada. No es un escenario del kit tal cual.
+  fallo es T09 con dos TIMEOUT inyectados en la escritura: el primero deja la escritura incierta,
+  la búsqueda por `operation_id` no encuentra nada, se intenta una vez más con la misma clave, el
+  segundo TIMEOUT la deja incierta otra vez y la ejecución termina `FAILED`. No es un escenario del
+  kit tal cual.
 - Las marcas de tiempo de las trazas son el reloj fijo de la evaluación (`2026-10-28T12:00:00Z`) y
   `elapsed_ms` es tiempo simulado (un temporizador manual que solo avanza con los timeouts y
   esperas simuladas), así que las trazas se reproducen igual en cada corrida.
@@ -174,6 +183,15 @@ una toma de control rechazada que no dejaba `tool_rejected` en la traza, lo pend
 oportunidad que se cancelaba con la decisión de otra, el evento de fallo sintético y sus
 contadores, un texto que UTF-8 no puede codificar, el responsable sin enmascarar en la ficha y
 rutas equivocadas en `SEGURIDAD.md`.
+
+Después hubo más rondas: una auditoría final del estado entregable, con tres auditorías
+independientes (el código, los documentos y variantes de escenarios, más de mil), y las correcciones
+que salieron de ellas: `run_id` derivados que podían chocar, una toma de control vieja con la
+versión 0, el vocabulario de la guarda de alcance, el texto de un rechazo de alcance y otras.
+Cada hallazgo tiene un test que falla sin la corrección; por ejemplo
+`tests/cortex/integration/test_review_findings.py::test_k1_an_interleaved_run_never_shares_the_main_runs_id`,
+`tests/cortex/integration/test_chat.py::test_k2_a_takeover_at_version_zero_below_the_stored_one_is_ignored`
+y `tests/cortex/integration/test_review_findings.py::test_k4_a_scope_refusal_never_carries_text_of_the_key`.
 
 ## Limitaciones pendientes
 
@@ -232,7 +250,9 @@ La segunda entrega se hizo con Claude Code (modelos Claude Opus 5.5 y Sonnet 5.5
 de la primera está en [PRUEBA_1.md](PRUEBA_1.md#uso-declarado-de-asistentes-de-ia). El asistente
 escribió la mayor parte del código, de los tests y de los documentos, y también el análisis de la
 consigna (trampas y contradicciones) leyendo los archivos del kit. Los revisores ciegos de la
-revisión adversarial fueron subagentes de Claude Code. Se trabajó con un plan
+revisión adversarial fueron subagentes de Claude Code, y también lo fueron las auditorías y
+revisiones previas a publicar: agentes independientes, sin acceso al trabajo de los demás. La
+persona que entrega decidió qué corregir. Se trabajó con un plan
 aprobado antes de empezar y por bloques de trabajo, y cada bloque se aprobó antes de pasar al
 siguiente. La persona que entrega eligió el alcance, la arquitectura entre las alternativas
 propuestas y el modelo y esfuerzo de cada bloque (Opus para la lógica con invariantes de
@@ -248,5 +268,5 @@ El buscador, el agente, la máquina de estados y su evaluación siguen intactos,
 
 | Entrega | Archivos y carpetas |
 |---|---|
-| Primera | `PRUEBA_1.md`, `SPEC_REVIEW.md`, `questions.jsonl`, `data/`, `docs/`, `design/`, `src/merchant_assistant/`, `evaluation/conversations/`, `evaluation/retrieval/`, `evaluation/results/conversations/`, `evaluation/results/retrieval/` |
+| Primera | `PRUEBA_1.md`, `SPEC_REVIEW.md`, `questions.jsonl`, `data/`, `docs/` (también es el corpus de documentos de Comercio A en el harness, `src/cortex/kit_adapter/corpora.py`), `design/`, `src/merchant_assistant/`, `evaluation/conversations/`, `evaluation/retrieval/`, `evaluation/results/conversations/`, `evaluation/results/retrieval/` |
 | Segunda | `src/cortex/`, `evaluation/harness/`, `evaluation/results/harness/`, `kit/`, `examples/`, `README.md`, `REVISION_CONSIGNA.md`, `DESIGN_DECISIONS.md`, `SEGURIDAD.md` |

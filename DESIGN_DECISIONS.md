@@ -20,6 +20,8 @@ Canchas (el caso de diseño de la sección 8, sin implementación).
 | Trazas con lista blanca y enmascarado al escribir, guardadas mientras ocurren | Nada sin filtrar llega a ningún destino, y un fallo deja su historia | Filtrar al exportar |
 | El adaptador no lee `expected`; solo el verificador lo usa para comparar. La evaluación usa reloj fijo y un verificador que lee los archivos | Un PASS tiene que salir del estado real, no de lo que el adaptador dice | Comparar solo la salida JSON |
 
+El caso siguiente es la «página adicional» que pide la consigna; la tabla de arriba son las decisiones de la implementación.
+
 ## Caso: Zoco Canchas, Chat, PDV y Pagos
 
 **Situación.** Queda un turno libre hoy. El agente puede ofrecerlo con hasta 10 % de descuento,
@@ -35,7 +37,7 @@ por día).
    precio, descuento, vencimiento y clientes elegibles.
 2. **Aprobación del dueño antes de ofrecer.** La oferta es una escritura pendiente que solo
    confirma un principal con permiso `ofertas:aprobar` (el agente no lo tiene), atada a la huella
-   de esos valores y a la versión del turno: si cambia el precio o el turno, se vuelve a aprobar.
+   de esos valores y a la versión del turno: si cambian, se vuelve a aprobar.
 3. El agente la envía por Chat solo a clientes con consentimiento y si nadie tomó la conversación.
 4. Si el cliente acepta, se pide un **bloqueo con vencimiento** en Canchas (`LIBRE → BLOQUEADO`
    solo si la versión no cambió). Sin bloqueo, no hay cobro.
@@ -63,6 +65,7 @@ ofertas y bloqueos ajenos), `bloqueo_vencido`, `pago_confirmado`, `pago_fallido`
 recibe ofertas (grupo de control).
 - **Reservas adicionales:** diferencia de ocupación entre turnos con oferta y de control.
 - **Margen incremental:** `precio_final − costo_variable` más el consumo en el PDV atribuido, menos
-  lo que pagarían a precio de lista quienes igual reservaban (canibalización, que el control mide).
+  el margen a precio de lista (`precio_lista − costo_variable`) de las reservas que igual ocurrían
+  (canibalización, que el control mide).
 - **Embudo desde las trazas:** aprobadas → enviadas → aceptadas → bloqueadas → pagadas → asistidas,
   más bajas y reclamos.
