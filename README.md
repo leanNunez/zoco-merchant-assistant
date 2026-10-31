@@ -135,7 +135,7 @@ La consigna descarta una entrega que permita alguna de estas tres cosas.
 
 ## Resultados y trazas
 
-- Resultados fechados: `evaluation/results/harness/2026-10-30/report.md`. Registran el commit del
+- Resultados fechados: `evaluation/results/harness/2026-10-31/report.md`. Registran el commit del
   código que corrió; el último commit del repositorio solo agrega esos resultados.
 - Dos trazas anonimizadas, un éxito y un fallo: `evaluation/results/harness/traces/`
   (se regeneran con `uv run python -m cortex.kit_adapter.samples`). El éxito es T07 del kit. El
