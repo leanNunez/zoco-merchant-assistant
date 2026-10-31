@@ -142,8 +142,9 @@ La consigna descarta una entrega que permita alguna de estas tres cosas.
 
 ## Resultados y trazas
 
-- Resultados fechados: `evaluation/results/harness/2026-10-31/report.md`. Registran el commit del
-  código que corrió; el último commit del repositorio solo agrega esos resultados.
+- Resultados fechados: `evaluation/results/harness/2026-10-31/report.md`. El informe registra el
+  commit en que corrió y un digest del código (`code_sha256`); el commit siguiente solo agrega los
+  resultados.
 - Dos trazas anonimizadas, un éxito y un fallo: `evaluation/results/harness/traces/`
   (se regeneran con `uv run python -m cortex.kit_adapter.samples`). El éxito es T07 del kit. El
   fallo es T09 con dos TIMEOUT inyectados en la escritura: el primero deja la escritura incierta,
@@ -209,8 +210,8 @@ y `tests/cortex/integration/test_review_findings.py::test_k4_a_scope_refusal_nev
 - **Autenticación simulada.** El principal y la empresa son fixtures confiables del evaluador;
   no hay login, emisión ni vencimiento de credenciales.
 - **Un solo proceso y SQLite local.** Los candados (una ejecución por conversación, escrituras con
-  `BEGIN IMMEDIATE`) están probados con hilos y con procesos secuenciales, no con varios servidores
-  (el de la conversación, en `tests/cortex/integration/test_runner_guards.py::test_a_second_run_on_a_busy_conversation_is_refused_without_calling_the_model`).
+  `BEGIN IMMEDIATE`) están probados con hilos y con procesos secuenciales, no con varios servidores.
+  El de la conversación se prueba en `tests/cortex/integration/test_runner_guards.py::test_a_second_run_on_a_busy_conversation_is_refused_without_calling_the_model`.
 - **Los mensajes se guardan completos** en la tabla de la conversación (es la memoria), y no hay
   política de retención ni de borrado. Las trazas y los logs no los llevan. La ficha del operador,
   que también va en la salida del adaptador, lleva un extracto enmascarado de hasta 200 caracteres
@@ -222,8 +223,8 @@ y `tests/cortex/integration/test_review_findings.py::test_k4_a_scope_refusal_nev
   clave vacía se rechaza.
 - **No se integra el modo SUGGEST** (borradores que aprueba un operador) de la primera entrega: una
   conversación que no está en AUTO no ejecuta al agente.
-- **El seguimiento registra la decisión, no la ejecuta**: no hay scheduler ni envío (la consigna
-  los excluye).
+- **El seguimiento registra la decisión, no la ejecuta**: no hay scheduler (el contrato pide no
+  construirlo) ni envío (T12 y T13 esperan 0 mensajes al cliente).
 - **Búsqueda solo léxica** (BM25). Heredada: para "devoluciones" el documento de liquidaciones
   puntúa antes que el de cancelaciones, porque este último no usa esa palabra en el cuerpo.
 - **Repetir un `run_id` después de una toma de control rechazada** devuelve el resultado guardado,
@@ -246,17 +247,18 @@ y `tests/cortex/integration/test_review_findings.py::test_k4_a_scope_refusal_nev
 
 ## Uso de asistentes de IA
 
-La segunda entrega se hizo con Claude Code (modelos Claude Opus 5.5 y Sonnet 5.5); la declaración
-de la primera está en [PRUEBA_1.md](PRUEBA_1.md#uso-declarado-de-asistentes-de-ia). El asistente
-escribió la mayor parte del código, de los tests y de los documentos, y también el análisis de la
-consigna (trampas y contradicciones) leyendo los archivos del kit. Los revisores ciegos de la
-revisión adversarial fueron subagentes de Claude Code, y también lo fueron las auditorías y
-revisiones previas a publicar: agentes independientes, sin acceso al trabajo de los demás. La
-persona que entrega decidió qué corregir. Se trabajó con un plan
-aprobado antes de empezar y por bloques de trabajo, y cada bloque se aprobó antes de pasar al
-siguiente. La persona que entrega eligió el alcance, la arquitectura entre las alternativas
-propuestas y el modelo y esfuerzo de cada bloque (Opus para la lógica con invariantes de
-seguridad; Sonnet para el resto).
+La segunda entrega se hizo con Claude Code (Claude Opus 5.5 y Sonnet 5.5); la declaración de la
+primera está en [PRUEBA_1.md](PRUEBA_1.md#uso-declarado-de-asistentes-de-ia). Agentes de Claude
+Code escribieron el código, los tests y los documentos, y también el análisis de la consigna
+(trampas y contradicciones) leyendo los archivos del kit. Las revisiones y las auditorías también
+las hicieron agentes de Claude Code: dos revisores ciegos por ronda, sin ver el trabajo del otro, y
+varias auditorías independientes al final. Son el mismo tipo de modelo que escribió el código:
+reducen errores, pero no reemplazan una revisión humana.
+
+La persona que entrega trabajó con un plan aprobado antes de empezar y por bloques, aprobó cada
+bloque antes de pasar al siguiente y decidió qué corregir de cada revisión. Eligió el alcance, la
+arquitectura entre las alternativas propuestas y el modelo y el esfuerzo de cada bloque (Opus para
+la lógica con invariantes de seguridad; Sonnet para el resto).
 
 Nada se da por bueno porque el asistente lo diga: lo comprueban los tests, los contratos de
 arquitectura y la evaluación contra el estado real (`make check` y `make eval`).
